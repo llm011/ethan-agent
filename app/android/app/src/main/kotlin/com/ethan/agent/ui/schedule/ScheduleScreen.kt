@@ -520,27 +520,26 @@ private fun TimelineLayout(
             item(key = "date_$dateKey") {
                 // 日期标题**在轴线右侧**、贴着轴线起排。
                 //
-                // 之前把日期/时间做成轴线左侧的 68dp 标签列，结果轴线被推到
-                // 屏幕中间偏右，左侧空出一大片（用户反馈「左侧还是有大片空白」）。
-                // 轴线贴左 + 标签跟着轴线往右排，水平空间才不浪费。
+                // 关键：行间的竖直间距（`DATE_ROW_TOP_GAP`）做在**轴列内部**，
+                // 不能放在 Row 的 padding 上 —— 放在 Row 外层的话那段高度没有
+                // 轴线覆盖，两组之间就会看到明显的断口（用户反馈的正是这个）。
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(IntrinsicSize.Min)
-                        .padding(top = if (groupIndex == 0) 2.dp else 16.dp, bottom = 4.dp),
+                    Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // 轴列：与任务行同一列，保证线在同一条竖线上。
-                    // 线要**通长填满这一行**（fillMaxHeight），否则日期行上下各留
-                    // 一截空白，整条轴线看起来是断断续续的虚线。
+                    // 轴列：与任务行同一列，保证线在同一条竖线上；通长填满整行
                     Box(Modifier.width(AXIS_COLUMN).fillMaxHeight()) {
-                        Box(
-                            Modifier
-                                .align(Alignment.Center)
-                                .width(1.dp)
-                                .fillMaxHeight()
-                                .background(MaterialTheme.colorScheme.outlineVariant),
-                        )
+                        Column(Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Spacer(
+                                Modifier.height(if (groupIndex == 0) 2.dp else DATE_ROW_TOP_GAP),
+                            )
+                            Box(
+                                Modifier
+                                    .width(1.dp)
+                                    .weight(1f)
+                                    .background(MaterialTheme.colorScheme.outlineVariant),
+                            )
+                        }
                     }
                     Spacer(Modifier.width(AXIS_TO_CONTENT))
                     val label = if (dateKey.isNotBlank()) {
@@ -557,6 +556,7 @@ private fun TimelineLayout(
                         color = if (dateKey == todayKey) MaterialTheme.colorScheme.onSurface
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
+                        modifier = Modifier.padding(vertical = 6.dp),
                     )
                     // 「今天」徽章会让人误以为是可切换的胶囊按钮（旁边正好有
                     // 「今天/全部」切换），改成中性灰文字，纯标注、不可点。
@@ -611,6 +611,25 @@ private val AXIS_TO_CONTENT = 14.dp
 private val DOT_CENTER_Y = 26.dp
 
 /**
+ * 日期标题行上方留出的空隙（第二组起）。
+ *
+ * **必须做在轴列内部**：日期行的高度里如果没有轴线覆盖，两组任务之间就会
+ * 出现一个肉眼可见的断口（用户反馈的正是这个）。放在 Row 的 padding 上
+ * 等于把空隙推到轴线外面去，所以这里改成「垫一段 Spacer，再把线 weight(1f)
+ * 撑满剩余高度」。第一组不留（贴着列表顶部）。
+ */
+private val DATE_ROW_TOP_GAP = 16.dp
+
+/**
+ * 每张卡片下方的空隙。
+ *
+ * 同理做在**轴列内部**：卡片自带 padding 的话那段高度在轴列外面，
+ * 线就断了。这里由轴列在最底下垫一段等高的 Spacer 制造间距，
+ * 上半段线照旧贯通 —— 于是「卡片底 → 下一张卡片顶」之间也是连线。
+ */
+private val ROW_BOTTOM_GAP = 10.dp
+
+/**
  * 时间轴一行：轴线 + 卡片（时间在卡片内首行）。
  *
  * 布局要点：
@@ -635,23 +654,25 @@ private fun TimelineRow(
 
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         // 轴列：整行一条竖线，圆点压在线中间。
-        // fillMaxHeight 保证下半段能一直延伸到行底（含卡片下面的 10dp 间距），
-        // 这样下一组的第一行接上来时线是连着的。
+        // Box 用 fillMaxHeight 撑满整行，下半段的线才能一直延伸到行底 ——
+        // 而「行底」是含卡片下方那 [ROW_BOTTOM_GAP] 的（那个 padding 做在
+        // 轴列内部，不是做在 Row 上），所以两行之间的空隙也有线穿过，不断口。
         Box(Modifier.width(AXIS_COLUMN).fillMaxHeight()) {
+            val dotTop = DOT_CENTER_Y - DOT_SIZE / 2
             // 上半段：第一行不画（时间轴上端不悬空）
             if (!isFirst) {
                 Box(
                     Modifier
                         .align(Alignment.TopCenter)
                         .width(1.dp)
-                        .height(DOT_CENTER_Y - DOT_SIZE / 2)
+                        .height(dotTop)
                         .background(MaterialTheme.colorScheme.outlineVariant),
                 )
             }
             Box(
                 Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = DOT_CENTER_Y - DOT_SIZE / 2)
+                    .padding(top = dotTop)
                     .size(DOT_SIZE)
                     .clip(CircleShape)
                     .background(
@@ -659,15 +680,22 @@ private fun TimelineRow(
                         else MaterialTheme.colorScheme.outlineVariant
                     ),
             )
-            // 下半段：最后一行不画（时间轴下端不拖尾）
-            Box(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = DOT_CENTER_Y + DOT_SIZE / 2)
-                    .width(1.dp)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.outlineVariant),
-            )
+            // 下半段：最后一行不画（时间轴下端不拖尾）。
+            // 下面塞一个 Spacer 把线顶到行底再留出 ROW_BOTTOM_GAP，
+            // 这样「卡片底 → 下一行卡片顶」整段都有线。
+            Column(Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Spacer(Modifier.height(dotTop + DOT_SIZE))
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .weight(1f)
+                        .background(
+                            if (isLast) Color.Transparent
+                            else MaterialTheme.colorScheme.outlineVariant,
+                        ),
+                )
+                Spacer(Modifier.height(ROW_BOTTOM_GAP))
+            }
         }
 
         Spacer(Modifier.width(AXIS_TO_CONTENT))
@@ -679,7 +707,7 @@ private fun TimelineRow(
             onToggle = onToggle,
             onDelete = onDelete,
             onOpenSession = onOpenSession,
-            modifier = Modifier.weight(1f).padding(bottom = 10.dp),
+            modifier = Modifier.weight(1f),
             phase = phase,
             // 时间轴视图里，时间放在卡片首行（替代列表视图那行「8小时后(09:00)」）
             timeBadge = ScheduleFormat.timeLabelOf(job.nextRunTime),

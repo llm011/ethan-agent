@@ -24,12 +24,17 @@ import com.ethan.agent.shared.UiMessage
 import com.ethan.agent.shared.UiMessageImage
 import com.ethan.agent.shared.ShareBus
 import kotlinx.datetime.Clock
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -110,6 +115,7 @@ class ChatViewModel(
         loadInitial(sessionId)
         observeSharedText()
         observeAutoConsent()
+        observeDraftPersistence()
     }
 
     /**
@@ -158,6 +164,17 @@ class ChatViewModel(
     private fun loadInitial(sessionId: String?) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
+
+            // 恢复该会话上次没发出去的草稿（对齐 Web 的 useInputStore）。
+            // 放在最前面且单独 launch：草稿是本地读，不该等网络那一串。
+            launch {
+                try {
+                    val saved = repository.draft(sessionId)
+                    if (saved.isNotBlank()) {
+                        _state.update { if (it.inputText.isBlank()) it.copy(inputText = saved) else it }
+                    }
+                } catch (_: Exception) { }
+            }
 
             // 并行加载元数据（cached flow: 先秒出缓存，再网络刷新）
             launch {
@@ -260,6 +277,53 @@ class ChatViewModel(
     fun onInputChange(text: String) { _state.update { it.copy(inputText = text) } }
 
     /**
+     * 草稿落盘：按 sessionId 各存各的（对齐 Web 的 `useInputStore`）。
+     *
+     * 实现上**订阅 inputText 的变化**而不是在每个清空点手动调用 —— 输入框被写的地方
+     * 有七八处（发送、inject、slash command、分享投递…），逐个补 saveDraft 一定会漏。
+     * 看状态变化就没人能漏掉。
+     *
+     * 攒 400ms 再写：DataStore 是整文件重写 + 内部 Mutex，每敲一个字写一次太费。
+     * sessionId 也订阅了 —— 新会话建好后 key 要从 `@new` 迁到真实 id。
+     */
+    private fun observeDraftPersistence() {
+        viewModelScope.launch {
+            var lastSavedKey: String? = null
+            var lastSavedText: String? = null
+            combine(_state.map { it.inputText }, _state.map { it.sessionId }) { text, sid -> text to sid }
+                .debounce(400)
+                .collect { (text, sid) ->
+                    val key = draftKeyOf(sid)
+                    val prevKey: String? = lastSavedKey
+                    if (text == lastSavedText && key == prevKey) return@collect
+                    // 会话 id 变了（新会话刚建好）且旧 key 里没留下内容：把旧 key 清掉，
+                    // 否则下次新建会话会把刚才发出去的内容又预填回来。
+                    if (prevKey != null && prevKey != key && lastSavedText.isNullOrBlank()) {
+                        runCatching { repository.saveDraft(sessionIdOf(prevKey), "") }
+                    }
+                    lastSavedKey = key
+                    lastSavedText = text
+                    runCatching { repository.saveDraft(sid, text) }
+                }
+        }
+    }
+
+    private fun draftKeyOf(sid: String?): String = sid ?: "@new"
+
+    private fun sessionIdOf(key: String): String? = if (key == "@new") null else key
+
+    override fun onCleared() {
+        super.onCleared()
+        // 页面销毁时 debounce 窗口里的那次写会随 viewModelScope 一起被取消 ——
+        // 用独立作用域把最后一份草稿补上，否则「打完字立刻返回」会丢。
+        val text = _state.value.inputText
+        val sid = _state.value.sessionId
+        CoroutineScope(Dispatchers.Default).launch {
+            runCatching { repository.saveDraft(sid, text) }
+        }
+    }
+
+    /**
      * 消费跨页面（如 Agenda「拆解该安排」）带来的自动发送 prompt。
      * 等模型就绪后再发送（新会话 isLoading 立即为 false，selectedModel 依赖缓存流）。
      * 10s 兜底：超时仍未就绪则退化为预填输入框（不自动发送）——避免 selectedModel=null
@@ -354,6 +418,8 @@ class ChatViewModel(
                     error = null,
                 )
             }
+            // 发出去了就不再是草稿 —— 上面把 inputText 清空后，
+            // observeDraftPersistence 会把空串写下去（等于删掉这条记录）。
 
             var sessionId = current.sessionId
             if (sessionId == null) {

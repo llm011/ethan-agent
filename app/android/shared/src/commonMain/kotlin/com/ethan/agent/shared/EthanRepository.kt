@@ -124,6 +124,13 @@ class EthanRepository(
         configStore.setAutoConsentEnabled(enabled)
     }
 
+    // ── 输入框草稿（按会话） ──────────────────────────────────────────
+    // 对齐 Web 的 useInputStore：切会话时各存各的，重进 App 也还在。
+
+    suspend fun draft(sessionId: String?): String = configStore.draft(sessionId)
+
+    suspend fun saveDraft(sessionId: String?, text: String) = configStore.saveDraft(sessionId, text)
+
     /**
      * 运行中切换超级权限：把开关推给正在跑的那个 run（见 api.setAutoConsent）。
      *

@@ -59,6 +59,18 @@ class AppConfigStore(
         val THEME_ID = stringPreferencesKey("theme_id")
         val APP_LOCK = booleanPreferencesKey("app_lock_enabled")
         val AUTO_CONSENT = booleanPreferencesKey("auto_consent_enabled")
+
+        /**
+         * 每个会话的输入框草稿：`draft_<sessionId>` -> 草稿正文。
+         *
+         * 对齐 Web 的 `useInputStore`（`web/components/chat/use-input-store.ts`）：
+         * 按 sessionId 缓存草稿，切会话时保存当前、恢复目标，重进 App 也还在
+         * （Web 用 sessionStorage，这里用 DataStore 落在磁盘上，比 Web 还持久）。
+         * 新建会话（sessionId 为空）用 [DRAFT_NEW] 这个哨兵 key —— 用户还没发消息
+         * 时后端没有 sessionId，草稿也得有地方存。
+         */
+        const val DRAFT_PREFIX = "draft_"
+        const val DRAFT_NEW = "draft_@new"
     }
 
     val config: Flow<AppConfig> = dataStore.data.map { prefs ->
@@ -123,5 +135,28 @@ class AppConfigStore(
 
     suspend fun setAutoConsentEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.AUTO_CONSENT] = enabled }
+    }
+
+    // ── 输入框草稿（按会话） ────────────────────────────────────────────
+
+    /** 草稿 key：登录/登出等场景下会同时换用户，草稿不跨用户共享。 */
+    private fun draftKey(sessionId: String?): Preferences.Key<String> =
+        stringPreferencesKey(
+            if (sessionId.isNullOrBlank()) Keys.DRAFT_NEW else Keys.DRAFT_PREFIX + sessionId,
+        )
+
+    /** 读某个会话的草稿（没有则空串）。 */
+    suspend fun draft(sessionId: String?): String =
+        dataStore.data.first()[draftKey(sessionId)] ?: ""
+
+    /**
+     * 写某个会话的草稿。**空草稿会直接删掉这个 key**，避免 DataStore 里
+     * 攒下成百上千条空记录（每个聊过的会话都会留一条）。
+     */
+    suspend fun saveDraft(sessionId: String?, text: String) {
+        val key = draftKey(sessionId)
+        dataStore.edit { prefs ->
+            if (text.isBlank()) prefs.remove(key) else prefs[key] = text
+        }
     }
 }
