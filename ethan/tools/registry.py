@@ -5,6 +5,59 @@ import json
 from ethan.providers.base import ToolCall
 from ethan.tools.base import BaseTool, ToolResult
 
+_JSON_TYPES = {"string", "integer", "number", "boolean", "object", "array"}
+
+
+def _coerce_by_schema(value, prop_schema):
+    """按 JSON Schema 的 type 把值转成工具期望的类型；转不了就原样返回。
+
+    文本型工具调用（anthropic 风格 <invoke>/<parameter>、DSML、call:tool{args}）
+    只携带字符串，而工具签名可能是 int/bool/list。这里做一次保守修正：
+    - 值已是目标类型 → 不动
+    - integer/number：能解析成数字才转（"608" → 608，"abc" 原样留给工具报错）
+    - boolean：只认 "true"/"false"/"1"/"0"，避免把任意非空串都当 True
+    - array/object：仅当字符串是合法 JSON 且形状匹配时才转
+    - type 缺失或未知（含 anyOf/oneOf 等复合 schema）→ 不动
+    """
+    if not isinstance(prop_schema, dict) or not isinstance(value, str):
+        return value
+    t = prop_schema.get("type")
+    if t not in _JSON_TYPES:
+        return value
+    if t == "string":
+        return value
+    if t == "integer":
+        try:
+            return int(value.strip())
+        except (TypeError, ValueError):
+            return value
+    if t == "number":
+        try:
+            return float(value.strip())
+        except (TypeError, ValueError):
+            return value
+    if t == "boolean":
+        low = value.strip().lower()
+        if low in ("true", "1"):
+            return True
+        if low in ("false", "0"):
+            return False
+        return value
+    # array / object：字符串里可能就是序列化好的 JSON
+    if t == "array" and value.lstrip().startswith("["):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return value
+        return parsed if isinstance(parsed, list) else value
+    if t == "object" and value.lstrip().startswith("{"):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return value
+        return parsed if isinstance(parsed, dict) else value
+    return value
+
 
 class ToolRegistry:
     def __init__(self):
@@ -98,6 +151,13 @@ class ToolExecutor:
             # 只传工具 schema 里声明的参数：剥掉 intent（展示用）以及模型偶尔幻觉出的
             # 多余字段（如 description=），防止 run() 报 unexpected keyword argument。
             run_args = {k: v for k, v in tc.arguments.items() if k in valid_params}
+            # 按 schema 把参数值修正成本工具期望的类型：文本型工具调用（XML 标记、
+            # call:tool{args}）天然只给字符串，"x": "608" 传进期望 int 的工具会崩。
+            schema_props = tool.parameters.get("properties") or {}
+            run_args = {
+                k: _coerce_by_schema(v, schema_props.get(k))
+                for k, v in run_args.items()
+            }
             out = await tool.run(**run_args)
             # 工具可返回 str（普通）或 ToolResult（携带 sub_steps 等元信息）
             if isinstance(out, ToolResult):

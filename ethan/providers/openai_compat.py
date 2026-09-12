@@ -13,7 +13,11 @@ from ethan.providers._text_toolcalls import (
     _MARKED_TOOL_RE,
     _buf_has_unclosed_marked_tool,
     _strip_marked_tool_blocks,
+    buf_has_unclosed_invoke,
+    contains_invoke,
+    parse_invoke_tool_calls,
     parse_marked_text_tool_calls,
+    strip_invoke_tool_blocks,
 )
 from ethan.providers._text_toolcalls import (
     contains_dsml as _contains_dsml_impl,
@@ -44,6 +48,9 @@ __all__ = [
     "_strip_marked_tool_blocks",
     "_buf_has_unclosed_marked_tool",
     "parse_marked_text_tool_calls",
+    "buf_has_unclosed_invoke",
+    "strip_invoke_tool_blocks",
+    "parse_invoke_tool_calls",
 ]
 
 _CHUNK_TIMEOUT = 120  # 单个 chunk 超时（秒）
@@ -355,6 +362,10 @@ class OpenAICompatProvider(BaseProvider):
                 # opens==closes，整块会被下面的 else 当正文 yield 漏给用户。
                 if _buf_has_unclosed_marked_tool(content_buf) or _MARKED_TOOL_RE.search(content_buf):
                     pass
+                # Anthropic 风格 <tool_calls>/<invoke> 标记（function calling 退化成文本）：
+                # 未闭合 → 持续缓冲，避免半截 XML 漏给用户；已闭合 → 也缓冲到 finish 统一解析。
+                elif buf_has_unclosed_invoke(content_buf) or contains_invoke(content_buf):
+                    pass
                 # DSML 标记开头特征：一旦检测到就持续缓冲直到流结束或 finish
                 elif self._contains_dsml(content_buf):
                     pass  # 继续缓冲，不 yield
@@ -390,39 +401,50 @@ class OpenAICompatProvider(BaseProvider):
                             tool_calls_acc[idx]["args_raw"] += tc_delta.function.arguments
 
             if chunk.choices and chunk.choices[0].finish_reason in ("tool_calls", "stop"):
-                # 处理缓冲区中可能的文本 tool calls：标记型（<tool_call>/<tool_use>）优先，
-                # 其次 DSML
+                # 处理缓冲区中可能的文本 tool calls。三种格式**顺序、非互斥**地处理：
+                # 同一段 content 可能混排多种标记（如 <tool_call>{...}</tool_call> 与
+                # <invoke> 同时出现），若写成互斥 elif，先命中的分支会让后面的块既不被
+                # 解析也不被剥离——工具静默丢失，且 XML 原样漏给用户；又因为 tool_calls
+                # 非空，agent 层的文本兜底解析会被跳过，兜不回来。
                 if content_buf:
+                    # ① 标记型 <tool_call>/<tool_use>{json}
                     marked_calls = parse_marked_text_tool_calls(content_buf)
                     if marked_calls or _MARKED_TOOL_RE.search(content_buf):
                         # 哪怕一个块都解析不出来（如截断的半截块）也要剥，
                         # 否则包裹符里的内容会当正文漏给用户
-                        pre_text = _strip_marked_tool_blocks(content_buf).strip()
-                        if pre_text:
-                            yield StreamChunk(content=pre_text)
+                        content_buf = _strip_marked_tool_blocks(content_buf)
                         for mc in marked_calls:
                             tool_calls_acc[len(tool_calls_acc)] = {
                                 "id": mc.id, "name": mc.name,
                                 "args_raw": json.dumps(mc.arguments, ensure_ascii=False),
                             }
-                        content_buf = ""
-                    else:
-                        dsml_calls = self._parse_dsml_tool_calls(content_buf)
-                        if dsml_calls:
-                            # 保留 DSML 标记之前的正文
-                            import re as _re
-                            dsml_start = _re.search(r'<[｜|][｜|]DSML[｜|][｜|]', content_buf)
-                            pre_text = content_buf[:dsml_start.start()].rstrip() if dsml_start else ""
-                            if pre_text:
-                                yield StreamChunk(content=pre_text)
-                            for dc in dsml_calls:
-                                tool_calls_acc[len(tool_calls_acc)] = {
-                                    "id": dc.id, "name": dc.name, "args_raw": json.dumps(dc.arguments, ensure_ascii=False)
-                                }
-                            content_buf = ""
-                        else:
-                            yield StreamChunk(content=content_buf)
-                            content_buf = ""
+
+                    # ② Anthropic 风格 <invoke>/<parameter>（无 DSML 前缀）
+                    invoke_calls = parse_invoke_tool_calls(content_buf)
+                    if invoke_calls:
+                        content_buf = strip_invoke_tool_blocks(content_buf)
+                        for ic in invoke_calls:
+                            tool_calls_acc[len(tool_calls_acc)] = {
+                                "id": ic.id, "name": ic.name,
+                                "args_raw": json.dumps(ic.arguments, ensure_ascii=False),
+                            }
+
+                    # ③ DSML
+                    dsml_calls = self._parse_dsml_tool_calls(content_buf)
+                    if dsml_calls:
+                        import re as _re
+                        dsml_start = _re.search(r'<[｜|][｜|]DSML[｜|][｜|]', content_buf)
+                        # 保留 DSML 标记之前的正文
+                        content_buf = content_buf[:dsml_start.start()] if dsml_start else ""
+                        for dc in dsml_calls:
+                            tool_calls_acc[len(tool_calls_acc)] = {
+                                "id": dc.id, "name": dc.name, "args_raw": json.dumps(dc.arguments, ensure_ascii=False)
+                            }
+
+                    # 剥离后剩下的真正文（如「我来帮你操作。」）照常输出
+                    if content_buf.strip():
+                        yield StreamChunk(content=content_buf.strip())
+                    content_buf = ""
 
                 tool_calls = []
                 for tc in tool_calls_acc.values():
@@ -440,7 +462,11 @@ class OpenAICompatProvider(BaseProvider):
         # 中途断连 salvage：flush 剩余缓冲并标记 truncated，上层 agent 据此自动续接
         if _salvaged:
             if content_buf:
-                pre = _strip_marked_tool_blocks(content_buf)
+                # 剥除两个文本线格式。注意这里**不能**用「parse 成功」当门槛：断连场景下
+                # 块本来就是截断的，parse 必然失败——而剥掉半截 XML 正是 salvage 的目的。
+                # 安全性由 strip_invoke_tool_blocks 自身保证：它只在出现 <tool_calls> 或
+                # <parameter> 时才动刀，仅提到 `<invoke` 一词的讲解性正文不受影响。
+                pre = strip_invoke_tool_blocks(_strip_marked_tool_blocks(content_buf))
                 if pre.strip():
-                    yield StreamChunk(content=pre)
+                    yield StreamChunk(content=pre.strip())
             yield StreamChunk(content="", is_final=True, truncated=True)

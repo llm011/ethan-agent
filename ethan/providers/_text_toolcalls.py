@@ -140,6 +140,125 @@ def contains_dsml(content: str) -> bool:
     return "DSML" in content and ("｜｜DSML｜｜" in content or "||DSML||" in content)
 
 
+# ── Anthropic 风格的 invoke/parameter 标记（无 DSML 前缀）────────────────────
+#
+# 背景：Anthropic 协议里工具调用本应是原生 tool_use 块（走 input_json_delta），
+# 但一些 anthropic 兼容网关（如火山 coding 网关）在 function calling 退化时，
+# 会把工具调用**当正文文本**下发，形状是不带 DSML 前缀的 Anthropic 原生标记：
+#     <tool_calls>
+#       <invoke name="browser_page">
+#         <parameter name="action">mouse</parameter>
+#         <parameter name="x">608</parameter>
+#       </invoke>
+#     </tool_calls>
+# 与 DSML 的差别仅在于没有 `｜｜DSML｜｜` 前缀，故复用同一套 invoke/parameter
+# 正则逻辑，去掉前缀要求即可。
+_INVOKE_RE = re.compile(
+    r'<\s*invoke\s+name="(?P<name>[^"]+)"[^>]*>(?P<body>.*?)</\s*invoke\s*>',
+    re.DOTALL | re.IGNORECASE,
+)
+_INVOKE_PARAM_RE = re.compile(
+    r'<\s*parameter\s+name="(?P<key>[^"]+)"[^>]*>(?P<val>.*?)</\s*parameter\s*>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def contains_invoke(content: str) -> bool:
+    """正文里是否有**完整的** Anthropic 风格 `<invoke name="...">…</invoke>` 工具调用块。
+
+    注意不要退化成 `"<invoke" in content` 的子串判断：模型讲解用法、写 XML 示例
+    （如「你需要使用 <invoke name="x"> 标签来调用工具」）时正文里就含字面量 `<invoke`，
+    但并没有真正的工具调用。若拿子串当门槛，调用方会去剥除，而 `strip_invoke_tool_blocks`
+    的未闭合兜底是从匹配点截到**字符串末尾**，这段解释性正文会被整段吃掉。
+
+    故这里要求必须匹配到成对的 <invoke>…</invoke>（即真的解析得出工具调用）。
+    """
+    return bool(parse_invoke_tool_calls(content))
+
+
+def parse_invoke_tool_calls(content: str) -> list[ToolCall]:
+    """解析不带 DSML 前缀的 Anthropic 风格 <invoke>/<parameter> 文本工具调用。
+
+    网关把原生 tool_use 降级成文本时会出现这种形状。参数值一律**保留为字符串**
+    （XML 不携带类型信息），类型转换交给 tool registry 按 schema 处理。
+    解析不出 invoke 块时返回空列表，不抛错。
+    """
+    results: list[ToolCall] = []
+    for inv_match in _INVOKE_RE.finditer(content or ""):
+        tool_name = inv_match.group("name").strip()
+        if not tool_name:
+            continue
+        body = inv_match.group("body")
+        args: dict = {}
+        for p_match in _INVOKE_PARAM_RE.finditer(body):
+            args[p_match.group("key")] = p_match.group("val").strip()
+        results.append(ToolCall(
+            id=f"call_{uuid.uuid4().hex[:8]}",
+            name=tool_name,
+            arguments=args,
+        ))
+    return results
+
+
+def strip_invoke_tool_blocks(content: str) -> str:
+    """把 <invoke>…</invoke> 工具调用标记从展示正文里剥掉，只留真正文。
+
+    与 _strip_marked_tool_blocks 同理：成对的块无论能否解析都先移除，防止序列化后的
+    工具调用（XML 原文）漏给用户。外层 <tool_calls> 包裹标签也一起去掉。
+
+    **只在「确实像是在下发工具调用」时才动刀**——判据是出现 `<tool_calls>` 包裹标签
+    或 `<parameter …>` 子标签（真实调用二选一必居其一）。否则正文里但凡提一句
+    `<invoke name="x">` 作讲解，就会被下面的未闭合兜底正则从该点截到字符串末尾，
+    后半段正文整段消失。宁可偶有漏剥（模型把没有 parameter 的裸 invoke 写进正文），
+    也不能把正常正文吃掉——漏剥只影响展示，吃正文是丢内容。
+
+    未闭合块的兜底：流被截断时闭合标签可能永远没到，此时从开头标签截到结尾。
+    """
+    if not content or "<invoke" not in content.lower():
+        return content
+    looks_like_call = bool(
+        re.search(r"<\s*tool_calls\b", content, re.IGNORECASE)
+        or re.search(r"<\s*parameter\b", content, re.IGNORECASE)
+    )
+    if not looks_like_call:
+        return content
+    stripped = re.sub(
+        r'<\s*tool_calls\s*>.*?</\s*tool_calls\s*>', "", content,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    stripped = re.sub(
+        r'<\s*invoke\b[^>]*>.*?</\s*invoke\s*>', "", stripped,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    # 截断的未闭合块：从开头标签截到结尾
+    m = re.search(r"<\s*(?:tool_calls|invoke)\b[\s\S]*$", stripped, re.IGNORECASE)
+    if m:
+        stripped = stripped[: m.start()]
+    return stripped
+
+
+def buf_has_unclosed_invoke(content: str) -> bool:
+    """缓冲区是否含「尚未闭合」的 <tool_calls>/<invoke> 块。
+
+    流式分片时开头标签先到、闭合标签后到，若按普通文本 yield 出去用户会看到半截
+    XML。检测到未闭合时持续缓冲，直到流结束再统一解析。
+
+    `<invoke>` 的开头标签要求带 `name=`：只认真正的工具调用标签，避免正文里
+    提到 `<invoke` 一词（讲解用法）就无谓地一直缓冲、把正常正文延迟输出。
+    """
+    if not content:
+        return False
+    for open_pat, close_pat in (
+        (r'<\s*tool_calls\b', r'<\s*/\s*tool_calls\s*>'),
+        (r'<\s*invoke\s+name="', r'<\s*/\s*invoke\s*>'),
+    ):
+        if len(re.findall(open_pat, content, re.IGNORECASE)) > len(
+            re.findall(close_pat, content, re.IGNORECASE)
+        ):
+            return True
+    return False
+
+
 def parse_text_tool_calls(content: str) -> list[ToolCall]:
     """从文本中解析 `call:<tool_name>{<args>}` 格式的工具调用。
 
