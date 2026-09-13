@@ -30,6 +30,16 @@ from ethan.core.context import get_user_id
 
 # ── per-profile 路径 ─────────────────────────────────────────────
 
+def system_dir() -> Path:
+    """全局共享的 system 目录（identity/soul/agent/tools/naming/heartbeat.md）。
+
+    不随 profile 变，始终是 CONFIG_DIR / "system"。所有读写 system/*.md 的代码
+    都应走这里——早前 settings.py 硬编码 ~/.ethan/system，agent.py 用
+    defaults.workspace，二者在 ETHAN_DATA_DIR 或自定义 workspace 下会错位。
+    """
+    return CONFIG_DIR / "system"
+
+
 def user_data_dir() -> Path:
     """当前 profile 的数据根目录。空 user_id（default）= CONFIG_DIR 本身。"""
     uid = get_user_id()

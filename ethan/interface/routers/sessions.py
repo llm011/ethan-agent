@@ -338,7 +338,7 @@ async def cleanup_trivial_sessions(user_id: str = Depends(verify_token)):
 @router.post("/sessions/{session_id}/regen-title")
 async def regen_title(session_id: str, user_id: str = Depends(verify_token)):
     """用廉价模型重新生成标题（用户手动触发，force 跳过已有标题保护）。"""
-    from ethan.memory.session import _PROTECTED_PREFIXES, _generate_smart_title
+    from ethan.memory.session import _PROTECTED_PREFIXES, _generate_smart_title, _rule_title
     store = await get_session_store()
     session = await store.load(session_id)
     if not session:
@@ -347,7 +347,11 @@ async def regen_title(session_id: str, user_id: str = Depends(verify_token)):
     if any(session.title.startswith(p) for p in _PROTECTED_PREFIXES):
         return {"ok": False, "title": session.title,
                 "error": "受保护标题（定时/后台/心跳）不可重新生成"}
-    title = await _generate_smart_title(session.messages)
+    # 先按确定性规则取名（/review 链接等），命中零成本
+    first_user = next((m.content for m in session.messages if m.role == "user" and m.content), "")
+    title = _rule_title(first_user) if first_user else None
+    if not title:
+        title = await _generate_smart_title(session.messages)
     if title:
         await store.update_title(session_id, title)
         return {"ok": True, "title": title}

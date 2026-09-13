@@ -260,8 +260,10 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
             session_obj = await store.load(req.session_id)
             # 首轮对话立即写标题：避免"新对话"残留很久，也避免前端本地 placeholderTitle
             # 被 3s 会话列表轮询覆盖回"新对话"。与 completions.py / repl_stream.py 初始化思路对齐。
-            # 策略（仅首轮生效，且当前标题仍是默认"新对话"才写）：
-            #   - /review 命令：从 URL 解析 "PR #xx owner/repo"，写标题。
+            # 策略（仅首轮生效）：
+            #   - /review 命令：按命名规则解析出 "#xx owner/repo code review"，立即写库。
+            #     规则标题是确定性的、零 LLM 成本，只要当前标题不是受保护前缀就写——
+            #     即便前一条消息已写了占位标题也升级为规则标题。
             #   - 普通首条 query：内容量足够（≥10 中文等价字、或英文单词≥6）→ 立即用
             #     _auto_title（清洗 + 40 字截断）写 DB 标题，不等模型智能标题；
             #     若太短（你好/hi/测试）则保留"新对话"，等第二轮智能标题，避免把毫无
@@ -270,15 +272,17 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
             user_text = (req.messages[-1].get("content", "") if req.messages else "").strip()
             early_title = None
             if user_text:
-                from ethan.memory.session import _review_title
-                early_title = _review_title(user_text)
+                from ethan.memory.session import _rule_title
+                early_title = _rule_title(user_text)
             from ethan.memory.session import _PROTECTED_PREFIXES
-            if (not any(getattr(session_obj, "title", "").startswith(p) for p in _PROTECTED_PREFIXES)) and (
+            _protected = any(getattr(session_obj, "title", "").startswith(p) for p in _PROTECTED_PREFIXES)
+            # 规则标题优先：命中即写（未受保护、且尚未是同一条规则标题）
+            if early_title and not _protected and getattr(session_obj, "title", "") != early_title:
+                await store.update_title(req.session_id, early_title)
+            elif (not _protected) and (
                 (not getattr(session_obj, "title", "")) or getattr(session_obj, "title", "") == "新对话"
             ):
-                if early_title:
-                    await store.update_title(req.session_id, early_title)
-                elif user_text:
+                if user_text:
                     from ethan.memory.session import _auto_title, _count_content
                     # 阈值：中文等价字≥10 或 英文单词≥6 视为有信息量。
                     # 阈值为什么不是 3/4？因为用户明确反馈"先发了 query 很久标题还是新对话"，

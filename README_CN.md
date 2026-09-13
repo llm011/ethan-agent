@@ -585,6 +585,7 @@ defaults:
 ├── system/
 │   ├── identity.md      # Agent 身份（名字、角色）
 │   ├── soul.md          # 行为原则（主动写记忆的指令在这里）
+│   ├── naming.md        # 对话命名规则（注入标题生成 prompt）
 │   └── heartbeat.md     # 心跳任务（自然语言定义）
 ├── memory/
 │   ├── memory.db        # 结构化记忆 + 证据链 + 洞察 + 向量索引

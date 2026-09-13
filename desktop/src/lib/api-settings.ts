@@ -106,6 +106,7 @@ export interface SystemSettings {
   agent: string;
   tools: string;
   heartbeat: string;
+  naming: string;
 }
 
 export async function fetchSystemSettings(): Promise<SystemSettings> {
