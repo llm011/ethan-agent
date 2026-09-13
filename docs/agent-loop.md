@@ -78,6 +78,10 @@ workspace 路径
 
 Fast Path 保留：`soul + identity + 当前时间 + workspace 路径 + user_profile + behavioral_guidelines + 匹配到的 Skill`（不带结构化记忆召回，省成本）。
 
+> `system/naming.md` **不进主 system prompt**：它只在生成会话标题时注入廉价模型的标题 prompt
+> （见 `ethan/memory/session.py` 的 `_build_title_system_prompt`），零常驻 token 成本。
+> `/review` + PR/MR 链接这类确定性场景走 `_rule_title` 直接短路（不调用模型）。
+
 ---
 
 ## 工具执行（ToolExecutor）

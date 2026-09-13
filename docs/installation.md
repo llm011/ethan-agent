@@ -226,6 +226,9 @@ pnpm tauri build  # 产出 dmg/exe
 ├── system/
 │   ├── identity.md      # Agent 身份设定
 │   ├── soul.md          # 行为原则
+│   ├── agent.md         # 工具路由优先级
+│   ├── tools.md         # 工具说明补充
+│   ├── naming.md        # 对话命名规则（注入标题生成 prompt）
 │   └── heartbeat.md     # 心跳任务（自然语言描述的定期任务）
 ├── memory/
 │   ├── memory.db        # 结构化记忆 + 证据链 + 洞察 + 向量索引

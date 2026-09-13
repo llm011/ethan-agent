@@ -201,12 +201,13 @@ class SystemSettingsPatch(BaseModel):
     agent: str | None = None
     tools: str | None = None
     heartbeat: str | None = None
+    naming: str | None = None
 
 
 @router.get("/settings/system", dependencies=[Depends(verify_token)])
 async def get_system_settings():
     system_dir = Path(os.path.expanduser("~/.ethan/system"))
-    files = {k: system_dir / f"{k}.md" for k in ("identity", "soul", "agent", "tools", "heartbeat")}
+    files = {k: system_dir / f"{k}.md" for k in ("identity", "soul", "agent", "tools", "heartbeat", "naming")}
     return {k: (p.read_text(encoding="utf-8") if p.exists() else "") for k, p in files.items()}
 
 
@@ -220,6 +221,7 @@ async def update_system_settings(req: SystemSettingsPatch):
         "agent": req.agent,
         "tools": req.tools,
         "heartbeat": req.heartbeat,
+        "naming": req.naming,
     }
     for name, val in mapping.items():
         if val is None:
@@ -227,6 +229,10 @@ async def update_system_settings(req: SystemSettingsPatch):
         if not val.strip():
             continue  # 空串视为不修改,避免误清空
         (system_dir / f"{name}.md").write_text(val, encoding="utf-8")
+    # 命名规则改了要清缓存，否则标题生成仍用旧规则
+    if req.naming is not None:
+        from ethan.memory.session import reload_naming_rules
+        reload_naming_rules()
     return {"ok": True}
 
 

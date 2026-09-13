@@ -35,7 +35,7 @@ interface SettingsViewProps {
   initialTab?: TabId;
 }
 
-type TabId = "general" | "fast-rules" | "providers" | "channels" | "plugins" | "identity" | "soul" | "tools" | "heartbeat" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers";
+type TabId = "general" | "fast-rules" | "providers" | "channels" | "plugins" | "identity" | "soul" | "tools" | "heartbeat" | "naming" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers";
 
 const TAB_GROUPS = [
   {
@@ -61,6 +61,7 @@ const TAB_GROUPS = [
       { id: "soul" as TabId, label: "运行准则" },
       { id: "tools" as TabId, label: "工具说明" },
       { id: "heartbeat" as TabId, label: "心跳任务" },
+      { id: "naming" as TabId, label: "命名规则" },
     ],
   },
   {
@@ -151,6 +152,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
     agent: "",
     tools: "",
     heartbeat: "",
+    naming: "",
   });
 
   const [providerForm, setProviderForm] = useState<ProviderSettings>({});
@@ -1069,6 +1071,20 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                   value={sysForm.heartbeat}
                   onChange={(v) => setSysForm({ ...sysForm, heartbeat: v })}
                   placeholder="# 在这里添加心跳任务..."
+                />
+              </div>
+            )}
+
+            {activeTab === "naming" && (
+              <div className="h-full flex flex-col min-h-[500px]">
+                <h3 className="text-lg font-medium mb-2">命名规则 (naming.md)</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  定义新对话标题的命名规则，注入标题生成 prompt。例如：review PR 时 → <code>#100 llm011/ethan-agent code review</code>。
+                </p>
+                <MdEditor
+                  value={sysForm.naming}
+                  onChange={(v) => setSysForm({ ...sysForm, naming: v })}
+                  placeholder="# 对话命名规则..."
                 />
               </div>
             )}

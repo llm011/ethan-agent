@@ -101,7 +101,7 @@ def _auto_title(messages: list[Message]) -> str:
             t = m.content.strip()
             # 去掉 markdown 标记（**粗体**、# 标题、`代码`、_斜体_、~删除~）
             t = re.sub(r"[*#`_~]", "", t)
-            # 去掉命令前缀（/help xxx → xxx；/review url 保留 url 由 _review_title 处理）
+            # 去掉命令前缀（/help xxx → xxx；/review url 保留 url 由 _rule_title 处理）
             t = re.sub(r"^/(?:help|new|model|token|btw|stop)\s+", "", t)
             t = t.replace("\n", " ").strip()
             if not t:
@@ -176,12 +176,67 @@ def _sanitize_title(raw: str) -> str:
 
 
 
+_NAMING_RULES_CACHE: tuple[float, str] | None = None
+
+
+def reload_naming_rules() -> None:
+    """清空 naming.md 缓存，下次 _load_naming_rules 重新读盘。
+
+    设置页保存命名规则后调用，无需重启进程即可生效。
+    """
+    global _NAMING_RULES_CACHE
+    _NAMING_RULES_CACHE = None
+
+
+def _naming_rules_path() -> Path:
+    from ethan.core.config import get_config
+
+    return Path(get_config().defaults.workspace) / "system" / "naming.md"
+
+
+def _load_naming_rules() -> str:
+    """读取 ~/.ethan/system/naming.md 的命名规则，带 mtime 缓存。
+
+    文件不存在 / 为空 → 返回 ""（调用方据此退化到无规则的老 prompt）。
+    """
+    global _NAMING_RULES_CACHE
+
+    p = _naming_rules_path()
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        _NAMING_RULES_CACHE = None
+        return ""
+    if _NAMING_RULES_CACHE is not None and _NAMING_RULES_CACHE[0] == mtime:
+        return _NAMING_RULES_CACHE[1]
+    try:
+        content = p.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    _NAMING_RULES_CACHE = (mtime, content)
+    return content
+
+
+_TITLE_SYSTEM_BASE = (
+    "你是一个标题生成助手。你只能基于给出的文本总结标题，无法也无需访问任何链接或外部资源；"
+    "标题不超过 20 个字，只输出标题本身，不加引号或标点。"
+)
+
+
+def _build_title_system_prompt() -> str:
+    """标题生成的 system prompt：基础指令 + 用户可维护的命名规则（naming.md）。"""
+    rules = _load_naming_rules()
+    if not rules:
+        return _TITLE_SYSTEM_BASE
+    return f"{_TITLE_SYSTEM_BASE}\n\n# 命名规则（必须遵守）\n{rules}"
+
+
 async def _generate_smart_title(messages: list[Message], retries: int = 3) -> str | None:
     """用廉价模型生成 ≤20 字的简洁标题；lite 模型可用时失败重试 retries 次。
 
     返回 None 表示「没生成出来」，调用方据此决定是否保留占位标题，绝不拿兜底值覆盖：
-    - 没有可用的 lite 模型（create_provider 抛错）→ 返回 None，不重试。
-    - lite 模型可用但调用全部失败（超时/限流/endpoint 抖动）→ 退避重试后返回 None。
+    - 没有可用的 lite 模型（create_provider 抛错）→ 回退到主模型再试一次；仍失败返回 None。
+    - 模型可用但调用全部失败（超时/限流/endpoint 抖动）→ 退避重试后返回 None。
     """
     import asyncio
     import re as _re
@@ -201,13 +256,21 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
         return None
 
     conv = "\n".join(f"{'用户' if r == 'user' else 'AI'}: {c}" for r, c in turns)
-    prompt = f"根据以下对话文本，用不超过15个汉字或30个英文字符生成一个简洁的标题，只输出标题本身：\n\n{conv}"
+    # 长度等具体规则以 naming.md 为准，这里只给基础引导，避免与规则文件互相打架
+    prompt = f"根据以下对话文本生成一个简洁的标题，只输出标题本身：\n\n{conv}"
 
-    try:
-        cfg = get_config()
-        cheap_model = get_lite_model(cfg.defaults.model)
-        provider = create_provider(cheap_model)
-    except Exception:
+    cfg = get_config()
+    provider = None
+    # 优先廉价 lite 模型；拿不到（未配置/不支持的供应商）时回退主模型，避免放弃命名
+    for candidate in (get_lite_model(cfg.defaults.model), cfg.defaults.model):
+        if not candidate:
+            continue
+        try:
+            provider = create_provider(candidate)
+            break
+        except Exception:
+            continue
+    if provider is None:
         return None
 
     # 模型拒绝/跑偏时的典型开头（如 "I can't access external links"），视为生成失败
@@ -220,7 +283,7 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
         try:
             resp = await provider.chat(
                 [Message(role="user", content=prompt)],
-                system="你是一个标题生成助手。你只能基于给出的文本总结标题，无法也无需访问任何链接或外部资源；只输出标题本身，不加引号或标点。",
+                system=_build_title_system_prompt(),
                 disable_thinking=True,
             )
             title = _sanitize_title(resp.content)
@@ -236,8 +299,15 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
 _PROTECTED_PREFIXES = ("[定时]", "[后台]", "[心跳]")
 
 
-def _review_title(text: str) -> str | None:
-    """从 /review 命令中解析 PR 标题，格式如 'PR #70 llm011/ethan-agent'。"""
+def _rule_title(text: str) -> str | None:
+    """从 /review 命令中解析出确定性标题（无需 LLM），格式对齐 naming.md。
+
+    GitHub: `/review https://github.com/llm011/ethan-agent/pull/100`
+      → `#100 llm011/ethan-agent code review`
+    GitLab: `/review https://gitlab.com/larksuite/cli/-/merge_requests/42`
+      → `!42 larksuite/cli code review`
+    命中返回标题，未命中/无链接返回 None（交由模型按 naming.md 兜底）。
+    """
     import re as _re
 
     t = text.strip()
@@ -249,20 +319,29 @@ def _review_title(text: str) -> str | None:
     # 匹配 GitHub PR URL: github.com/owner/repo/pull/123
     m = _re.search(r"github\.com/([^/]+/[^/]+)/pull/(\d+)", target)
     if m:
-        return f"PR #{m.group(2)} {m.group(1)}"
+        return f"#{m.group(2)} {m.group(1)} code review"
     # 匹配 GitLab MR URL: gitlab.com/owner/repo/-/merge_requests/123
     m = _re.search(r"gitlab\.com/([^/]+/[^/]+)/-/merge_requests/(\d+)", target)
     if m:
-        return f"MR !{m.group(2)} {m.group(1)}"
+        return f"!{m.group(2)} {m.group(1)} code review"
     return None
+
+
+def _is_placeholder_title(current_title: str, messages: list[Message]) -> bool:
+    """判断当前标题是否仍是「从未成功命名过」的占位/截断标题。"""
+    if current_title in ("", "新对话"):
+        return True
+    return current_title == _auto_title(messages)
 
 
 async def decide_title(messages: list[Message], current_title: str = "") -> str | None:
     """统一的标题策略，返回应设置的标题；返回 None 表示本轮不改标题。
 
-    - 第 1 轮：首条问题内容量 ≥3（中文按字、英文按单词）直接生成智能标题；否则先用清洗后的原文占位。
-    - 第 2 轮：仅当首条问题太短（之前是占位）时补生成智能标题；失败则放弃，保留占位。
-    - 第 3 轮起：不再自动重试，避免用户突然看到标题变化。用户可用 🔄 按钮手动重试。
+    - 第 1 轮：/review 链接直接按规则取名（零 LLM 成本）；否则首条问题内容量 ≥3
+      （中文按字、英文按单词）直接生成智能标题；太短则先用清洗后的原文占位。
+    - 第 2 轮：仍是占位标题时补生成智能标题，失败保留占位。
+    - 第 3 轮起：**仅当标题仍是占位**（从未成功命名过，如多轮都生成失败）才继续尝试；
+      已有成功标题则不再改动，避免用户突然看到标题变化。用户可用 🔄 按钮手动重试。
     """
     # 保护特殊标题（定时/后台/心跳等），不被自动标题覆盖
     if any(current_title.startswith(p) for p in _PROTECTED_PREFIXES):
@@ -272,10 +351,10 @@ async def decide_title(messages: list[Message], current_title: str = "") -> str 
     n = len(user_msgs)
     if n == 1:
         first = user_msgs[0].content.strip()
-        # /review 命令：直接从 URL 解析出 "PR #xx owner/repo" 格式标题
-        review = _review_title(first)
-        if review:
-            return review
+        # /review 命令：直接从 URL 解析出 "#xx owner/repo code review" 规则标题
+        rule = _rule_title(first)
+        if rule:
+            return rule
         if _count_content(first) >= SHORT_QUESTION_CHARS:
             return await _generate_smart_title(messages) or _auto_title(messages)
         return _auto_title(messages)
@@ -285,10 +364,12 @@ async def decide_title(messages: list[Message], current_title: str = "") -> str 
             return await _generate_smart_title(messages) or _auto_title(messages)
         # 首条够长但 round 1 智能标题失败（或被 API 路径用首条消息当了初始标题）：
         # 仍是占位/截断标题时再试一次智能生成；已有好标题则跳过
-        if any(current_title == p for p in ("", "新对话")) or current_title == _auto_title(messages):
+        if _is_placeholder_title(current_title, messages):
             return await _generate_smart_title(messages) or _auto_title(messages)
         return None
-    # 第 3 轮起不再自动重试：占位标题已足够可读，用户可手动点 🔄 触发 regen_title
+    # 第 3 轮起：只要标题还是占位（从未成功命名）就继续补，避免永久卡在占位标题
+    if _is_placeholder_title(current_title, messages):
+        return await _generate_smart_title(messages) or None
     return None
 
 

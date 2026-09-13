@@ -599,6 +599,7 @@ Environment variables in `.env` override config values (useful for secrets).
 ├── system/
 │   ├── identity.md      # Agent identity (name, role)
 │   ├── soul.md          # Behavioral principles
+│   ├── naming.md        # Conversation naming rules (injected into title prompt)
 │   └── heartbeat.md     # Heartbeat tasks (natural language)
 ├── memory/
 │   ├── memory.db        # Structured memories + evidence + insights + vector index
