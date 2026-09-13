@@ -37,33 +37,47 @@ val ModelEntry.fullId: String
     get() = if (provider.isBlank()) id else "$provider/$id"
 
 /**
- * 解析任意 model 引用到列表里的唯一模型。
+ * 把一个 model 引用解析成**候选模型集合**，按优先级依次尝试：
+ *  1. 精确复合键 `provider/id`（id 本身可再含 "/"）；
+ *  2. 复合写法但 provider 前缀对不上：按第一个 "/" 拆出 provider + 整段 id 再匹配；
+ *  3. 旧格式：整段当纯 id / alias 匹配（含「id 本身带 "/"」的情况，如
+ *     `trae/glm-5.3-flash` 这种聚合网关模型在 #308 之前就是以裸 id 存的）。
  *
- * 兼容三种写法：复合键 `provider/id`、纯 id、以及 alias。纯 id/alias 命中多个
- * 同名模型时返回 null（歧义，不能猜——静默切到另一个 provider 可能涉及计费/隐私，
- * 交由上层提示用户显式选择）。
+ * 命中 >1 个即歧义（多个 provider 同名）——不能猜，静默切到另一个 provider 可能涉及
+ * 计费/隐私，交由上层提示用户显式选择。resolveModel / isAmbiguous / 候选列举都基于
+ * 同一个集合，保证判定与展示不会打架。
  */
-fun List<ModelEntry>.resolveModel(ref: String?): ModelEntry? {
-    if (ref.isNullOrBlank()) return null
-    // 1) 精确匹配复合键
-    firstOrNull { it.fullId == ref }?.let { return it }
-    // 2) 复合写法但缺前缀/前缀写错：按第一个 "/" 拆出 provider 再匹配整段 id
+fun List<ModelEntry>.modelCandidates(ref: String?): List<ModelEntry> {
+    if (ref.isNullOrBlank()) return emptyList()
+    firstOrNull { it.fullId == ref }?.let { return listOf(it) }
     if ("/" in ref) {
         val provider = ref.substringBefore("/")
         val id = ref.substringAfter("/")
-        return firstOrNull { it.provider == provider && it.id == id }
+        firstOrNull { it.provider == provider && it.id == id }?.let { return listOf(it) }
     }
-    // 3) 旧会话存的纯 id / alias：唯一命中才安全升级，多个同名不猜
-    val hits = filter { it.id == ref || ref in it.alias }
-    return hits.singleOrNull()
+    return hitsOf(ref)
 }
 
-/** 纯 id/alias 命中多个同名模型（歧义，需要用户显式选择）。 */
-fun List<ModelEntry>.isAmbiguous(ref: String?): Boolean {
-    if (ref.isNullOrBlank() || any { it.fullId == ref }) return false
-    if ("/" in ref) return false
-    return count { it.id == ref || ref in it.alias } > 1
-}
+/** 按纯 id / alias 命中的模型。 */
+private fun List<ModelEntry>.hitsOf(ref: String): List<ModelEntry> =
+    filter { it.id == ref || ref in it.alias }
+
+/**
+ * 解析任意 model 引用到列表里的唯一模型。兼容复合键 `provider/id`、纯 id、alias；
+ * 命中多个同名模型时返回 null（歧义，交由上层提示用户显式选择）。
+ */
+fun List<ModelEntry>.resolveModel(ref: String?): ModelEntry? = modelCandidates(ref).singleOrNull()
+
+/** 引用命中多个同名模型（歧义，需要用户显式选择）。 */
+fun List<ModelEntry>.isAmbiguous(ref: String?): Boolean = modelCandidates(ref).size > 1
+
+/**
+ * 歧义 ref 的同名候选模型，供 UI 列「一键候选」让用户显式指定 provider；
+ * 非歧义时返回空列表。与 web 端 `chat-input.tsx` 的
+ * `models.filter(m => m.id === selectedModel)` 同语义。
+ */
+fun List<ModelEntry>.ambiguousCandidates(ref: String?): List<ModelEntry> =
+    if (isAmbiguous(ref)) modelCandidates(ref) else emptyList()
 
 @Serializable
 data class ModelsResponse(val models: List<ModelEntry> = emptyList())

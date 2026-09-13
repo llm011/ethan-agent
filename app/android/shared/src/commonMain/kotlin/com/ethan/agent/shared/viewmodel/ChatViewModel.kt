@@ -14,6 +14,7 @@ import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.ToolStep
 import com.ethan.agent.core.model.Usage
 import com.ethan.agent.core.model.WaitForUserInfo
+import com.ethan.agent.core.model.ambiguousCandidates
 import com.ethan.agent.core.model.fullId
 import com.ethan.agent.core.model.isAmbiguous
 import com.ethan.agent.core.model.resolveModel
@@ -53,11 +54,6 @@ data class ChatUiState(
     val modes: List<ModeEntry> = emptyList(),
     /** 选中模型，复合键 `provider/id`（见 ModelEntry.fullId） */
     val selectedModel: String? = null,
-    /**
-     * 旧会话存的纯 id/alias 命中多个同名模型：歧义，需用户显式选择。
-     * true 时禁用发送，避免静默切到另一个 provider（可能涉及计费/隐私）。
-     */
-    val modelAmbiguous: Boolean = false,
     val selectedMode: String = "",
     val inputText: String = "",
     val pendingImages: List<PendingImage> = emptyList(),
@@ -83,7 +79,21 @@ data class ChatUiState(
     val userInfo: String = "",
     val autoConsent: Boolean = false,
     val serverUrl: String = "",
-)
+) {
+    /**
+     * 旧会话/默认模型存的纯 id/alias 命中多个同名模型：歧义，需用户显式选择。
+     * true 时禁用发送，避免静默切到另一个 provider（可能涉及计费/隐私）。
+     *
+     * **派生而非存储**：models 与 selectedModel 是并行加载的（三条 cached flow 先后到达），
+     * 若把它当独立字段写入，先到的流写下的值会被后到的流按旧快照覆盖，出现「该报的没报、
+     * 不该报的报死」（见 PR #324 评审）。这里统一从当前 (models, selectedModel) 推导，
+     * 任何写入顺序都收敛到同一个结果，与 web 端 `ambiguousLegacy` 的算法一致。
+     */
+    val modelAmbiguous: Boolean get() = models.isAmbiguous(selectedModel)
+
+    /** 歧义时的同名候选（供 UI 列「一键候选」），非歧义为空。 */
+    val ambiguousCandidates: List<ModelEntry> get() = models.ambiguousCandidates(selectedModel)
+}
 
 class ChatViewModel(
     private val repository: EthanRepository,
@@ -133,6 +143,17 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 把任意来源的模型引用（会话存的 model、`agent_settings` 的默认模型）收敛到复合键：
+     * 在 [models] 里唯一命中 → 升级为 `provider/id`；歧义（多个 provider 同名）或
+     * 模型还没加载到时保持原值不动。
+     *
+     * 三条并行缓存流都走这一个函数，避免各自实现细微不一致导致状态互相覆盖。
+     * 歧义态不在这里存，由 [ChatUiState.modelAmbiguous] 从 (models, selectedModel) 派生。
+     */
+    private fun upgradeModelRef(models: List<ModelEntry>, ref: String?): String? =
+        models.resolveModel(ref)?.fullId ?: ref
+
     private fun loadInitial(sessionId: String?) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
@@ -142,15 +163,13 @@ class ChatViewModel(
                 try {
                     repository.cachedModels().collect { models ->
                         _state.update { st ->
-                            val resolved = models.resolveModel(st.selectedModel)
-                            when {
-                                // 旧会话存的纯 id 命中多个同名模型 → 保持原值并标记歧义，等用户选
-                                st.selectedModel != null && resolved == null && models.isAmbiguous(st.selectedModel) ->
-                                    st.copy(models = models, modelAmbiguous = true)
-                                resolved != null -> st.copy(models = models, selectedModel = resolved.fullId, modelAmbiguous = false)
-                                st.selectedModel == null -> st.copy(models = models, selectedModel = models.firstOrNull()?.fullId)
-                                else -> st.copy(models = models)
-                            }
+                            // 模型列表到达：把当前选中的 ref（可能来自先到的会话/默认模型缓存，
+                            // 也可能是旧格式纯 id）收敛一次 —— 唯一命中就升级成复合键，歧义保持原值。
+                            st.copy(
+                                models = models,
+                                selectedModel = st.selectedModel?.let { upgradeModelRef(models, it) }
+                                    ?: models.firstOrNull()?.fullId,
+                            )
                         }
                     }
                 } catch (_: Exception) { }
@@ -169,12 +188,11 @@ class ChatViewModel(
                         if (sessionId == null) {
                             _state.update { st ->
                                 // 默认模型也可能是旧格式纯 id：能唯一解析就升级成复合键，
-                                // 解析不出就保留原值（可能是还没加载到的模型 id）
-                                val fallback = st.models.firstOrNull()?.fullId
-                                val resolved = st.models.resolveModel(settings.defaultModel)
+                                // 解析不出（歧义或模型还没加载到）就保留原值。
+                                val raw = settings.defaultModel.ifBlank { st.models.firstOrNull()?.fullId.orEmpty() }
+                                    .ifBlank { null }
                                 st.copy(
-                                    selectedModel = resolved?.fullId
-                                        ?: settings.defaultModel.ifBlank { fallback.orEmpty() }.ifBlank { null },
+                                    selectedModel = raw?.let { upgradeModelRef(st.models, it) },
                                     isLoading = false,
                                 )
                             }
@@ -199,13 +217,12 @@ class ChatViewModel(
                     repository.cachedSession(sessionId).collect { session ->
                         _state.update { st ->
                             // session.model 由服务端存储：新会话已是 provider/id 复合键，
-                            // 老会话可能是纯 id → 唯一命中就升级，多个同名标记歧义等用户选
-                            val resolved = st.models.resolveModel(session.model)
+                            // 老会话可能是纯 id → 唯一命中就升级，多个同名保持原值等用户选
+                            // （歧义态由 ChatUiState.modelAmbiguous 派生，不在这里写）
                             st.copy(
                                 sessionId = session.id,
                                 title = session.title,
-                                selectedModel = resolved?.fullId ?: session.model,
-                                modelAmbiguous = st.models.isAmbiguous(session.model),
+                                selectedModel = upgradeModelRef(st.models, session.model),
                                 selectedMode = session.mode ?: "",
                                 messages = session.messages.map { msg ->
                                     UiMessage(
@@ -258,9 +275,13 @@ class ChatViewModel(
         }
     }
 
-    /** model 为复合键 `provider/id`（见 ModelEntry.fullId）；显式选择后消除歧义态。 */
+    /**
+     * model 为复合键 `provider/id`（见 ModelEntry.fullId）。
+     * 显式选择后歧义态自然消除 —— `modelAmbiguous` 由 (models, selectedModel) 派生，
+     * 选中值命中某个 `fullId` 即不再歧义，无需额外清标志位。
+     */
     fun onModelSelected(model: String) {
-        _state.update { it.copy(selectedModel = model, modelAmbiguous = false) }
+        _state.update { it.copy(selectedModel = model) }
     }
     fun onModeSelected(mode: String) { _state.update { it.copy(selectedMode = mode) } }
     fun toggleAutoConsent() {

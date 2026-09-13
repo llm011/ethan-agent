@@ -282,7 +282,7 @@ fun ChatScreen(
                 Text("模型", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (state.modelAmbiguous) {
                     Text(
-                        "模型「${state.selectedModel}」在多个 provider 下重名，请重新选择要使用的模型",
+                        "该模型在多个 provider 下重名，请从下方列表选择要使用的 provider",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -291,7 +291,15 @@ fun ChatScreen(
                 ExposedDropdownMenuBox(expanded = modelExpanded, onExpandedChange = { modelExpanded = it }) {
                     AssistChip(
                         onClick = { modelExpanded = true },
-                        label = { Text(state.selectedModel ?: "选择模型", maxLines = 1) },
+                        // 歧义时裸 id 并不在候选列表里，直接展示会让用户以为已经选中；
+                        // 与 web 的 unmatchedLabel 一致，改成「请指定一个」的提示文案
+                        label = {
+                            Text(
+                                if (state.modelAmbiguous) "有多个 provider 提供该模型，请指定一个"
+                                else state.selectedModel ?: "选择模型",
+                                maxLines = 1,
+                            )
+                        },
                         modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                     )
                     ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
@@ -662,6 +670,37 @@ fun ChatScreen(
                     )
                 }
 
+                // 旧会话/默认模型存的纯 id 命中多个同名模型：列出候选让用户一键指定 provider，
+                // 选择前禁用发送（与 web/desktop chat-input 的候选按钮同做法）
+                if (state.modelAmbiguous) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 4.dp)
+                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            "模型「${state.selectedModel}」在多个 provider 下重名，请选择要使用的：",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            state.ambiguousCandidates.forEach { model ->
+                                AssistChip(
+                                    onClick = { onModelSelected(model.fullId) },
+                                    label = { Text(model.fullId, style = MaterialTheme.typography.bodySmall) },
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.surface,
@@ -767,21 +806,24 @@ fun ChatScreen(
                                         }
                                     }
                                     else -> {
+                                        // 有内容且模型不歧义才可发送（歧义时按钮同时变灰，避免"看起来能点"）
+                                        val canSend = (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) &&
+                                            !state.modelAmbiguous
                                         Surface(
                                             shape = CircleShape,
-                                            color = if (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) MaterialTheme.colorScheme.primary
+                                            color = if (canSend) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                             modifier = Modifier.size(36.dp),
                                         ) {
                                             IconButton(
                                                 onClick = onSend,
                                                 // 模型歧义时禁用发送，强制用户先显式选一个 provider
-                                                enabled = (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) && !state.modelAmbiguous,
+                                                enabled = canSend,
                                             ) {
                                                 Icon(
                                                     Icons.AutoMirrored.Filled.Send,
                                                     contentDescription = "发送",
-                                                    tint = if (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) MaterialTheme.colorScheme.onPrimary
+                                                    tint = if (canSend) MaterialTheme.colorScheme.onPrimary
                                                         else MaterialTheme.colorScheme.onSurfaceVariant,
                                                     modifier = Modifier.size(18.dp).offset(x = 1.dp),
                                                 )
