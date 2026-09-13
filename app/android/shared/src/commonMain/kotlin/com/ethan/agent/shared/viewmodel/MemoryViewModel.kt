@@ -95,15 +95,37 @@ data class MemoryUiState(
     // Facts
     val allFacts: List<Fact> = emptyList(),
     val facts: List<FactItem> = emptyList(),
+    /** 事实列表还有没有下一页（下滑加载更多用）。 */
+    val factsHasMore: Boolean = false,
+    val factsLoading: Boolean = false,
+    /**
+     * 下一页要从服务端的第几条开始拉。
+     *
+     * **不能**用 `facts.size` 当 offset —— [toFactItems] 会把 superseded 的事实
+     * 滤掉（后端 `/facts` 的 status 过滤同时包含 active 和 superseded），本地条数
+     * 因此可能小于服务端已经翻过的条数。拿本地条数当 offset，只要第一页里有一条
+     * superseded，第二页就会把同样的记录再拉一遍，然后一直原地打转。
+     *
+     * 这里记的是「服务端已消费的条数」，与 UI 上显示多少条无关。
+     */
+    val factsOffset: Int = 0,
     // Insights
     val insights: List<InsightItem> = emptyList(),
     val insightsDate: String = "",
+    val insightsHasMore: Boolean = false,
+    val insightsLoading: Boolean = false,
+    /** 同 [factsOffset]：服务端已消费的条数（by-date 分支会丢解码失败的项）。 */
+    val insightsOffset: Int = 0,
     // Procedures
     val procedures: List<Procedure> = emptyList(),
     // Records
     val records: List<StructuredRecord> = emptyList(),
     val recordsFilter: RecordsFilter = RecordsFilter(),
     val recordsSearch: String = "",
+    val recordsHasMore: Boolean = false,
+    val recordsLoading: Boolean = false,
+    /** 同 [factsOffset]：服务端已消费的条数（追加时会按 id 去重，本地条数会偏小）。 */
+    val recordsOffset: Int = 0,
     // ── 共用编辑器（事实 / 流程 / 结构化记忆）──────────────────────────────
     /** 非空时，编辑页盖在列表之上。 */
     val editing: MemoryEditTarget? = null,
@@ -171,6 +193,9 @@ class MemoryViewModel(
             _state.update { it.copy(isLoading = true) }
             launch {
                 try {
+                    // 缓存先渲染（离线也有内容），再拉第一页替换。
+                    // 注意：缓存 write 仍在 cachedFacts() 里、写的是全量 list，
+                    // 分页结果绝不能写回缓存 —— 一页覆盖全量会让离线只剩当前页。
                     repository.cachedFacts().collect { allFacts ->
                         _state.update {
                             it.copy(allFacts = allFacts, facts = allFacts.toFactItems(), isLoading = false)
@@ -182,6 +207,7 @@ class MemoryViewModel(
                     }
                 }
             }
+            launch { loadFactsFirstPage() }
             launch {
                 try {
                     repository.cachedProcedures().collect { procedures ->
@@ -192,6 +218,65 @@ class MemoryViewModel(
                         _state.update { it.copy(error = repository.friendlyError(e)) }
                     }
                 }
+            }
+        }
+    }
+
+    // ── Facts 分页 ─────────────────────────────────────────────────────────────
+
+    /**
+     * 拉事实第一页。
+     *
+     * 事实是四个 tab 里最可能真正变长的（上限 1000），所以走分页接口而不是
+     * 一次性全量。第一页成功后用 [replaceHeadKeepLater] 覆盖：**保留**用户已经
+     * 翻出来的后续页 —— 编辑/删除后重新拉第一页时，直接整表替换会让那些页凭空消失。
+     */
+    private suspend fun loadFactsFirstPage() {
+        _state.update { it.copy(factsLoading = true) }
+        try {
+            val page = repository.getFactsPage(limit = MEMORY_PAGE, offset = 0)
+            val fresh = page.facts.toFactItems()
+            _state.update {
+                val merged = if (it.facts.size > fresh.size) {
+                    replaceHeadKeepLater(it.facts, fresh, { f -> f.recordId })
+                } else {
+                    fresh
+                }
+                it.copy(
+                    allFacts = page.facts,
+                    facts = merged,
+                    factsOffset = page.facts.size,
+                    factsHasMore = hasMoreAfter(page.facts, page.total, offset = 0),
+                    factsLoading = false,
+                )
+            }
+        } catch (e: Exception) {
+            _state.update { it.copy(factsLoading = false, error = repository.friendlyError(e)) }
+        }
+    }
+
+    /** 事实列表滚到底：拉下一页追加。 */
+    fun loadMoreFacts() {
+        val s = _state.value
+        if (s.factsLoading || !s.factsHasMore) return
+        _state.update { it.copy(factsLoading = true) }
+        viewModelScope.launch {
+            try {
+                // 用服务端口径的 offset，不是 facts.size —— 后者被 superseded
+                // 过滤影响，会偏小（见 MemoryUiState.factsOffset 的注释）。
+                val offset = s.factsOffset
+                val page = repository.getFactsPage(limit = MEMORY_PAGE, offset = offset)
+                val appended = page.facts.toFactItems()
+                _state.update { st ->
+                    st.copy(
+                        facts = appendPage(st.facts, appended, { f -> f.recordId }),
+                        factsOffset = offset + page.facts.size,
+                        factsHasMore = hasMoreAfter(page.facts, page.total, offset = offset),
+                        factsLoading = false,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(factsLoading = false, error = repository.friendlyError(e)) }
             }
         }
     }
@@ -327,18 +412,72 @@ class MemoryViewModel(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val items = if (date.isBlank()) {
-                    repository.getInsights(limit = 50).items
-                } else {
-                    repository.getInsightsByDate(date).items.mapNotNull { el ->
-                        try {
-                            kotlinx.serialization.json.Json.decodeFromJsonElement(InsightItem.serializer(), el)
-                        } catch (_: Exception) { null }
-                    }
+                val page = fetchInsightsPage(offset = 0)
+                _state.update {
+                    it.copy(
+                        insights = page.items,
+                        insightsOffset = page.rawCount,
+                        insightsHasMore = hasMoreAfter(page.items, page.total, offset = 0),
+                        isLoading = false,
+                    )
                 }
-                _state.update { it.copy(insights = items, isLoading = false) }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    /**
+     * 拉一页永久记忆。两条分支（全部 / 指定日期）形状对齐，调用方不用分别处理。
+     *
+     * [rawCount] 是**服务端这一页返回了几条**（解码前），不是 [items] 的长度：
+     * by-date 分支要逐条解码 JsonElement，解码失败的会被 `mapNotNull` 丢掉，
+     * 拿 [items] 的长度当 offset 会越翻越偏、把后面的条目整段跳过。
+     */
+    private class InsightsPage(
+        val items: List<InsightItem>,
+        val total: Int?,
+        val rawCount: Int,
+    )
+
+    private suspend fun fetchInsightsPage(offset: Int): InsightsPage {
+        val date = _state.value.insightsDate
+        // 有日期 → 走 by-date（一天通常 1-2 条，但接口已支持分页，两条分支
+        // 形状对齐后这里能共用同一套「还有没有下一页」判断）
+        return if (date.isBlank()) {
+            val r = repository.getInsights(limit = MEMORY_PAGE, offset = offset)
+            InsightsPage(r.items, r.total, r.items.size)
+        } else {
+            val r = repository.getInsightsByDate(date, limit = MEMORY_PAGE, offset = offset)
+            val decoded = r.items.mapNotNull { el ->
+                try {
+                    kotlinx.serialization.json.Json.decodeFromJsonElement(InsightItem.serializer(), el)
+                } catch (_: Exception) { null }
+            }
+            InsightsPage(decoded, r.total, r.items.size)
+        }
+    }
+
+    /** 永久记忆滚到底：拉下一页追加。 */
+    fun loadMoreInsights() {
+        val s = _state.value
+        if (s.insightsLoading || !s.insightsHasMore) return
+        _state.update { it.copy(insightsLoading = true) }
+        viewModelScope.launch {
+            try {
+                // 服务端口径的 offset，不是 insights.size（见 InsightsPage.rawCount）
+                val offset = s.insightsOffset
+                val page = fetchInsightsPage(offset = offset)
+                _state.update {
+                    it.copy(
+                        insights = appendPage(it.insights, page.items, { i -> i.id }),
+                        insightsOffset = offset + page.rawCount,
+                        insightsHasMore = hasMoreAfter(page.items, page.total, offset = offset),
+                        insightsLoading = false,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(insightsLoading = false, error = repository.friendlyError(e)) }
             }
         }
     }
@@ -356,19 +495,65 @@ class MemoryViewModel(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val items = if (q.isNotBlank()) {
-                    repository.searchRecords(query = q, domain = filter.domain, status = filter.status).items
-                } else {
-                    repository.getRecords(
-                        type = filter.type,
-                        status = filter.status,
-                        domain = filter.domain,
-                        limit = 50,
+                if (q.isNotBlank()) {
+                    // 搜索走 /records/search，该接口**没有 offset**（FTS 排序 + 无游标，
+                    // 分页要让 FTS 稳定排序，是独立的一件事），所以搜索结果不分页。
+                    val items = repository.searchRecords(
+                        query = q, domain = filter.domain, status = filter.status,
                     ).items
+                    _state.update { it.copy(records = items, recordsHasMore = false, isLoading = false) }
+                    return@launch
                 }
-                _state.update { it.copy(records = items, isLoading = false) }
+                val page = repository.getRecords(
+                    type = filter.type,
+                    status = filter.status,
+                    domain = filter.domain,
+                    limit = MEMORY_PAGE,
+                    offset = 0,
+                )
+                _state.update {
+                    it.copy(
+                        records = page.items,
+                        recordsOffset = page.items.size,
+                        recordsHasMore = hasMoreAfter(page.items, page.total, offset = 0),
+                        isLoading = false,
+                    )
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    /** 结构化记忆滚到底：拉下一页追加。搜索中不分页（接口没有 offset）。 */
+    fun loadMoreRecords() {
+        val s = _state.value
+        if (s.recordsLoading || !s.recordsHasMore || s.recordsSearch.isNotBlank()) return
+        _state.update { it.copy(recordsLoading = true) }
+        viewModelScope.launch {
+            try {
+                val filter = s.recordsFilter
+                // 服务端口径的 offset，不是 records.size —— 追加时按 id 去重，
+                // 后端重排时下一遍可能又发来已加载的行，本地条数会落后于 offset，
+                // 用本地条数会原地打转。
+                val offset = s.recordsOffset
+                val page = repository.getRecords(
+                    type = filter.type,
+                    status = filter.status,
+                    domain = filter.domain,
+                    limit = MEMORY_PAGE,
+                    offset = offset,
+                )
+                _state.update {
+                    it.copy(
+                        records = appendPage(it.records, page.items, { r -> r.id }),
+                        recordsOffset = offset + page.items.size,
+                        recordsHasMore = hasMoreAfter(page.items, page.total, offset = offset),
+                        recordsLoading = false,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(recordsLoading = false, error = repository.friendlyError(e)) }
             }
         }
     }

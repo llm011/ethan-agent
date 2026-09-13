@@ -25,6 +25,10 @@ data class InsightsListResponse(
 data class InsightsByDateResponse(
     val date: String = "",
     val items: List<JsonElement> = emptyList(),
+    /** 该日总条数（与 /insights 对齐，前端两条分支共用分页逻辑）。 */
+    val total: Int = 0,
+    val limit: Int = 0,
+    val offset: Int = 0,
 )
 
 @Serializable
@@ -62,7 +66,13 @@ data class StructuredRecord(
 )
 
 @Serializable
-data class RecordListResponse(val items: List<StructuredRecord> = emptyList())
+data class RecordListResponse(
+    val items: List<StructuredRecord> = emptyList(),
+    /** 过滤后的总条数；0 且 items 非空表示老后端没返回（按页大小兜底）。 */
+    val total: Int = 0,
+    val limit: Int = 0,
+    val offset: Int = 0,
+)
 
 @Serializable
 data class RecordDetailResponse(

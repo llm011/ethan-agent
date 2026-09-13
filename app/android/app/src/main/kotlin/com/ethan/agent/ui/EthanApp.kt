@@ -307,6 +307,9 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onHideSummaries = vm::hideSummaries,
                     onSummariesDateChange = vm::setSummariesDate,
                     onLoadMoreSummaries = vm::loadMoreSummaries,
+                    onLoadMoreFacts = vm::loadMoreFacts,
+                    onLoadMoreInsights = vm::loadMoreInsights,
+                    onLoadMoreRecords = vm::loadMoreRecords,
                 )
             }
 

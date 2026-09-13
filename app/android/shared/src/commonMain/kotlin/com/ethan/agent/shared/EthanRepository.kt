@@ -24,6 +24,7 @@ import com.ethan.agent.core.model.DocMeta
 import com.ethan.agent.core.model.Episode
 import com.ethan.agent.core.model.Fact
 import com.ethan.agent.core.model.FactUpdateRequest
+import com.ethan.agent.core.model.FactsResponse
 import com.ethan.agent.core.model.KnowledgeCreateRequest
 import com.ethan.agent.core.model.KnowledgeItem
 import com.ethan.agent.core.model.KnowledgeUpdateRequest
@@ -397,6 +398,16 @@ class EthanRepository(
         return api.getFacts().facts
     }
 
+    /**
+     * 分页拉取事实（带 total，供「还有没有下一页」判断）。
+     *
+     * 与 [cachedFacts] 分开：缓存写的是**全量** list，分页结果绝不能写进去 ——
+     * 一页覆盖全量会让离线打开只剩当前页。分页路径不碰缓存。
+     */
+    suspend fun getFactsPage(limit: Int, offset: Int): FactsResponse {
+        return api.getFacts(limit = limit, offset = offset)
+    }
+
     suspend fun updateFact(id: String, content: String) {
         api.updateFact(id, FactUpdateRequest(content))
     }
@@ -554,8 +565,12 @@ class EthanRepository(
         return api.getInsights(limit, offset)
     }
 
-    suspend fun getInsightsByDate(dateStr: String): InsightsByDateResponse {
-        return api.getInsightsByDate(dateStr)
+    suspend fun getInsightsByDate(
+        dateStr: String,
+        limit: Int? = null,
+        offset: Int? = null,
+    ): InsightsByDateResponse {
+        return api.getInsightsByDate(dateStr, limit = limit, offset = offset)
     }
 
     suspend fun consolidateMemory(): ConsolidateResponse {
