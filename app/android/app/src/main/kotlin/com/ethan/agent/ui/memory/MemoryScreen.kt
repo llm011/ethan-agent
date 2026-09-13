@@ -6,10 +6,6 @@ import com.ethan.agent.shared.viewmodel.MemoryEditTarget
 import com.ethan.agent.shared.viewmodel.MemoryTab
 import com.ethan.agent.shared.viewmodel.RecordsFilter
 import com.ethan.agent.shared.viewmodel.recordId
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -72,13 +68,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -107,8 +100,6 @@ import com.ethan.agent.ui.components.SnackbarContainer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -185,14 +176,6 @@ fun MemoryScreen(
 
     var factsSearchQuery by remember { mutableStateOf("") }
 
-    // 搜索框收起状态（事实 / 结构化记忆两个 tab 共用同一套交互）：
-    // 往下滑收起（tab 栏右侧出现小放大镜），往上滑或回到顶部再展开。
-    // 切 tab 时复位 —— 在别的 tab 收起的图标带过来会让人以为这页的搜索没了。
-    var factsSearchCollapsed by remember { mutableStateOf(false) }
-    var factsSearchForcedOpen by remember { mutableStateOf(false) }
-    var recordsSearchCollapsed by remember { mutableStateOf(false) }
-    var recordsSearchForcedOpen by remember { mutableStateOf(false) }
-
     EthanScaffold(
         topBar = {
             EthanTopBar(
@@ -224,26 +207,8 @@ fun MemoryScreen(
             EthanScrollableTabBar(
                 tabs = MemoryTab.entries.toList(),
                 selectedTab = state.tab,
-                onTabSelected = { tab ->
-                    // 切 tab 时把两个搜索框都复位成展开 —— 在别的 tab 收起的图标
-                    // 带过来会让人以为这页的搜索没了。
-                    factsSearchCollapsed = false
-                    factsSearchForcedOpen = false
-                    recordsSearchCollapsed = false
-                    recordsSearchForcedOpen = false
-                    onTabChange(tab)
-                },
+                onTabSelected = { tab -> onTabChange(tab) },
                 labelOf = { it.title },
-                action = when {
-                    state.tab == MemoryTab.Facts && factsSearchCollapsed -> {
-                        // 收起后搜索的入口挪到这儿：点一下展开
-                        { SearchActionButton(onClick = { factsSearchForcedOpen = true }) }
-                    }
-                    state.tab == MemoryTab.Records && recordsSearchCollapsed -> {
-                        { SearchActionButton(onClick = { recordsSearchForcedOpen = true }) }
-                    }
-                    else -> null
-                },
             )
 
             if (state.isLoading) {
@@ -257,13 +222,6 @@ fun MemoryScreen(
                     searchQuery = factsSearchQuery,
                     onSearchChange = { factsSearchQuery = it },
                     onSelect = onSelectFact,
-                    collapsed = factsSearchCollapsed && !factsSearchForcedOpen,
-                    onCollapsedChange = { collapsed ->
-                        factsSearchCollapsed = collapsed
-                        // 用户手动点开搜索后，别让「强制展开」标记永久压着滚动折叠，
-                        // 下一次下滑仍应能收起。
-                        if (collapsed) factsSearchForcedOpen = false
-                    },
                 )
 
                 MemoryTab.Insights -> InsightsTab(
@@ -286,13 +244,6 @@ fun MemoryScreen(
                     onEdit = onSelectRecord,
                     onConfirm = onConfirmRecord,
                     onDelete = onDeleteRecord,
-                    collapsed = recordsSearchCollapsed && !recordsSearchForcedOpen,
-                    onCollapsedChange = { collapsed ->
-                        recordsSearchCollapsed = collapsed
-                        // 同「事实」：手动点开搜索后清掉强制展开标记，
-                        // 下一次下滑仍应能收起。
-                        if (collapsed) recordsSearchForcedOpen = false
-                    },
                 )
             }
         }
@@ -417,178 +368,93 @@ private fun EditorMetaRow(target: MemoryEditTarget) {
 
 // ── Facts tab ────────────────────────────────────────────────────────────────
 
-/**
- * 搜索框收起后，tab 栏右侧露出的放大镜。
- *
- * 「事实」和「结构化记忆」两个 tab 共用 —— 收起后的入口长得一样、位置一样，
- * 点一下都是把它那一页的搜索框重新展开。
- */
-@Composable
-private fun SearchActionButton(onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
-        Icon(
-            Icons.Default.Search,
-            contentDescription = "搜索",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
 @Composable
 private fun FactsListContent(
     facts: List<FactItem>,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     onSelect: (FactItem) -> Unit,
-    /** 列表是否已下滑到底 —— true 时把搜索框收起来，只留 tab 栏右侧的小图标。 */
-    collapsed: Boolean = false,
-    onCollapsedChange: (Boolean) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
 
-    // 滚动驱动的收起/展开。
-    //
-    // 累积的是「**相对起点**滚了多远」，不是「首项露出多少」——
-    // 位置量会和下面的「收起后把首项对齐到顶部」互相打架：一收起就把列表拉回
-    // 顶部 → 位置量变小 → 又判定成没滚过 → 搜索框弹回来 → 抖动（实测过）。
-    // 行程是个不进反馈环的量：对齐顶部会把 `anchor` 一起重置，但那时已经收起了，
-    // 重置只会让下一次收起重新需要一个完整行程去触发，用户无感。
-    //
-    // [index, offset] 是「列表顶端正对着哪一项、偏了多少像素」，两者相减即绝对位置。
-    val collapseThresholdPx = with(LocalDensity.current) { 48.dp.toPx() }
-    LaunchedEffect(listState, collapseThresholdPx) {
-        var anchor = 0f          // 下行行程的起点（绝对位置）
-        var collapsedAt = 0f     // 收起时记住的位置
-        var armed = false        // 是否正在累计下行行程
-        snapshotFlow {
-            val first = listState.layoutInfo.visibleItemsInfo.firstOrNull()
-                ?: return@snapshotFlow Pair(Int.MIN_VALUE, 0f)
-            Pair(first.index, first.offset.toFloat())
-        }
-            .distinctUntilChanged()
-            .collect { (index, offset) ->
-                val pos = index * 1_000_000f + offset
-
-                // 回到顶部（首项完好地停在顶端）→ 展开，并复位检测
-                if (index == 0 && offset >= 0f) {
-                    armed = false
-                    onCollapsedChange(false)
-                    return@collect
-                }
-                if (!listState.isScrollInProgress) return@collect
-
-                if (!armed) {
-                    armed = true
-                    anchor = if (collapsed) collapsedAt else pos
-                }
-                // 往下滑了足够远 → 收起（已经收起就不重复触发）
-                if (!collapsed && pos - anchor >= collapseThresholdPx) {
-                    collapsedAt = pos
-                    onCollapsedChange(true)
-                }
-                // 往回滑回来（相对收起点）→ 展开
-                if (collapsed && collapsedAt - pos >= collapseThresholdPx) {
-                    armed = false
-                    onCollapsedChange(false)
-                }
-            }
+    val filteredFacts = if (searchQuery.isBlank()) {
+        facts
+    } else {
+        facts.filter { it.fact.content.contains(searchQuery, ignoreCase = true) }
     }
 
-    // 收起的那一刻，把「当前停在列表顶端的那一项」对齐到顶端。
+    // 搜索框是**列表的第一项**，跟着内容一起滑走。
     //
-    // 否则搜索框让出的高度会让内容「悬」在半空 —— 顶端那张卡片只剩下半截，
-    // 看着就像第一条不见了（用户反馈的原话）。
+    // 之前它是个常驻/可收起的头部，为此写过好几版滚动检测：位置量、行程量、
+    // 收起后 animateScrollToItem 对齐……全都在和用户的手指抢滚动位置。
+    // 根因是「收起会改变列表视口高度」—— 视口一变，「顶端对着哪一项」就变，
+    // 内容被顶走（用户反馈「第一条永远看不到」），而且一旦想用代码把位置
+    // 掰回去，就会和手势打架（滑不动、被拽回、收起又立刻展开）。
     //
-    // 注意对齐的**不是第 0 项**：用户一滑可能已经滑过好几张卡片，硬拉回第 0 项
-    // 等于把人拽回列表开头。对齐首项只是把它从「被切一半」变成「完整显示」，
-    // 视觉上内容几乎没动，卡片却容易读了。
-    //
-    // 由 collapsed 边沿触发，不塞进上面的方向检测里 —— 后者会让「对齐」影响
-    // 检测的输入，形成抖动（实测过）。
-    // 必须**等收起动画走完**再对齐：动画这 180ms 里列表可视高度一直在长高，
-    // 对齐早了，多出来的高度会从上方把上一张卡片的尾巴露出来（实测就是
-    // 顶栏下面挂着半行字）。等高度定下来再对，才算真的对齐。
-    var wasCollapsed by remember { mutableStateOf(false) }
-    LaunchedEffect(collapsed) {
-        if (collapsed && !wasCollapsed) {
-            delay(200)
-            // 只有首项确实被切掉一截时才动；完好对齐时不动，避免无谓的滚动动画
-            if (listState.firstVisibleItemScrollOffset > 0) {
-                listState.animateScrollToItem(listState.firstVisibleItemIndex)
-            }
-        }
-        wasCollapsed = collapsed
-    }
-
-    Column(Modifier.fillMaxSize()) {
-        // 搜索框：往下滑时收起。
-        //
-        // 用 AnimatedVisibility + shrink/expandVertically 而不是切换 height ——
-        // 动画只影响这一行自身的高度，不碰 LazyColumn 的滚动位置，
-        // 所以收起/展开时列表内容不会跳。
-        AnimatedVisibility(
-            visible = !collapsed,
-            enter = expandVertically(animationSpec = tween(180)),
-            exit = shrinkVertically(animationSpec = tween(180)),
-        ) {
-            OutlinedTextField(
+    // 放进列表里当第一项，这些问题一次性消失：没有收缩动画、没有视口变化、
+    // 没有任何 animateScrollToItem。搜索框自己也是被 LazyColumn 虚拟化管理的，
+    // 滑上去就回收，长列表也不会因为它在顶上而多留一块空白。
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(key = "__search__") {
+            SearchField(
                 value = searchQuery,
                 onValueChange = onSearchChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp),
-                placeholder = { Text("搜索记忆，支持 Markdown...") },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                singleLine = true,
-                shape = MaterialTheme.shapes.small,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                ),
+                placeholder = "搜索记忆，支持 Markdown...",
             )
         }
 
-        val filteredFacts = if (searchQuery.isBlank()) {
-            facts
-        } else {
-            facts.filter { it.fact.content.contains(searchQuery, ignoreCase = true) }
-        }
-
         if (filteredFacts.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    if (searchQuery.isBlank()) "暂无事实记忆" else "未找到匹配的记忆",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            item(key = "__empty__") {
+                Box(
+                    Modifier.fillMaxWidth().padding(top = 48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (searchQuery.isBlank()) "暂无事实记忆" else "未找到匹配的记忆",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            return@Column
-        }
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            // 搜索框在时上边距给 4dp（它自己带了 6dp 下边距，再叠 8dp 会显空）；
-            // 收起后 4dp 太贴，第一张卡片会紧挨 tab 栏，所以补到 8dp。
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = if (collapsed) 8.dp else 4.dp,
-                bottom = 24.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+        } else {
             items(filteredFacts, key = { it.index }) { item ->
                 FactListCard(item, onClick = { onSelect(item) })
             }
         }
     }
+}
+
+/** 列表里的搜索框。事实 / 结构化记忆两个 tab 共用，外观一致。 */
+@Composable
+private fun SearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text(placeholder) },
+        leadingIcon = {
+            Icon(
+                Icons.Default.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        singleLine = true,
+        shape = MaterialTheme.shapes.small,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+        ),
+    )
 }
 
 @Composable
@@ -808,135 +674,57 @@ private fun RecordsTab(
     onEdit: (StructuredRecord) -> Unit,
     onConfirm: (String) -> Unit,
     onDelete: (String) -> Unit,
-    /** 列表是否已下滑到底 —— true 时把「筛选 + 搜索」整块收起来，只留 tab 栏右侧的小图标。 */
-    collapsed: Boolean = false,
-    onCollapsedChange: (Boolean) -> Unit = {},
 ) {
     val chipsScrollState = rememberScrollState()
     val listState = rememberLazyListState()
 
-    // 滚动驱动的收起/展开 —— 与 FactsListContent 同一套判据，理由见那边的注释。
-    val collapseThresholdPx = with(LocalDensity.current) { 48.dp.toPx() }
-    LaunchedEffect(listState, collapseThresholdPx) {
-        var anchor = 0f
-        var collapsedAt = 0f
-        var armed = false
-        snapshotFlow {
-            val first = listState.layoutInfo.visibleItemsInfo.firstOrNull()
-                ?: return@snapshotFlow Pair(Int.MIN_VALUE, 0f)
-            Pair(first.index, first.offset.toFloat())
-        }
-            .distinctUntilChanged()
-            .collect { (index, offset) ->
-                val pos = index * 1_000_000f + offset
-                if (index == 0 && offset >= 0f) {
-                    armed = false
-                    onCollapsedChange(false)
-                    return@collect
-                }
-                if (!listState.isScrollInProgress) return@collect
-                if (!armed) {
-                    armed = true
-                    anchor = if (collapsed) collapsedAt else pos
-                }
-                if (!collapsed && pos - anchor >= collapseThresholdPx) {
-                    collapsedAt = pos
-                    onCollapsedChange(true)
-                }
-                if (collapsed && collapsedAt - pos >= collapseThresholdPx) {
-                    armed = false
-                    onCollapsedChange(false)
-                }
-            }
-    }
+    val statuses = listOf(
+        null to "全部", "pending" to "候选",
+        "confirmed" to "已确认", "superseded" to "已替代",
+    )
 
-    // 收起后把停在顶端的那一项对齐到顶端（同 FactsListContent，理由见那边 ——
-    // 尤其是「要等动画走完再对齐」这一点）。
-    var wasCollapsed by remember { mutableStateOf(false) }
-    LaunchedEffect(collapsed) {
-        if (collapsed && !wasCollapsed) {
-            delay(200)
-            if (listState.firstVisibleItemScrollOffset > 0) {
-                listState.animateScrollToItem(listState.firstVisibleItemIndex)
-            }
-        }
-        wasCollapsed = collapsed
-    }
-
-    Column(Modifier.fillMaxSize()) {
-        // 筛选 chips + 搜索框整体作为一个「头部」收起/展开。
-        //
-        // 之前这里是：chips 行常驻 + 一个切换 searchVisible 的放大镜按钮 + 单独
-        // AnimatedVisibility 的搜索框。现在改成和「事实」tab 一致的下滑收起，
-        // 两块一起走，收起后入口统一收到右上角 tab 栏的放大镜上。
-        AnimatedVisibility(
-            visible = !collapsed,
-            enter = expandVertically(animationSpec = tween(180)),
-            exit = shrinkVertically(animationSpec = tween(180)),
-        ) {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val statuses = listOf(
-                        null to "全部", "pending" to "候选",
-                        "confirmed" to "已确认", "superseded" to "已替代",
+    // 筛选 chips + 搜索框都是**列表的开头两项**，跟着内容一起滑走。
+    // 和「事实」tab 同一套做法，理由见 FactsListContent 上方的注释 ——
+    // 核心就一句：不改变列表视口高度，就不会和用户的滚动位置打架。
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(key = "__chips__") {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(chipsScrollState),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                statuses.forEach { (value, label) ->
+                    FilterChip(
+                        selected = filter.status == value,
+                        onClick = { onFilterChange(filter.copy(status = value)) },
+                        label = { Text(label) },
                     )
-                    Row(
-                        modifier = Modifier.weight(1f).horizontalScroll(chipsScrollState),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        statuses.forEach { (value, label) ->
-                            FilterChip(
-                                selected = filter.status == value,
-                                onClick = { onFilterChange(filter.copy(status = value)) },
-                                label = { Text(label) },
-                            )
-                        }
-                    }
                 }
-
-                OutlinedTextField(
-                    value = search,
-                    onValueChange = onSearchChange,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 6.dp),
-                    placeholder = { Text("搜索记录…") },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.small,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                    ),
-                )
             }
+        }
+
+        item(key = "__search__") {
+            SearchField(
+                value = search,
+                onValueChange = onSearchChange,
+                placeholder = "搜索记录…",
+            )
         }
 
         if (records.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无结构化记忆", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            item(key = "__empty__") {
+                Box(
+                    Modifier.fillMaxWidth().padding(top = 48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("暂无结构化记忆", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
-            return@Column
-        }
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            // 顶部间距收到 8dp。这里原本是「chips 行下边距 + Spacer(4dp) + 列表
-            // contentPadding 16dp」三层叠加，卡片离筛选栏老远 —— 用户反馈的
-            // 「离上方有点远、间距太大」就是这个。现在只留一层 8dp。
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+        } else {
             items(records, key = { it.id }) { record ->
                 RecordCard(
                     record = record,
