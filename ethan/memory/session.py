@@ -1114,7 +1114,9 @@ class SessionStore:
                 f"SELECT * FROM (SELECT {_MSG_COLS} FROM messages WHERE {_where} "
                 "ORDER BY id DESC LIMIT ?) ORDER BY id"
             )
-            _params.append(max(1, int(limit)))
+            # limit 缺省（只传了 before）时取「比 before 更早的全部」：SQLite 的
+            # LIMIT -1 就是不限量。不能对 None 直接 int()，那会 TypeError → 500。
+            _params.append(max(1, int(limit)) if limit is not None else -1)
             _params = tuple(_params)
 
         async with self._db.execute(_sql, _params) as cursor:

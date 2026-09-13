@@ -90,6 +90,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - Messages load **one page at a time**: the first screen fetches only the latest 30 and older pages stream in as you scroll up (`limit` / `before` on `GET /sessions/{id}`, with `has_more` / `oldest_id` as the cursor). On the largest real session this took opening a chat from 1602 ms / 9.06 MB down to 10 ms / 304 KB
 - Streaming and pagination coexist safely: finished runs merge the new tail into the already-loaded history instead of replacing it, so pages you scrolled back through never vanish
 - Opening a session renders from a local cache first (IndexedDB on web, localStorage on desktop) while the network response loads in the background; existing inline-base64 cards are converted to asset paths once at startup
+- Page results **merge into the existing cache and never overwrite it** — the cache means "the whole session", so writing just the latest 30 messages would downgrade offline-readable history to a fragment (earlier history becomes permanently unreachable)
 
 **Multi-channel**
 - CLI REPL, Web UI (Next.js), **Android App** (Kotlin/Compose), Lark/Feishu (WebSocket, no public IP required)

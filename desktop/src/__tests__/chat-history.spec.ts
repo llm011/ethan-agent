@@ -15,6 +15,7 @@ import {
   promoteMessageId,
   hasOlderAfterLoad,
   replaceTailKeepOlder,
+  mergeOlderMessagesIntoCache,
 } from "@ethan/shared/chat/history";
 
 type M = { id?: number | string | null; role: string; content: string };
@@ -214,5 +215,47 @@ describe("replaceTailKeepOlder", () => {
     const out = replaceTailKeepOlder(prev, page);
     expect(out.map((x) => x.id)).toEqual([1, 2]);
     expect(out.some((x) => isTempId(x.id))).toBe(false);
+  });
+});
+
+describe("mergeOlderMessagesIntoCache", () => {
+  it("没有缓存时不产生残缺缓存（宁可离线无缓存）", () => {
+    expect(mergeOlderMessagesIntoCache([], [m(50, "user"), m(51, "assistant")])).toBeNull();
+  });
+
+  it("把最近一页并入已有全量缓存，不覆盖更早的历史", () => {
+    const cached = [m(1, "user"), m(2, "assistant"), m(3, "user")];
+    const page = [m(3, "user"), m(4, "assistant"), m(5, "user")];
+    expect(mergeOlderMessagesIntoCache(cached, page)!.map((x) => x.id)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("重叠消息用新页的版本（覆盖流式期间的中间态）", () => {
+    const cached = [m(3, "assistant", "流式中…")];
+    const page = [m(3, "assistant", "定稿内容")];
+    expect(mergeOlderMessagesIntoCache(cached, page)!.map((x) => x.content)).toEqual(["定稿内容"]);
+  });
+
+  it("不把缓存的覆盖范围向更早方向偷偷扩张（否则离线阅读出现空洞）", () => {
+    // 缓存只从 id=5 开始；新页含 1..5。若整页并入，缓存会假装覆盖 1..5 而中间是空的。
+    const cached = [m(5, "user"), m(6, "assistant"), m(7, "user")];
+    const page = [m(1, "user"), m(2, "assistant"), m(3, "user"), m(4, "assistant"), m(5, "user")];
+    expect(mergeOlderMessagesIntoCache(cached, page)!.map((x) => x.id)).toEqual([5, 6, 7]);
+  });
+
+  it("整页都比缓存新时全部并入并保持 id 升序", () => {
+    const out = mergeOlderMessagesIntoCache([m(1, "user")], [m(3, "assistant"), m(2, "user")]);
+    expect(out!.map((x) => x.id)).toEqual([1, 2, 3]);
+  });
+
+  it("空页不动缓存", () => {
+    expect(mergeOlderMessagesIntoCache([m(1, "user")], [])).toBeNull();
+  });
+
+  it("缓存里没有数字 id（拿不到 cutoff）时保守跳过", () => {
+    expect(mergeOlderMessagesIntoCache([m(null, "user")], [m(1, "user")])).toBeNull();
+  });
+
+  it("整页都比缓存旧时不动缓存", () => {
+    expect(mergeOlderMessagesIntoCache([m(9, "user")], [m(1, "user"), m(2, "user")])).toBeNull();
   });
 });

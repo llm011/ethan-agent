@@ -183,7 +183,9 @@ CLI 内部维护 `WorkingMemory` 实例：
 
    - 不传参数 = 全量返回，`has_more` 恒为 `False`（兼容旧前端）
    - `limit`：取最近 N 条（**返回仍是时间正序**，前端不做反转）
-   - `before`：只取 `id < before` 的消息；前端把上一页的 `oldest_id` 原样传回来
+   - `before`：只取 `id < before` 的消息；前端把上一页的 `oldest_id` 原样传回来。
+     `limit` 与 `before` 各自独立可选，**只传 `before` 合法**（= 取全部更早消息，
+     落库层用 SQLite 的 `LIMIT -1` 表示不限；不要对 `None` 直接 `int()`，会 500）
    - `has_more`：还有更早的消息可加载；`oldest_id` 取自**返回集**（只含 user/assistant），
      否则游标会指向一条前端看不见的 tool 消息
 
@@ -202,8 +204,19 @@ CLI 内部维护 `WorkingMemory` 实例：
 `web/lib/session-db.ts`，桌面端走 localStorage），再后台拉网络结果覆盖。缓存是**体验补偿**，
 不能替代上面的体积治理；只写缓存不约束体积，等于把网络开销换成等量的本地 IO 开销。
 
-⚠️ 分页结果**不写入离线缓存**（`fetchSessionPage` 不写 IndexedDB）：缓存的是「整个会话」
-的语义，只存一页会让离线时看到残缺历史。离线仍走 `fetchSession` 的全量/缓存路径。
+⚠️ 分页结果**只合并进已有缓存，绝不覆盖**（`mergeSessionPageIntoCache` →
+`mergeOlderMessagesIntoCache`）：缓存的是「整个会话」的语义，而分页只有最近 30 条——
+直接 `writeSessionDetail` / `writeSessionCache` 会把全量缓存降级成残页，**离线打开长会话
+就只剩 30 条，更早历史永久不可达**（上滚走网络请求，离线必然失败）。首屏与
+`handleRefreshSession` 这两条走 `fetchSessionPage` 的路径都要遵守。规则：
+
+- 没有全量缓存 → 什么都不写（宁可离线无缓存，也不要一份残缺缓存）
+- 按 id 合并，新页优先（覆盖流式期间写入的中间态）
+- 只保留 id ≥ 缓存原本最旧 id 的部分，不把覆盖范围向更早方向偷偷扩张（否则会造出
+  「以为覆盖 1..N、中间却是空洞」的假完整缓存）
+
+纯函数收在 `packages/shared/src/chat/history.ts`，两端共用、有单测（含变异测试）。
+`fetchSession` 的全量路径照旧覆盖写——它是权威的全量数据。
 
 另：侧边栏的取数 effect 以「所在区块」而不是完整 `pathname` 作依赖，避免 `/chat/[id]`
 之间切换时把会话列表/定时任务重新拉一遍。

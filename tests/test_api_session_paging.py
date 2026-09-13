@@ -103,6 +103,21 @@ def test_before_is_exclusive(client, store):
     assert all(mid < ids[4] for mid in got)
 
 
+def test_before_without_limit_returns_all_earlier(client, store):
+    """只传 before 不传 limit：返回全部更早消息，不能 500。
+
+    limit / before 是各自独立的可选参数，契约上允许只传 before。
+    store 层若对 None 直接 int() 会 TypeError → 500（项目没有全局异常处理器兜底）。
+    """
+    ids = _seed(store, n=10)
+    res = client.get("/sessions/s1", params={"before": ids[5]})
+    assert res.status_code == 200
+    body = res.json()
+    assert [m["id"] for m in body["messages"]] == ids[:5]
+    assert body["oldest_id"] == ids[0]
+    assert body["has_more"] is False
+
+
 def test_paging_walks_all_messages_without_gaps_or_dupes(client, store):
     """用 oldest_id 当游标一页页往回翻，能无重无漏覆盖全部消息。
 

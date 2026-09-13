@@ -50,7 +50,7 @@ export function isPersistedId(id: unknown): id is number {
 }
 
 /** 消息的最小形状（只关心 id / role，避免耦合两端各自的 Message 类型细节）。 */
-interface IdentifiedMessage {
+export interface IdentifiedMessage {
   id?: number | string | null;
   role: string;
 }
@@ -156,4 +156,45 @@ export function replaceTailKeepOlder<M extends IdentifiedMessage>(
     (m) => typeof m.id === "number" && (m.id as number) < oldestPageId,
   );
   return carried.length > 0 ? [...carried, ...page] : page;
+}
+
+/**
+ * 把「刚拉到的一页消息」并入已有的**全量**会话缓存。
+ *
+ * 缓存语义是「整个会话」：`fetchSession` 离线时只读它。而首屏 / 静默刷新走的
+ * `fetchSessionPage(limit=30)` 只有最近一页——直接覆盖写会把全量缓存降级成残页，
+ * 离线打开长会话就只剩 30 条，更早历史永久不可达（上滚走网络请求，离线必然失败）。
+ *
+ * 所以分页路径只**合并**、不覆盖，规则：
+ * - `cached` 为空 → 返回 null（调用方保持「无缓存」，宁可离线无缓存也不要残缺缓存）
+ * - 按 id 合并（新页优先，覆盖流式期间写入的中间态）
+ * - 只保留 id >= 缓存原本最旧 id 的部分：不把缓存的覆盖范围向更早方向偷偷扩张，
+ *   否则会出现「以为覆盖 1..N 但中间有空洞」的假完整缓存
+ * - 缓存的条目里没有数字 id（拿不到 cutoff）→ 返回 null，保守跳过
+ *
+ * @returns 新的 messages 数组（已按 id 升序）；null 表示不应改写缓存
+ */
+export function mergeOlderMessagesIntoCache<M extends IdentifiedMessage>(
+  cachedMessages: M[],
+  pageMessages: M[],
+): M[] | null {
+  if (pageMessages.length === 0) return null;
+  if (cachedMessages.length === 0) return null;
+  let cutoff: number | null = null;
+  for (const m of cachedMessages) {
+    if (typeof m.id === "number" && (cutoff === null || m.id < cutoff)) cutoff = m.id;
+  }
+  if (cutoff === null) return null;
+  // 绑成 const：TS 不会把 let 的收窄带进下面的闭包
+  const floor: number = cutoff;
+  const fresh = pageMessages.filter((m) => typeof m.id === "number" && m.id >= floor);
+  if (fresh.length === 0) return null;
+  const byId = new Map<number, M>();
+  for (const m of cachedMessages) {
+    if (typeof m.id === "number") byId.set(m.id, m);
+  }
+  for (const m of fresh) {
+    if (typeof m.id === "number") byId.set(m.id, m);
+  }
+  return [...byId.entries()].sort((a, b) => a[0] - b[0]).map(([, m]) => m);
 }

@@ -33,7 +33,7 @@ import { fetchAgentSettings, type AgentSettings } from "@/lib/api-settings";
 import { fetchOnboardingStatus, type OnboardingStatus } from "@/lib/api-misc";
 import { fetchBackgroundTasks, type BackgroundTask } from "@/lib/api-misc";
 import { useCachedResource } from "@/lib/use-cached-resource";
-import { readSessionCache, writeSessionCache } from "@/lib/session-cache";
+import { mergeSessionPageIntoCache, readSessionCache, writeSessionCache } from "@/lib/session-cache";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
 import { MESSAGE_PAGE_SIZE, isPersistedId, prependOlderMessages, replaceTailKeepOlder } from "@ethan/shared/chat/history";
@@ -372,7 +372,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     // 用 replaceTailKeepOlder 保留用户已上滚翻出来的更早历史，不能整表替换。
     const detail = await fetchSessionPage(sid, { limit: MESSAGE_PAGE_SIZE }).catch(() => null);
     if (!detail) return;
-    writeSessionCache(sid, detail);
+    // 只合并进已有全量缓存，不覆盖（这一页只有最近 30 条）
+    mergeSessionPageIntoCache(sid, detail);
     setSessionTitle(detail.title || "");
     const loaded = mapDetailMessages(detail);
     setMessages((prev) => replaceTailKeepOlder(prev, loaded));
@@ -507,8 +508,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           justFinishedRef.current = null;
           return;
         }
-        // 写入本地缓存
-        writeSessionCache(initialSessionId, detail);
+        // 写入本地缓存：只**合并**进已有全量缓存，不覆盖。
+        // 这一页只有最近 30 条，直接 writeSessionCache 会把整会话缓存降级成残页，
+        // 离线打开长会话就只能看到 30 条、更早历史永久不可达。没有全量缓存时保持没有。
+        mergeSessionPageIntoCache(initialSessionId, detail);
         setLoadingSession(false);
         window.dispatchEvent(new CustomEvent("session:loaded", { detail: { sessionId: initialSessionId } }));
         setActiveSession(initialSessionId);

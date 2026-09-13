@@ -88,6 +88,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 消息**按页加载**：首屏只取最近 30 条，向上滚动时再加载更早的页（`GET /sessions/{id}` 的 `limit` / `before`，配 `has_more` / `oldest_id` 当游标）。实测最大的真实会话，打开从 1602ms / 9.06MB 降到 10ms / 304KB
 - 流式与分页安全共存：一轮生成结束后把新的末尾并入已加载的历史，而不是整表替换——用户上滚翻出来的更早几页不会凭空消失
 - 打开会话先渲染本地缓存（Web 走 IndexedDB、桌面端走 localStorage），网络结果后台覆盖；历史遗留的内联 base64 卡片在启动时一次性转成资产路径
+- 分页结果**只合并进已有缓存、绝不覆盖**——缓存是整个会话的语义，写入最近 30 条会把离线可读的历史降级成残页（更早历史永久不可达）
 
 **多渠道**
 - CLI REPL、Web UI（Next.js）、**Android App**（Kotlin/Compose）、飞书（WebSocket 长连接，无需公网 IP）

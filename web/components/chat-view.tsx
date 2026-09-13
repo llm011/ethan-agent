@@ -36,7 +36,7 @@ import {
   type BackgroundTask,
   type Annotation,
 } from "@/lib/api";
-import { readSessionDetail, updateSessionDetail, writeSessionDetail } from "@/lib/session-db";
+import { mergeSessionPageIntoCache, readSessionDetail, updateSessionDetail } from "@/lib/session-db";
 import { MESSAGE_PAGE_SIZE, isPersistedId, prependOlderMessages, replaceTailKeepOlder } from "@ethan/shared/chat/history";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
@@ -512,8 +512,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         // 首屏只拉了一页：记下后端说的「还有更早的」，上滚时据此决定要不要再请求。
         // has_more 缺失时（老后端 / 缓存）按「拉满一页就还有」保守推断。
         setHasOlder(detail.has_more ?? loaded.length >= MESSAGE_PAGE_SIZE);
-        // 回写离线缓存：下次点开会话可先用缓存立即渲染（SWR）
-        writeSessionDetail(initialSessionId, detail).catch(() => {});
+        // 回写离线缓存：只**合并**进已有全量缓存，不覆盖。
+        // 这一页只有最近 30 条，直接 writeSessionDetail 会把整会话缓存降级成残页，
+        // 离线打开长会话就只能看到 30 条、更早历史永久不可达。
+        // 缓存尚未建立时（没有全量缓存过）保持没有——宁可离线无缓存，也不要残缺缓存。
+        mergeSessionPageIntoCache(initialSessionId, detail).catch(() => {});
 
         if (detail.active_run) {
           _setStreaming(true);
