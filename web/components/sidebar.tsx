@@ -185,7 +185,13 @@ export function Sidebar() {
     (s) => s.updated_at > lastSeenSchedule
   ).length;
 
-  // Re-fetch sessions on pathname change
+  // 侧栏所属「区块」（chat/sessions vs 其它页面）。用它而不是完整 pathname：
+  // 点会话只改 /chat/<id> 的 id，不该触发侧栏重新拉数据——否则每点一次会话都要
+  // 多发 6 个请求（主列表 + 定时/心跳/插件/置顶四组 + schedules），与刚点开的大
+  // 响应抢带宽，正是「点了半天才进去」的元凶之一。
+  const sidebarSection = pathname.startsWith("/chat") || pathname === "/sessions" ? "chat" : "other";
+
+  // Re-fetch sessions when search or section changes
   useEffect(() => {
     const q = sessionSearch.trim();
     const timer = setTimeout(() => {
@@ -197,7 +203,7 @@ export function Sidebar() {
     }, 300);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionSearch, pathname]);
+  }, [sessionSearch, sidebarSection]);
 
   // 定时/心跳/浏览器插件三个分组：各拉前 5 条，30s 低频轮询（不参与 3s 主 poll）
   // fetchGroups 提为组件级函数：handleToggleDone 取消完成时需要立即 refetch——
@@ -231,11 +237,11 @@ export function Sidebar() {
     document.addEventListener("visibilitychange", onVis);
     return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  }, [sidebarSection]);
 
   useEffect(() => {
     fetchSchedules().then(setSchedules).catch(() => {});
-  }, [pathname]);
+  }, [sidebarSection]);
 
   // 获取版本号 + agent_name（挂载时一次）
   useEffect(() => {

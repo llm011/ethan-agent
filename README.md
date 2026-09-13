@@ -85,6 +85,10 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 **Prompt Caching**
 - System prompt split into stable layer / dynamic layer; stable layer cached 5 min, token cost drops to 0.1×
 
+**Session loading**
+- Images read by the agent are stored on disk (`~/.ethan/assets/images/<session_id>/`) and cards carry only a relative path — never inline base64, which is what used to make opening a session take seconds
+- Opening a session renders from a local cache first (IndexedDB on web, localStorage on desktop) while the network response loads in the background; existing inline-base64 cards are converted to asset paths once at startup
+
 **Multi-channel**
 - CLI REPL, Web UI (Next.js), **Android App** (Kotlin/Compose), Lark/Feishu (WebSocket, no public IP required)
 - Lark auto-auth guidance: when a user-token-dependent call (e.g. reading group chat context via `--as user`) fails with an auth-class error (99991663 / 99991661 / `need_user_authorization`), the bot sends a red guidance card to that chat telling the user to run `lark-cli auth login --domain im`. Throttled to once per 5 min per chat; non-auth errors (network / param / not-found) do not trigger it.
@@ -538,6 +542,8 @@ GET  /knowledge/search          # Semantic search
 GET  /ui-resources              # MCP Apps UI resources (SEP-1865): list
 GET  /ui-resources/read?uri=    # MCP Apps UI resource: read HTML + _meta
 ```
+
+`GET /sessions/{id}` returns the whole message history, so its payload size is what decides how fast a session opens. Image cards carry a relative asset path (`assets/images/...`) rather than inline base64 data URIs; a startup migration converts any pre-existing inline cards to asset files.
 
 ---
 

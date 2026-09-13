@@ -1,8 +1,11 @@
 """File Tool — 读取和写入本地文件。"""
 import base64
+import logging
 from pathlib import Path
 
 from ethan.tools.base import BaseTool, ToolResult
+
+logger = logging.getLogger(__name__)
 
 # 图片扩展名 → MIME 映射（按扩展名快速识别）
 _IMAGE_MIME = {
@@ -23,6 +26,32 @@ _MAGIC_MIME = [
     (b"GIF89a", "image/gif"),
     (b"RIFF", "image/webp"),  # RIFF....WEBP
 ]
+
+
+def _persist_image_asset(filename: str, data: bytes, mime: str) -> str | None:
+    """把图片写入会话资产目录，返回可直接给前端 <img> 用的相对 URL。
+
+    返回形如 "assets/images/<session_id>/<file>.png"；无 session 上下文或
+    落盘异常时返回 None，由调用方决定降级策略。
+
+    走 assets 目录而非内联 base64 的原因：卡片数据会随消息持久化到
+    messages.cards / tool_steps，内联一张 1MB 截图会让整个会话的详情响应
+    膨胀到数 MB，前端点开会话要等数秒。落盘后这些端点带 immutable 缓存。
+    """
+    try:
+        from ethan.core.assets import save_image
+        from ethan.core.context import get_session_id
+
+        sid = get_session_id() or "no_session"
+        idx = 0  # 单图场景固定 0；save_image 用时间戳+随机后缀保证唯一
+        segments = save_image(sid, idx, base64.b64encode(data).decode("ascii"), mime)
+        if not segments:
+            return None
+        rel_path, _ = segments[0]
+        return f"assets/images/{rel_path}"
+    except Exception:
+        logger.warning("persist image asset failed: %s", filename, exc_info=True)
+        return None
 
 
 def _detect_image_mime(path: Path) -> str | None:
@@ -158,22 +187,30 @@ class FileReadTool(BaseTool):
                 return f"📷 图片 {p.name}（{mime}）过大（{size} 字节），未渲染。建议缩小后重试。"
             try:
                 data = p.read_bytes()
-                b64 = base64.b64encode(data).decode("ascii")
                 # 给模型：简短说明，不含 base64（避免浪费 context）
                 model_content = f"📷 已读取图片文件 {p.name}（{mime}），图片已在前端以卡片形式渲染展示，无需在回复中重复贴出。"
-                # 给前端：image card（data URI）
-                cards = [{
+                card = {
                     "type": "image",
                     "title": p.name,
-                    "url": f"data:{mime};base64,{b64}",
-                    "local_path": "",
+                    "local_path": str(p),
                     "source": "file_read",
                     "page_url": "",
                     "width": None,
                     "height": None,
                     "size_kb": round(size / 1024, 1),
-                }]
-                return ToolResult(tool_call_id="", content=model_content, cards=cards)
+                }
+                # 给前端：图片落盘为资产文件，卡片只带相对路径，由 /api/assets/images/
+                # 端点（带 immutable 缓存）提供。绝不内联 base64——它会被写进 messages.cards
+                # 和 tool_steps，让单条会话的响应膨胀到数 MB，点开会话要等好几秒。
+                asset = _persist_image_asset(p.name, data, mime)
+                if asset:
+                    card["url"] = asset
+                else:
+                    # 落盘失败（无 session 上下文/磁盘异常）：退回 data URI 至少保证能看，
+                    # 但记录告警——这是应尽量避免的降级路径。
+                    logger.warning("file_read: 图片资产落盘失败，降级为内联 base64: %s", p)
+                    card["url"] = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+                return ToolResult(tool_call_id="", content=model_content, cards=[card])
             except Exception as e:
                 return f"Read image error: {e}"
 

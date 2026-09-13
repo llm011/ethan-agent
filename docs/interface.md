@@ -154,6 +154,29 @@ CLI 内部维护 `WorkingMemory` 实例：
 - 工具调用过程通过 SSE 事件分块推送，前端实时渲染调用详情
 - 生成与连接解耦：一次生成是一个后台 `ChatRun`（`ethan/core/run_manager.py`），SSE 响应只是订阅者。刷新页面断开连接不会中断生成——producer 照常跑完并入库。前端加载会话时若 `active_run` 为真，调 `GET /chat/{id}/stream` 重连，回放缓冲 + 继续实时
 
+### 打开会话的性能（不要往回退）
+
+点开会话卡顿的根因是**单条会话响应体过大**，不是前端渲染慢。三条约束必须保持：
+
+1. **图片卡片只存路径，不存 base64**。`file_read` 读图后走 `ethan/core/assets.py` 的 `save_image()`
+   落到 `~/.ethan/assets/images/<session_id>/`，卡片 `url` 写相对路径 `assets/images/...`。
+   仓库历史上曾把整张 base64 内联进卡片，单条消息可达数 MB，落库后每次打开会话都要
+   全量传输 + `JSON.parse`。落盘失败时降级为内联 base64，保证不丢图。
+2. **`tool_steps` 不重复挂重卡片**。同一张图片卡片曾被同时写进 `messages.cards` 和
+   `tool_steps`（`ethan/core/stream_collector.py`），一份数据存两遍。现在带内联图片数据的
+   卡片只进消息级 `cards`（前端从那里渲染），step 只保留轻量卡片。
+   `_card_has_inline_image()` 是判据。
+3. **存量数据靠启动迁移收敛**。`SessionStore._migrate_inline_image_cards()` 在 `init()`
+   时把历史内联 base64 卡片落盘为资产路径，幂等（只扫 `LENGTH(cards) > 2048` 或
+   `LENGTH(tool_steps) > 8192` 的行，转换后不再匹配，重启跳过）。解析/落盘失败一律保留原值。
+
+前端侧：Web 与桌面端都用 SWR 策略读会话——先渲染本地缓存（Web 走 IndexedDB
+`web/lib/session-db.ts`，桌面端走 localStorage），再后台拉网络结果覆盖。缓存是**体验补偿**，
+不能替代上面的体积治理；只写缓存不约束体积，等于把网络开销换成等量的本地 IO 开销。
+
+另：侧边栏的取数 effect 以「所在区块」而不是完整 `pathname` 作依赖，避免 `/chat/[id]`
+之间切换时把会话列表/定时任务重新拉一遍。
+
 ---
 
 ## HTTP API（`ethan/interface/api.py`）

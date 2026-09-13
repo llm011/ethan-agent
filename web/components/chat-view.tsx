@@ -35,7 +35,7 @@ import {
   type BackgroundTask,
   type Annotation,
 } from "@/lib/api";
-import { updateSessionDetail } from "@/lib/session-db";
+import { readSessionDetail, updateSessionDetail, writeSessionDetail } from "@/lib/session-db";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
 import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
@@ -49,7 +49,7 @@ import { ConsentGate } from "@ethan/shared/chat/consent-card";
 import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/chat/cleanup-confirm-card";
 import { AskUserCard, type AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 import { WaitForUserCard, type WaitForUserRequest } from "@ethan/shared/chat/wait-for-user-card";
-import { placeholderTitle, mapDetailMessages, isFirstQuerySignificant, pendingFileToImagePayload, revokePendingBlobUrls } from "@/components/chat/chat-helpers";
+import { placeholderTitle, mapDetailMessages, historicUsageOf, isFirstQuerySignificant, pendingFileToImagePayload, revokePendingBlobUrls } from "@/components/chat/chat-helpers";
 import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
@@ -313,14 +313,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const loaded = mapDetailMessages(detail);
     setMessages(loaded);
     fetchAnnotationsFor(loaded);
-    const historicUsage = detail.messages
-      .filter((m: any) => m.role === "assistant" && m.usage)
-      .reduce((acc: any, m: any) => ({
-        input: acc.input + (m.usage.input || 0),
-        output: acc.output + (m.usage.output || 0),
-        cache: acc.cache + (m.usage.cache || 0),
-      }), { input: 0, output: 0, cache: 0 });
-    setSessionUsage(historicUsage);
+    setSessionUsage(historicUsageOf(detail));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession, streaming, bgPolling]);
 
@@ -407,14 +400,31 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     setCleanupConfirm(null);
     setAskUserRequest(null);
 
-    setLoadingSession(true);
-    setActiveSession(null);
-    setMessages([]);
-    setSessionTitle("");
-    setSessionUsage({ input: 0, output: 0, cache: 0 });
-    setPendingInjected([]);
-
+    // SWR：先读 IndexedDB 缓存立即渲染，网络请求在后台刷新。
+    // 命中缓存时不要置 loading——否则侧边栏转圈、消息区白屏，体感反而是「卡」。
     let cancelled = false;
+    let cachedHit = false;
+
+    readSessionDetail(initialSessionId).then((cached) => {
+      if (cancelled || !cached || cachedHit) return;
+      cachedHit = true;
+      // 若 handleSend 已基于该会话启动流式响应，别用缓存覆盖实时消息
+      if (justFinishedRef.current === initialSessionId) return;
+      if (streamingRef.current) return;
+      const cachedMsgs = mapDetailMessages(cached);
+      setLoadingSession(false);
+      setActiveSession(initialSessionId);
+      setSessionTitle(cached.title || "");
+      setSessionSource(cached.source || "web");
+      setSessionPinnedAt(cached.pinned_at || 0);
+      setPendingInjected(cached.pending_injected || []);
+      setMessages(cachedMsgs);
+      setSelectedModel(cached.model);
+      setMode(cached.mode || "");
+      setSessionUsage(historicUsageOf(cached));
+      window.dispatchEvent(new CustomEvent("session:loaded", { detail: { sessionId: initialSessionId } }));
+      fetchAnnotationsFor(cachedMsgs);
+    }).catch(() => {});
 
     fetchSession(initialSessionId)
       .then(async (detail) => {
@@ -438,14 +448,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         fetchAnnotationsFor(loaded);
         setSelectedModel(detail.model);
         setMode(detail.mode || "");
-        const historicUsage = detail.messages
-          .filter((m: any) => m.role === "assistant" && m.usage)
-          .reduce((acc: any, m: any) => ({
-            input: acc.input + (m.usage.input || 0),
-            output: acc.output + (m.usage.output || 0),
-            cache: acc.cache + (m.usage.cache || 0),
-          }), { input: 0, output: 0, cache: 0 });
-        setSessionUsage(historicUsage);
+        setSessionUsage(historicUsageOf(detail));
+        // 回写离线缓存：下次点开会话可先用缓存立即渲染（SWR）
+        writeSessionDetail(initialSessionId, detail).catch(() => {});
 
         if (detail.active_run) {
           _setStreaming(true);
