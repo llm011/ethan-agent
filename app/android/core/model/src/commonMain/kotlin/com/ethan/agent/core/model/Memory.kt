@@ -97,6 +97,16 @@ data class ConfirmRecordResponse(
 @Serializable
 data class DailySummariesResponse(val items: List<JsonElement> = emptyList())
 
-/** 所有有日摘要的日期（`yyyy-MM-dd`，倒序）。用于日历置灰没内容的日子。 */
+/**
+ * 所有有日摘要的日期（`yyyy-MM-dd`，倒序）。用于日历置灰没内容的日子。
+ *
+ * [dates] 可能被后端上限截断：`dates.size < total` 时 [truncated] 为 true，
+ * 表示还有更早的日期没返回。UI 据此提示「还有更早的」，而不是把更早的日子
+ * 当成「没内容」静默置灰。
+ */
 @Serializable
-data class DailySummaryDatesResponse(val dates: List<String> = emptyList())
+data class DailySummaryDatesResponse(
+    val dates: List<String> = emptyList(),
+    val total: Int = 0,
+    val truncated: Boolean = false,
+)
