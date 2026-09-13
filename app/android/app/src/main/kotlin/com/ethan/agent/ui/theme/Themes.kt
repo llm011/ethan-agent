@@ -66,10 +66,23 @@ const val THEME_FOLLOW_SYSTEM = "system"
 private const val THEME_LEGACY_LIGHT = "light"
 
 /**
- * 把任意历史配置值规范化为合法主题 —— 照搬 Web 的 `normalizeThemeId`。
+ * 把任意历史配置值规范化为合法主题。
  *
- * 兼容早期只有 dark/light 的版本，以及那些已被删除的主题（映射到观感最接近的
- * 一套，而不是粗暴地回落到默认值，免得用户升级后发现主题「自己变了」）。
+ * 三端（Web `web/components/chat/themes.ts`、Desktop 同名文件、Android 这里）各有一份
+ * `normalizeThemeId`，**主题 id 集合相同、意图相同，但实现并不等价**，改这里不等于三端同步：
+ *
+ * - 三端**各自独立存储**（Android 走 DataStore，两端各走自己的 localStorage），所以
+ *   迁移逻辑只需覆盖本端历史上真正写过的值，不必求同。
+ * - Android 多一张**旧值迁移表**（`honey` / `matcha` / `lavender` / `sky_blue` /
+ *   `warm_orange` / `plain_paper`）：那些是早期 Android 版本自己写过的值，Web/Desktop
+ *   从没存过，它们只需处理 `light → warm`。**这段迁移仅 Android 需要。**
+ * - **空值语义不同**：这里把空配置当成「跟随系统」（[THEME_FOLLOW_SYSTEM]），
+ *   Web/Desktop 的同名函数则是回落到默认主题。
+ * - `system`（[THEME_FOLLOW_SYSTEM]）是 Android / Desktop 的伪主题 id，Web 的 `ThemeId`
+ *   联合类型里还没有，Web 读到会回落成默认主题。
+ *
+ * 映射到「观感最接近」的一套而不是一律回落默认值，是为了避免用户升级后发现
+ * 主题「自己变了」。
  */
 fun normalizeThemeId(raw: String?): String {
     if (raw.isNullOrBlank()) return THEME_FOLLOW_SYSTEM
