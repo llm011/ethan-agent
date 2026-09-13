@@ -192,7 +192,11 @@ class FileReadTool(BaseTool):
                 card = {
                     "type": "image",
                     "title": p.name,
-                    "local_path": str(p),
+                    # 落盘为资产文件后 url 已是相对路径，必须留空 local_path：
+                    # 前端 getImageSrc() 优先吃 local_path 并拼成 /api/images/<basename>，
+                    # 那是 image_search 下载图的端点（强制 img_ 前缀 + 只服务 /tmp/ethan_images），
+                    # 填本机路径会 400 破图。与 _migrate_inline_image_cards 的产出结构保持一致。
+                    "local_path": "",
                     "source": "file_read",
                     "page_url": "",
                     "width": None,

@@ -455,7 +455,6 @@ class SessionStore:
         重启后二次扫描直接跳过。单次只扫带 cards/tool_steps 且体积可观的行，
         避免每次启动全表扫 5000 行。
         """
-        import base64 as _b64
         import json as _json
 
         try:
@@ -479,10 +478,12 @@ class SessionStore:
         migrated_msgs = 0
         saved_bytes = 0
 
-        def _strip_data_uri(value: str) -> tuple[str, int]:
+        async def _strip_data_uri(value: str) -> tuple[str, int]:
             """把 data:...;base64,<payload> 落盘成资产文件，返回 (新 url, 释放字节)。
 
             非 data URI 或落盘失败时原样返回，释放字节为 0。
+            save_image 会做 base64 解码 + PIL 解码/缩放/长图切分，都是 CPU 密集的同步
+            操作，必须丢到线程里执行——否则存量用户首次启动时会卡住事件循环。
             """
             if not value.startswith("data:"):
                 return value, 0
@@ -491,8 +492,7 @@ class SessionStore:
                 return value, 0
             try:
                 media_type = header[len("data:"):].split(";", 1)[0] or "image/png"
-                data = _b64.b64decode(payload)
-                segments = save_image(sid, 0, _b64.b64encode(data).decode("ascii"), media_type)
+                segments = await asyncio.to_thread(save_image, sid, 0, payload, media_type)
                 if not segments:
                     return value, 0
                 rel_path, _ = segments[0]
@@ -500,7 +500,7 @@ class SessionStore:
             except Exception:
                 return value, 0
 
-        def _convert(cards: list) -> tuple[list, int]:
+        async def _convert(cards: list) -> tuple[list, int]:
             """把卡片里内联的 base64 图片落盘；返回 (新列表, 释放字节数)。
 
             兼容两种形态：图片卡片的 url 字段，以及搜索卡片把 base64 塞进
@@ -516,7 +516,7 @@ class SessionStore:
                 for key, val in card.items():
                     if not (isinstance(val, str) and val.startswith("data:image")):
                         continue
-                    new_val, f = _strip_data_uri(val)
+                    new_val, f = await _strip_data_uri(val)
                     if not f:
                         continue
                     if new_card is None:
@@ -542,7 +542,7 @@ class SessionStore:
                 try:
                     cards = _json.loads(cards_json)
                     if isinstance(cards, list):
-                        converted, f = _convert(cards)
+                        converted, f = await _convert(cards)
                         if f:
                             new_cards_s = _json.dumps(converted, ensure_ascii=False)
                             freed += f
@@ -557,7 +557,7 @@ class SessionStore:
                         steps_changed = False
                         for step in steps:
                             if isinstance(step, dict) and isinstance(step.get("cards"), list):
-                                converted, f = _convert(step["cards"])
+                                converted, f = await _convert(step["cards"])
                                 if f:
                                     step["cards"] = converted
                                     freed += f
