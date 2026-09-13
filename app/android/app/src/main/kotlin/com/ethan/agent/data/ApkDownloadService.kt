@@ -1,5 +1,6 @@
 package com.ethan.agent.data
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,12 +8,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import com.ethan.agent.MainActivity
 import com.ethan.agent.R
 import com.ethan.agent.core.datastore.AppConfigStore
@@ -233,10 +236,20 @@ class ApkDownloadService : Service() {
 
     /**
      * `POST_NOTIFICATIONS` 被用户拒绝是**完全正常的**（API 33+ 默认要问）：此时
-     * 通知不会显示，但前台服务和下载本身照常工作。所以这里静默吞掉
-     * `SecurityException`，绝不能让「用户不想要通知」变成「更新装不了」。
+     * 通知不会显示，但前台服务和下载本身照常工作。绝不能让「用户不想要通知」
+     * 变成「更新装不了」。
+     *
+     * 这里显式 `checkSelfPermission` 而不是只靠 `runCatching` 吞异常 —— 后者能跑，
+     * 但 lint 的 `MissingPermission` 认不出来会直接判构建失败（CI 就是这么挂的）；
+     * 而且显式检查也把「为什么可以不管这个权限」写进了代码里。
      */
     private fun notify(notification: Notification) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
         runCatching {
             NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification)
         }
