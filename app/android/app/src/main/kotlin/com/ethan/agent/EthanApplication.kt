@@ -19,7 +19,9 @@ class EthanApplication : Application() {
         setupAndroidPlatformModule {
             module {
                 single { AppConfigStore(androidContext()) }
-                single<AppUpdater> { AndroidAppUpdater(androidContext()) }
+                // 传 AppConfigStore：updater 要用用户配的 serverUrl 拼出「自建服务端」
+                // 这个下载源（三源降级里的第二顺位）。
+                single<AppUpdater> { AndroidAppUpdater(androidContext(), get()) }
             }
         }
         initKoin()

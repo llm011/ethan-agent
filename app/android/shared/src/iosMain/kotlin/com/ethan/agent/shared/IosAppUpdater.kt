@@ -12,6 +12,11 @@ package com.ethan.agent.shared
 object IosAppUpdater : AppUpdater {
     override fun shouldCheck(): Boolean = false
     override suspend fun checkForUpdate(): AppUpdater.CheckResult = AppUpdater.CheckResult.UpToDate
-    override suspend fun downloadAndInstall(url: String, onProgress: (Int) -> Unit): AppUpdater.InstallResult =
+    override suspend fun downloadAndInstall(
+        info: AppUpdater.UpdateInfo,
+        onProgress: (Int) -> Unit,
+    ): AppUpdater.InstallResult = AppUpdater.InstallResult.Failed
+
+    override suspend fun installDownloaded(): AppUpdater.InstallResult =
         AppUpdater.InstallResult.Failed
 }

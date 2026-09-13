@@ -198,6 +198,11 @@ def _guess_content_type(path: str) -> str:
         ".pdf": "application/pdf", ".txt": "text/plain",
         ".json": "application/json", ".md": "text/markdown",
         ".zip": "application/zip",
+        # Android 安装包（发版时 CI 会把 release APK 镜像到 CDN）
+        ".apk": "application/vnd.android.package-archive",
+        # 校验侧车文件：写 text/plain，浏览器直接看得到内容，
+        # 且不会被某些代理当成下载附件。
+        ".sha256": "text/plain",
     }.get(ext, "application/octet-stream")
 
 

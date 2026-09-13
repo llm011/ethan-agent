@@ -117,6 +117,9 @@ ethan/defaults/skills/ppt-generate/assets/fonts/
 # 临时快照调试输出
 .tmp_snap/
 
+# 本地验证 Android 更新流程用的桩服务器 / 测试 APK / 截图
+.tmp-rangetest/
+
 # updater endpoint（CI 构建时从 release 动态拉取，不入库）
 web/public/latest.json
 # article-to-video Open Motion renderer 临时文件

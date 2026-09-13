@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  状态栏小图标：必须是**单色 + 只有 alpha 通道**的形状，系统只取它的 alpha 做剪影。
+  用彩色 launcher icon 当 smallIcon 会渲染成一坨白块（API 21+ 的常见坑）。
+
+  造型：向下箭头 + 底座横线 = 下载。直径 24dp 是系统标准尺寸。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,3c-0.55,0 -1,0.45 -1,1v8.59l-2.29,-2.3c-0.39,-0.39 -1.02,-0.39 -1.41,0 -0.39,0.39 -0.39,1.02 0,1.41l4,4c0.39,0.39 1.02,0.39 1.41,0l4,-4c0.39,-0.39 0.39,-1.02 0,-1.41 -0.39,-0.39 -1.02,-0.39 -1.41,0L13,12.59V4c0,-0.55 -0.45,-1 -1,-1z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M5,18c-0.55,0 -1,0.45 -1,1s0.45,1 1,1h14c0.55,0 1,-0.45 1,-1s-0.45,-1 -1,-1H5z" />
+</vector>

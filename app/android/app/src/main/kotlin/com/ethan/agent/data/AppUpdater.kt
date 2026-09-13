@@ -6,7 +6,11 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import com.ethan.agent.BuildConfig
+import com.ethan.agent.core.datastore.AppConfigStore
+import com.ethan.agent.shared.update.DownloadPlan
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -22,14 +26,21 @@ import java.util.concurrent.TimeUnit
  */
 class AppUpdater(
     private val context: Context,
+    private val configStore: AppConfigStore? = null,
 ) {
 
     companion object {
         private const val GITHUB_API =
             "https://api.github.com/repos/llm011/ethan-agent/releases/latest"
-        private const val APK_CACHE_NAME = "ethan-update.apk"
+        const val APK_CACHE_NAME = "ethan-update.apk"
         private const val PREF_NAME = "app_update"
+
+        /** 侧车校验文件的后缀，与 CI 里生成的 `app-release.apk.sha256` 对应。 */
+        private const val SHA256_ASSET_SUFFIX = ".apk.sha256"
         private const val KEY_LAST_CHECK = "last_check_ts"
+
+        /** 上次下载对应的版本号；变了就把 `.part` 清掉（远端包换了，续不了）。 */
+        private const val KEY_PART_TAG = "part_tag"
         private const val CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000L // 4 小时
 
         /** 常见 prerelease 前缀 → 优先级（越大越接近正式版）。 */
@@ -56,6 +67,12 @@ class AppUpdater(
         val downloadUrl: String,
         val releaseNotes: String,
         val htmlUrl: String,
+        /** 候选源列表（CDN → 自建服务端 → GitHub），按可达性排序。 */
+        val downloadUrls: List<String> = listOf(downloadUrl),
+        /** GitHub Release 侧车 `app-release.apk.sha256`；老 release 没有则为 null。 */
+        val sha256: String? = null,
+        /** 远端 APK 字节数；未知为 0。 */
+        val sizeBytes: Long = 0L,
     )
 
     sealed class CheckResult {
@@ -68,6 +85,12 @@ class AppUpdater(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
+
+    /**
+     * 下载走**独立的 client**：这里 60s 的 readTimeout 是给流式接口用的，
+     * 对分块下载太宽松（进度条卡住要等一分钟才报错）。
+     */
+    private val downloader by lazy { ApkDownloader(context) }
 
     private val prefs by lazy {
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -91,7 +114,7 @@ class AppUpdater(
                 ?: return@withContext CheckResult.Error("无法获取当前版本号")
 
             val request = Request.Builder()
-                .url(GITHUB_API)
+                .url(checkApiUrl())
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "Ethan-Android")
                 .build()
@@ -120,12 +143,18 @@ class AppUpdater(
                 ?: return@withContext CheckResult.Error("Release 中没有安装包")
 
             var apkUrl: String? = null
+            var apkSize = 0L
+            var sha256Url: String? = null
             for (i in 0 until assets.length()) {
                 val asset = assets.optJSONObject(i) ?: continue
                 val name = asset.optString("name")
-                if (name.endsWith(".apk", ignoreCase = true)) {
-                    apkUrl = asset.optString("browser_download_url")
-                    break
+                val url = asset.optString("browser_download_url")
+                when {
+                    name.endsWith(".apk", ignoreCase = true) -> {
+                        apkUrl = url
+                        apkSize = asset.optLong("size", 0L)
+                    }
+                    name.endsWith(SHA256_ASSET_SUFFIX, ignoreCase = true) -> sha256Url = url
                 }
             }
 
@@ -133,11 +162,36 @@ class AppUpdater(
                 return@withContext CheckResult.Error("Release 中没有 APK 安装包")
             }
 
+            // 侧车校验值。**拿不到不算错误** —— 老 release 没有侧车，此时退化成
+            // 「只校验长度」；为了一个可选的完整性增强而让用户更新不了是本末倒置。
+            val sha256 = sha256Url?.let { fetchSha256(it) }
+
+            // 三源候选列表：CDN（国内最快）→ 自建服务端（app 本来就连着它）→ GitHub（兜底）。
+            // serverUrl 取不到时该源自动跳过，不影响更新可用性。
+            val serverUrl = configStore?.let { store ->
+                runCatching { store.config.first().serverUrl }.getOrNull()
+            }
+            val sources = BuildConfig.UPDATE_URL_OVERRIDE
+                .takeIf { it.isNotBlank() }
+                // 调试覆盖：把整个源列表替换成指定的地址（逗号分隔）。
+                // 用来在本地复现「断点续传」和「换源」—— 这两条路径没法用真实源触发。
+                ?.split(",")
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?: DownloadPlan.candidateSources(
+                    tag = tagName,
+                    fallbackUrl = apkUrl,
+                    serverUrl = serverUrl,
+                )
+
             CheckResult.UpdateAvailable(UpdateInfo(
                 version = tagName,
                 downloadUrl = apkUrl,
                 releaseNotes = json.optString("body").ifBlank { "暂无更新说明" },
                 htmlUrl = json.optString("html_url"),
+                downloadUrls = sources,
+                sha256 = sha256,
+                sizeBytes = apkSize,
             ))
         } catch (e: Exception) {
             CheckResult.Error("网络错误：${e.message ?: "未知错误"}")
@@ -145,41 +199,81 @@ class AppUpdater(
     }
 
     /**
-     * 下载 APK 到 cacheDir。
-     * @param onProgress 进度回调 0-100。
-     * @return 下载好的 File，失败返回 null。
+     * 「检查更新」请求的 API 地址。debug 构建可用 `ETHAN_UPDATE_API_OVERRIDE` 指向
+     * 本地桩服务器（模拟器没外网时唯一能跑通完整链路的方式）。release 恒为 GitHub。
      */
-    suspend fun downloadApk(url: String, onProgress: (Int) -> Unit): File? =
-        withContext(Dispatchers.IO) {
-            try {
-                val request = Request.Builder().url(url).build()
-                val response = client.newCall(request).execute()
+    private fun checkApiUrl(): String =
+        BuildConfig.UPDATE_API_OVERRIDE.takeIf { it.isNotBlank() }
+            ?: GITHUB_API
+
+    /**
+     * 读取侧车文件里的 sha256。失败返回 null（调用方退化成只校验长度）。
+     *
+     * 侧车内容就是 `sha256sum` 的输出：`<64 位小写 hex>  app-release.apk`。
+     * 只取第一段 hex，不关心后面的文件名 —— 万一 CI 换了命名也不受影响。
+     */
+    private suspend fun fetchSha256(url: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Ethan-Android")
+                .build()
+            client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
+                val text = response.body?.string() ?: return@withContext null
+                val hex = text.trim().split(Regex("\\s+")).firstOrNull() ?: return@withContext null
+                hex.takeIf { it.matches(Regex("^[0-9a-fA-F]{64}$")) }?.lowercase()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
-                val body = response.body ?: return@withContext null
-                val totalBytes = body.contentLength()
+    /**
+     * 下载 APK 到 cacheDir：多源降级 + 断点续传 + 长度/sha256 校验 + 原子替换。
+     *
+     * 以前这里是「单次阻塞请求 + 8KB 拷贝循环，失败就 return null」，在国内网络下
+     * 基本等于「断一次就得从头再来，而且没有任何诊断信息」。现在真正的执行在
+     * [ApkDownloader]，失败后的决策在 [DownloadPlan]（已单测）。
+     *
+     * @param onProgress 进度回调 0-100。
+     * @return 下载并校验通过的 File，失败返回 null。
+     */
+    suspend fun downloadApk(info: UpdateInfo, onProgress: (Int) -> Unit): File? {
+        // `.part` 里可能有上一次（甚至上一个版本）的残留。tag 变了说明远端包换了，
+        // 留着只会让 `Range` 请求一个已经不存在的位置 —— 清掉重来。
+        val lastTag = prefs.getString(KEY_PART_TAG, null)
+        if (lastTag != null && lastTag != info.version) {
+            clearPartialDownloads()
+        }
+        prefs.edit().putString(KEY_PART_TAG, info.version).apply()
 
-                val apkFile = File(context.cacheDir, APK_CACHE_NAME)
-                body.byteStream().use { input ->
-                    apkFile.outputStream().use { output ->
-                        val buffer = ByteArray(8192)
-                        var bytesRead: Int
-                        var downloaded = 0L
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                            downloaded += bytesRead
-                            if (totalBytes > 0) {
-                                onProgress((downloaded * 100 / totalBytes).toInt().coerceIn(0, 100))
-                            }
-                        }
-                    }
-                }
-                onProgress(100)
-                apkFile
-            } catch (_: Exception) {
-                null
+        val urls = info.downloadUrls.ifEmpty { listOf(info.downloadUrl) }
+        return downloader.download(
+            urls = urls,
+            expectedSha256 = info.sha256,
+            expectedSize = info.sizeBytes,
+            onProgress = onProgress,
+        )
+    }
+
+    /**
+     * 已经下好并校验通过的 APK；没有则 null。
+     *
+     * 供「后台已经下完、用户过一会儿才回来点安装」这条路径使用 —— 那时手上没有
+     * [UpdateInfo]，只能按约定名去 cacheDir 找。
+     */
+    fun downloadedApkFile(): File? =
+        File(context.cacheDir, APK_CACHE_NAME).takeIf { it.isFile && it.length() > 0 }
+
+    /** 清掉所有中间产物（`.part` / `.etag`）。换版本时调用。 */
+    private fun clearPartialDownloads() {
+        runCatching {
+            context.cacheDir.listFiles()?.forEach { f ->
+                if (f.name.endsWith(".part") || f.name.endsWith(".etag")) f.delete()
             }
         }
+    }
 
     sealed class InstallResult {
         data object Triggered : InstallResult()
@@ -213,9 +307,16 @@ class AppUpdater(
     }
 
     private fun getCurrentVersion(): String? = try {
-        context.packageManager
-            .getPackageInfo(context.packageName, 0)
-            .versionName
+        // 调试覆盖（debug 构建专用），用来在真机上走通「发现新版本」这条路径。
+        // release 构建里这个字段恒为空串。
+        val fake = BuildConfig.FAKE_CURRENT_VERSION
+        if (fake.isNotBlank()) {
+            fake
+        } else {
+            context.packageManager
+                .getPackageInfo(context.packageName, 0)
+                .versionName
+        }
     } catch (_: Exception) {
         null
     }

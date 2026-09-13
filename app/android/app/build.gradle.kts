@@ -81,7 +81,28 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 调试用：把下载源列表整个替换掉，指向宿主机上的测试服务器
+            // （emulator 用 10.0.2.2 访问宿主机）。留空则走真实的三源列表。
+            //
+            // 为什么需要它：断点续传只有在「下载到一半链路断掉、重启后从非 0 偏移
+            // 继续」时才看得出来，而这没法用真实源复现。
+            val override = System.getenv("ETHAN_UPDATE_URL_OVERRIDE").orEmpty()
+            buildConfigField("String", "UPDATE_URL_OVERRIDE", "\"$override\"")
+            // 调试用：假装当前版本是多少。用来在真机上触发「发现新版本」这条路径
+            // —— 否则本地装的版本号永远等于线上最新，更新流程根本走不到。
+            val fakeCurrent = System.getenv("ETHAN_FAKE_CURRENT_VERSION").orEmpty()
+            buildConfigField("String", "FAKE_CURRENT_VERSION", "\"$fakeCurrent\"")
+            // 调试用：把「检查更新」请求的 GitHub API 地址换成本地桩服务器。
+            // 模拟器没有外网时（api.github.com 连不上会挂死），只有这样才能本地
+            // 跑通「检查 → 下载 → 校验」整条链路。
+            val apiOverride = System.getenv("ETHAN_UPDATE_API_OVERRIDE").orEmpty()
+            buildConfigField("String", "UPDATE_API_OVERRIDE", "\"$apiOverride\"")
+        }
         release {
+            buildConfigField("String", "UPDATE_URL_OVERRIDE", "\"\"")
+            buildConfigField("String", "FAKE_CURRENT_VERSION", "\"\"")
+            buildConfigField("String", "UPDATE_API_OVERRIDE", "\"\"")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -108,6 +129,8 @@ android {
 
     buildFeatures {
         compose = true
+        // 只为上面的 UPDATE_URL_OVERRIDE（调试用下载源覆盖）
+        buildConfig = true
     }
 
     packaging {

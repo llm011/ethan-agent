@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Track 10: foreground service for SSE keep-alive -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 自动升级：后台下载 APK。API 34+ 起 dataSync 类型的前台服务除了基础的
+         FOREGROUND_SERVICE 之外还必须单独声明这一条，否则 startForeground 直接抛
+         SecurityException。无运行时权限、无 while-in-use 限制。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Track 7 Lightbox: save image to gallery (API ≤ 28; API 29+ uses MediaStore) -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
@@ -53,6 +57,17 @@
                 <data android:mimeType="application/*" />
             </intent-filter>
         </activity>
+
+        <!-- 自动升级：后台下载 APK。
+             为什么要前台服务而不是 WorkManager：这是用户点了「更新」正在等结果的
+             即时任务，WorkManager 的可延迟调度语义是错配；前台服务能直接显示通知栏
+             进度，且用户切后台/息屏后下载不会被打断。
+             dataSync 是官方为此类「数据传输」场景定义的类型（API 35 起受
+             24 小时内累计 6 小时上限约束，对 3.3 MB 的包无影响）。 -->
+        <service
+            android:name=".data.ApkDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- 自动升级：FileProvider 用于分享 APK 给系统安装器 -->
         <provider

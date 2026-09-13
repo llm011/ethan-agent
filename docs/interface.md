@@ -321,6 +321,16 @@ dblclick 一定在 click 之后触发，而那时 tab 已经被切走了。注�
 | GET | `/files/deck?path=...&session_id=...` | pptx 项目目录的 deck.json + pages/*.json，`/ppt-preview` 预览页数据源（Bearer） |
 | POST | `/files/sign` | 用 Bearer 把 path 批量换成短期签名（`{path: "exp.sig"}`，10 分钟有效），供 `<img>`/`<a>` 直链拼 `?user=&sig=` 免带 header |
 | GET | `/files/asset?path=...&session_id=...` | deck 项目 assets/ 下的图片（Bearer / cookie / 短期签名 URL 三通道鉴权，供 `<img>` 直链） |
+| GET | `/releases/android/{tag}/app-release.apk` | Android 客户端 APK 下载（**公开、无鉴权**，见下） |
+
+`/api/releases/android/*` 是 Android 应用内自更新的下载源，**不带鉴权**：更新检查本身
+就是匿名可用的，下载也不应该要求登录。`{tag}` 走白名单正则（`^v\d+\.\d+\.\d+...`），
+只允许 `app-release.apk` 与 `app-release.apk.sha256` 两个文件名，防路径穿越。
+
+优先从本地缓存目录（`ETHAN_APK_CACHE_DIR`）返回文件，没有则 **302 重定向到 CDN**
+（`${CDN_PUBLIC_URL}/ethan/releases/android/{tag}/{filename}`）—— 服务端不自己扛带宽。
+客户端拿到的是「CDN → 本服务端 → GitHub」三源列表，哪个通用哪个（见
+`app/android/shared/.../update/DownloadPlan.kt` 的 `candidateSources`）。
 
 `/api/files/*` 文件端点除了路径 jail，还有**会话级隔离**：必须带 `session_id`，且该 session
 的消息里确实存在 deliver_file 写入的 file 卡片（授权派生自 messages 表的 cards 列）——
