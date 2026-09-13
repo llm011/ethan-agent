@@ -51,6 +51,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -101,6 +102,9 @@ import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
 import com.ethan.agent.ui.components.SnackbarContainer
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.Date
 import java.util.Locale
 import kotlinx.serialization.json.JsonElement
@@ -163,6 +167,7 @@ fun MemoryScreen(
         SummariesDialog(
             summaries = state.summaries,
             date = state.summariesDate,
+            summaryDates = state.summaryDates,
             loading = state.summariesLoading,
             hasMore = state.summariesHasMore,
             onDateChange = onSummariesDateChange,
@@ -511,8 +516,7 @@ private fun InsightsTab(
                 TextButton(onClick = {
                     showDatePicker = false
                     datePickerState.selectedDateMillis?.let { millis ->
-                        val formatted = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(millis))
-                        onDateChange(formatted)
+                        onDateChange(isoFromUtcMillis(millis))
                     }
                 }) { Text("确定") }
             },
@@ -836,6 +840,49 @@ private fun RecordMetaRow(record: StructuredRecord) {
 // ── Summaries dialog ─────────────────────────────────────────────────────────
 
 /**
+ * Material3 日期选择器给的是 **UTC 当天 00:00 的毫秒**（`selectedDateMillis`、
+ * `SelectableDates.isSelectableDate` 都是这个语义），所以换算必须用 [ZoneOffset.UTC]。
+ *
+ * 以前这里用 `SimpleDateFormat(..., Locale.getDefault())` 格式化，在东八区碰巧没事
+ * （UTC 00:00 → 本地 08:00，还是同一天），但在西半球会整体退回前一天 ——
+ * 用户选 9/13，筛出来的是 9/12 的摘要。
+ */
+private fun isoFromUtcMillis(millis: Long): String =
+    Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString()
+
+/** [isoFromUtcMillis] 的反向：让已选日期在日历上正确高亮。格式非法时返回 null。 */
+private fun utcMillisFromIso(iso: String): Long? =
+    if (iso.isBlank()) null
+    else runCatching {
+        LocalDate.parse(iso).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    }.getOrNull()
+
+/**
+ * 只让「有日摘要的日子」可选，其余置灰。
+ *
+ * Material3 的 `DatePicker` 没有「在指定日期上画点」的 API，所以「标注哪些天有内容」
+ * 只能靠置灰实现 —— 效果上等价：用户一眼就能看出哪些格子能点。
+ *
+ * 集合用 `mutableStateOf` 持有而不是普通 `var`：日期全集是异步拉回来的，
+ * 晚到时读它的 `DatePicker` 需要感知到变化才会重算格子。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+private class SummaryDatesSelectable(initial: Set<String>) : SelectableDates {
+    private var dates by mutableStateOf(initial)
+
+    fun update(newDates: Set<String>) { dates = newDates }
+
+    override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+        // 空集合 = 还没拉到（或确实一条摘要都没有）。此时全放开，
+        // 否则接口一挂整个日历就锁死了，用户连"全部日期"都回不去。
+        if (dates.isEmpty()) return true
+        return dates.contains(isoFromUtcMillis(utcTimeMillis))
+    }
+
+    override fun isSelectableYear(year: Int): Boolean = true
+}
+
+/**
  * 日摘要弹窗。
  *
  * 之前是把后端的原始 JSON 直接 `toString().take(200)` 丢进文本框 —— 用户看到的是
@@ -853,6 +900,7 @@ private fun RecordMetaRow(record: StructuredRecord) {
 private fun SummariesDialog(
     summaries: List<JsonElement>,
     date: String,
+    summaryDates: Set<String>,
     loading: Boolean,
     hasMore: Boolean,
     onDateChange: (String) -> Unit,
@@ -860,20 +908,31 @@ private fun SummariesDialog(
     onDismiss: () -> Unit,
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
-    val datePickerState = rememberDatePickerState()
+    // 同一个实例跨重组复用（否则每次重组新建一个，等于重置）。
+    // LaunchedEffect 把最新的日期全集同步进去 —— 集合是异步到的，
+    // 和下面「每次打开重建 state」互为保险。
+    val selectable = remember { SummaryDatesSelectable(summaryDates) }
+    LaunchedEffect(summaryDates) { selectable.update(summaryDates) }
     // usePlatformDefaultWidth = false 是关键：Compose 的 Dialog 默认会被平台约束到
     // 一个较窄的宽度（约屏宽 80% 再减去系统边距），光在内容里写 fillMaxWidth() 是
     // 撑不开的 —— 这正是「弹窗不够宽、正文挤成窄条」的原因。
     // 日期选择：Web 端是 `daily` 页签上放一个 `<input type="date">`（memory-view.tsx:365），
     // 这里做成弹窗里的一行，语义等价 —— 选一天只看那天的摘要，清空回到全部。
     if (showDatePicker) {
+        // state 建在 if 里而不是外层：`rememberDatePickerState` 只在首次组合时读一次
+        // `selectableDates`，建在外层的话，「在日期全集到达前打开过一次」就会把空的
+        // 可选集合永久捕获住，之后日历怎么都不置灰。放进 if 后每次打开都是全新 state。
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = utcMillisFromIso(date),
+            selectableDates = selectable,
+        )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
                     showDatePicker = false
                     datePickerState.selectedDateMillis?.let { millis ->
-                        onDateChange(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(millis)))
+                        onDateChange(isoFromUtcMillis(millis))
                     }
                 }) { Text("确定") }
             },
@@ -935,6 +994,20 @@ private fun SummariesDialog(
                     if (date.isNotBlank()) {
                         TextButton(onClick = { onDateChange("") }) { Text("清除") }
                     }
+                }
+                // 说明「灰格子 = 那天没有摘要」。不给提示的话，用户会以为日历坏了。
+                // 只在确实拿到了日期全集时显示：空集合代表还没拉到或真的一条都没有，
+                // 那时日历是全放开的，这句话就不成立了。
+                if (summaryDates.isNotEmpty()) {
+                    Text(
+                        text = "灰色日期没有日摘要",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // 左侧对齐日期条的图标（日期条 padding 12dp + 图标前 12dp），
+                        // 下方留 10dp：列表的 contentPadding 只有 2dp，不留白的话
+                        // 这行字会贴着第一张卡片的顶边。
+                        modifier = Modifier.padding(start = 24.dp, top = 2.dp, bottom = 10.dp),
+                    )
                 }
 
                 when {

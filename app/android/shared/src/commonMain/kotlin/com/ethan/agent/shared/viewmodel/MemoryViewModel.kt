@@ -125,6 +125,13 @@ data class MemoryUiState(
     val summariesLoading: Boolean = false,
     /** 弹窗列表是否还有更早的摘要可以加载（按 [DAILY_SUMMARIES_PAGE] 分页）。 */
     val summariesHasMore: Boolean = false,
+    /**
+     * 所有有日摘要的日期（`YYYY-MM-DD`）。空集合 = 还没拉到，或确实一条都没有。
+     *
+     * 用途：让日期选择器把「没摘要的日子」置灰，用户一眼看出哪些天有内容。
+     * 这是**全量索引**，不随 [summariesDate] 变，也不进分页。
+     */
+    val summaryDates: Set<String> = emptySet(),
     // Loading
     val isLoading: Boolean = false,
     val isConsolidating: Boolean = false,
@@ -419,6 +426,9 @@ class MemoryViewModel(
                 val date = targetDate ?: Clock.System.todayIn(TimeZone.currentSystemDefault()).toString()
                 repository.consolidateRecords(date)
                 loadRecords()
+                // 沉淀可能刚生成今天的摘要，日期全集要跟着更新，
+                // 否则日历上「今天」还是灰的、点不了。
+                loadSummaryDates()
             } catch (e: Exception) {
                 _state.update { it.copy(error = repository.friendlyError(e)) }
             } finally {
@@ -428,6 +438,26 @@ class MemoryViewModel(
     }
 
     // ── Daily summaries ────────────────────────────────────────────────────────
+
+    /**
+     * 拉「有摘要的日期」全集，供日期选择器置灰没有内容的日子。
+     *
+     * 与 [loadSummaries] 分开：这是一次性的全量索引（几百个日期串），
+     * 不进分页、不随 [MemoryUiState.summariesDate] 变，弹窗打开时拉一次即可。
+     *
+     * 失败**静默忽略**：这只是辅助信息，接口挂了就退化成「全部日期可选」，
+     * 不能让一个附属请求把弹窗卡住。
+     */
+    fun loadSummaryDates() {
+        viewModelScope.launch {
+            try {
+                val dates = repository.getDailySummaryDates().dates.toSet()
+                _state.update { it.copy(summaryDates = dates) }
+            } catch (_: Exception) {
+                // 保持原样（空集合 → 日历全可选）
+            }
+        }
+    }
 
     /**
      * 打开日摘要弹窗：按当前 [MemoryUiState.summariesDate] 重新拉第一页。
@@ -441,6 +471,9 @@ class MemoryViewModel(
      */
     fun loadSummaries() {
         val date = _state.value.summariesDate
+        // 日期全集只在第一次打开时拉。带上幂等守卫，否则每次切日期
+        // （setSummariesDate → loadSummaries）都会重拉一遍同一个全集。
+        if (_state.value.summaryDates.isEmpty()) loadSummaryDates()
         _state.update { it.copy(showSummaries = true, summariesLoading = true) }
         viewModelScope.launch {
             try {

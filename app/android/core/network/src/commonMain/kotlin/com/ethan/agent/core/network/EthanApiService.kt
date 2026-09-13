@@ -63,6 +63,7 @@ import com.ethan.agent.core.model.BatchAnnotationsResponse
 import com.ethan.agent.core.model.ConfirmRecordResponse
 import com.ethan.agent.core.model.ConsolidateResponse
 import com.ethan.agent.core.model.DailySummariesResponse
+import com.ethan.agent.core.model.DailySummaryDatesResponse
 import com.ethan.agent.core.model.DeckResponse
 import com.ethan.agent.core.model.DeleteAnnotationResponse
 import com.ethan.agent.core.model.DeleteMessageResponse
@@ -380,6 +381,11 @@ class EthanApiService(
 
     suspend fun getDailySummaryByDate(dateStr: String, domain: String? = null): DailySummariesResponse =
         client.get(url("memory/records/summaries/$dateStr")) {
+            parameter("domain", domain)
+        }.body()
+
+    suspend fun getDailySummaryDates(domain: String? = null): DailySummaryDatesResponse =
+        client.get(url("memory/records/summaries/dates")) {
             parameter("domain", domain)
         }.body()
 

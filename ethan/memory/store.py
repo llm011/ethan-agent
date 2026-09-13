@@ -1113,6 +1113,28 @@ class MemoryStore:
         rows = self.list_daily_summaries(memory_domain=memory_domain, limit=366)
         return [row for row in rows if row["local_date"] == local_date]
 
+    def list_daily_summary_dates(
+        self, *, memory_domain: str | None = None, limit: int = 400
+    ) -> list[str]:
+        """所有存在日摘要的 local_date，倒序去重。
+
+        给前端日历用：让「没有摘要的日子」置灰不可选。
+
+        单独走一条 `GROUP BY` 而不是复用 `list_daily_summaries` 再过滤 —— 后者会把
+        每条摘要的正文（动辄几 KB）全读进内存，而这里只要日期串。
+        """
+        if memory_domain:
+            rows = self._get_conn().execute("""
+                SELECT local_date FROM daily_summaries WHERE memory_domain=?
+                GROUP BY local_date ORDER BY local_date DESC LIMIT ?
+            """, (memory_domain, limit)).fetchall()
+        else:
+            rows = self._get_conn().execute("""
+                SELECT local_date FROM daily_summaries
+                GROUP BY local_date ORDER BY local_date DESC LIMIT ?
+            """, (limit,)).fetchall()
+        return [row["local_date"] for row in rows]
+
     def claim_job(self, job: ConsolidationJob) -> bool:
         with self.transaction() as conn:
             row = conn.execute(

@@ -308,6 +308,24 @@ async def list_daily_summaries_api(
         store.close()
 
 
+@router.get("/records/summaries/dates")
+async def list_daily_summary_dates_api(
+    domain: str | None = Query(None),
+    limit: int = Query(400, ge=1, le=3660),
+    user_id: str = Depends(verify_token),
+):
+    """所有有日摘要的日期（倒序去重）。供前端日历把「没有摘要的日子」置灰。
+
+    ⚠️ 这个路由必须定义在 `/records/summaries/{date_str}` **之前**：FastAPI 按注册
+    顺序匹配，否则 "dates" 会被当成 date_str 传进 `date.fromisoformat()` 直接 400。
+    """
+    store = _structured_store()
+    try:
+        return {"dates": store.list_daily_summary_dates(memory_domain=domain, limit=limit)}
+    finally:
+        store.close()
+
+
 @router.get("/records/summaries/{date_str}")
 async def get_daily_summaries_by_date(
     date_str: str,

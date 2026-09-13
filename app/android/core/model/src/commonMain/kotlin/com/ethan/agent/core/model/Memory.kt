@@ -96,3 +96,7 @@ data class ConfirmRecordResponse(
 
 @Serializable
 data class DailySummariesResponse(val items: List<JsonElement> = emptyList())
+
+/** 所有有日摘要的日期（`yyyy-MM-dd`，倒序）。用于日历置灰没内容的日子。 */
+@Serializable
+data class DailySummaryDatesResponse(val dates: List<String> = emptyList())
