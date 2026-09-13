@@ -7,8 +7,14 @@
       "DOM",
       "DOM.Iterable"
     ],
+    // types 一旦写了就只会自动包含列出的包，其余 @types/* 全部被排除。
+    // react-syntax-highlighter 没有自带 d.ts，子路径（styles/prism、
+    // languages/prism/*）的类型全靠 @types/react-syntax-highlighter 里的
+    // declare module 提供；不显式列出它，这些 declare module 就是死代码，
+    // strict 下会因 TS7016 全线报错（web 侧没设 types，所以一直没暴露）。
     "types": [
-      "vite/client"
+      "vite/client",
+      "react-syntax-highlighter"
     ],
     "skipLibCheck": true,
     "jsx": "react-jsx",

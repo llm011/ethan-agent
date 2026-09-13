@@ -1,8 +1,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Check, Copy, WrapText } from "lucide-react";
+import { registerPrismLanguages } from "./prism-languages";
+
+// 语言白名单与注册集中在 prism-languages.ts（全仓库一份）。用 PrismLight 而非
+// Prism 是为了不把 prism 的 ~300 种语言全打进包——详见该模块的注释。
+const SyntaxHighlighter = registerPrismLanguages();
 
 interface CodeBlockProps {
   language: string;

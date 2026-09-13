@@ -6,7 +6,11 @@ import {
   WrapText, Copy, Check, BrainCircuit, MessageSquareText, X, Ban, CircleHelp
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { registerPrismLanguages } from "./prism-languages";
+
+// 必须走共享的 PrismLight 实例：只要这里还 import 全量 `Prism`，
+// 那 300 种语言就会顺着这个 import 重新进包，code-block 的瘦身就白做了。
+const SyntaxHighlighter = registerPrismLanguages();
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
