@@ -87,6 +87,8 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 **Session loading**
 - Images read by the agent are stored on disk (`~/.ethan/assets/images/<session_id>/`) and cards carry only a relative path — never inline base64, which is what used to make opening a session take seconds
+- Messages load **one page at a time**: the first screen fetches only the latest 30 and older pages stream in as you scroll up (`limit` / `before` on `GET /sessions/{id}`, with `has_more` / `oldest_id` as the cursor). On the largest real session this took opening a chat from 1602 ms / 9.06 MB down to 10 ms / 304 KB
+- Streaming and pagination coexist safely: finished runs merge the new tail into the already-loaded history instead of replacing it, so pages you scrolled back through never vanish
 - Opening a session renders from a local cache first (IndexedDB on web, localStorage on desktop) while the network response loads in the background; existing inline-base64 cards are converted to asset paths once at startup
 
 **Multi-channel**
@@ -605,6 +607,49 @@ Environment variables in `.env` override config values (useful for secrets).
 │   └── <name>/
 │       └── SKILL.md
 └── sessions.db          # Session history (SQLite)
+```
+
+---
+
+## Feature checklist
+
+### Tool calls
+
+```bash
+# 1. Web search
+Send: "What's the CNY/USD exchange rate today?"
+Verify: the tool timeline shows web_search
+
+# 2. Shell execution
+Send: "List the files in the current directory"
+Verify: the shell tool runs and returns the file list
+
+# 3. Tool result compression (needs a large output)
+Send: "Run find / -name '*.log' 2>/dev/null | head -100"
+Verify: the reply starts with a [summary, N chars of raw output] prefix
+```
+
+### Routing & caching
+
+```bash
+# 1. Fast path speed
+Send: "turn off the light" (or any word in fast_keywords)
+Check the TTFT reading in the REPL status bar or Web UI — should be < 500ms
+
+# 2. Prompt caching
+Send two messages in a row and look at the ⚡cache number on the second one
+If > 0, the cache was hit
+
+# 3. Session open speed
+Ask the agent to read a local image, then click back into that session
+In DevTools Network, GET /sessions/{id} should be a few hundred KB (not MB)
+Card images should load from assets/images/, not start with data:image/png;base64
+
+# 4. Long-session paging
+Open a session with a few hundred messages and watch the first-screen request,
+GET /sessions/{id}?limit=30 — the body should hold only the latest 30 messages
+(a few hundred KB). Scrolling up fires another request with before=<oldest_id>,
+and once you reach the start (first user message) it stops: has_more=false
 ```
 
 ---

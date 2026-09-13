@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback, useState } from "react";
 import { ArrowDown } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import type { Message } from "@ethan/shared/chat/types";
+import { isPersistedId } from "@ethan/shared/chat/history";
 import type { Annotation } from "@/lib/api";
 
 // 首屏显示的消息数量（约 5 轮对话 = 10 条消息）
@@ -25,10 +26,16 @@ interface MessageListProps {
   onActionConfirm?: (message: string) => void;
   onResume?: (msg: Message) => void;
   onRefresh?: () => void;
+  /** 上滚触顶时加载更早一页；返回是否真的加载到了内容（没加载到就停止继续请求）。 */
+  onLoadOlder?: () => Promise<void>;
+  /** 服务端是否还有更早的消息（false = 已经到会话开头，不再显示加载指示器）。 */
+  hasOlder?: boolean;
+  /** 正在加载更早一页（显示加载指示器，并防止并发重复请求）。 */
+  loadingOlder?: boolean;
   annotationsByMessage?: Record<number, Annotation[]>;
 }
 
-export function MessageList({ messages, streaming, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, pendingInjected, onRemoveInjected, onCancelTool, onActionConfirm, onResume, onRefresh, annotationsByMessage }: MessageListProps) {
+export function MessageList({ messages, streaming, sessionId, onQuote, onCardAction, onRead, onShare, onDelete, onInject, pendingInjected, onRemoveInjected, onCancelTool, onActionConfirm, onResume, onRefresh, onLoadOlder, hasOlder, loadingOlder, annotationsByMessage }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -66,30 +73,57 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
   const startIdx = hasMore ? messages.length - visibleCount : 0;
   const visibleMessages = messages.slice(startIdx);
 
+  // 加载中标志用 ref 兜住，避免 IntersectionObserver 回调闭包拿到 stale state
+  // 而在请求飞行期间反复触发（同一个哨兵会连续回调好几次）。
+  const loadingRef = useRef(false);
+  useEffect(() => { loadingRef.current = !!loadingOlder; }, [loadingOlder]);
+
+  // 哨兵可见时要往外「再要一屏」吗？
+  // - 本地窗口还有未展开的消息 → 纯前端展开（快，无网络）
+  // - 本地窗口已到已加载数据的开头，且服务端还有更早的 → 拉下一页
+  const needOlder =
+    !hasMore && !!hasOlder && !!onLoadOlder && !loadingOlder && messages.length > 0;
+
   // 向上滚动触顶时加载更多（IntersectionObserver 监听哨兵元素）
   useEffect(() => {
     const container = scrollRef.current;
     const sentinel = sentinelRef.current;
-    if (!container || !sentinel || !hasMore) return;
+    if (!container || !sentinel) return;
+    if (!hasMore && !needOlder) return;
 
     const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          // 记录加载前的滚动高度，加载后恢复位置防止跳动
-          const prevScrollHeight = container.scrollHeight;
+      async (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        if (loadingRef.current) return;
+
+        // 记录加载前的滚动高度，加载后恢复位置防止跳动
+        const prevScrollHeight = container.scrollHeight;
+
+        if (hasMore) {
+          // 展开本地已加载的部分
           setVisibleCount((c) => Math.min(c + LOAD_MORE_COUNT, messages.length));
-          // 恢复滚动位置：下一帧等 DOM 更新后调整 scrollTop
-          requestAnimationFrame(() => {
-            const newScrollHeight = container.scrollHeight;
-            container.scrollTop += newScrollHeight - prevScrollHeight;
-          });
+        } else if (needOlder) {
+          loadingRef.current = true;
+          try {
+            await onLoadOlder!();
+          } finally {
+            // 请求返回后 messages 变长，本 effect 会重跑并重新挂 observer；
+            // 这里只负责复位，避免异常路径把标志卡在 true。
+            loadingRef.current = false;
+          }
         }
+
+        // 恢复滚动位置：下一帧等 DOM 更新后调整 scrollTop
+        requestAnimationFrame(() => {
+          const newScrollHeight = container.scrollHeight;
+          container.scrollTop += newScrollHeight - prevScrollHeight;
+        });
       },
       { root: container, threshold: 0, rootMargin: "100px 0px 0px 0px" }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, messages.length]);
+  }, [hasMore, needOlder, messages.length, onLoadOlder]);
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -153,8 +187,10 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
     <div className="relative flex-1 flex flex-col min-h-0">
     <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4">
       <div className="max-w-3xl mx-auto w-full flex flex-col gap-6">
-        {/* 顶部加载更多指示器 */}
-        {hasMore && (
+        {/* 顶部加载更多指示器：
+            本地还有未展开的消息、或服务端还有更早一页时都要挂哨兵。
+            hasOlder=false（已到会话开头）时刻意不渲染，避免"一直转圈但其实没有了"。 */}
+        {(hasMore || needOlder || loadingOlder) && (
           <div ref={sentinelRef} className="flex items-center justify-center py-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/50" />
@@ -189,7 +225,7 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
             onActionConfirm={onActionConfirm}
             onResume={onResume}
             onRefresh={onRefresh}
-            annotations={msg.id != null ? annotationsByMessage?.[msg.id] : undefined}
+            annotations={isPersistedId(msg.id) ? annotationsByMessage?.[msg.id] : undefined}
           />
         ))}
       </div>

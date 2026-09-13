@@ -10,6 +10,7 @@ import {
   type ModeEntry,
   type ModelEntry,
   fetchSession,
+  fetchSessionPage,
   deleteMessage,
   fetchSchedules,
   streamChat,
@@ -36,6 +37,7 @@ import {
   type Annotation,
 } from "@/lib/api";
 import { readSessionDetail, updateSessionDetail, writeSessionDetail } from "@/lib/session-db";
+import { MESSAGE_PAGE_SIZE, isPersistedId, prependOlderMessages, replaceTailKeepOlder } from "@ethan/shared/chat/history";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
 import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
@@ -67,6 +69,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
   const [streaming, setStreaming] = useState(false);
+  // ── 消息分页 ──
+  // 长会话（最多 953 条 / 11MB）一次全量拉会卡好几秒，所以首屏只取最近一页，
+  // 上滚时再按 before 往回想。hasOlder=false 表示已经翻到会话开头。
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // 正在翻页的会话 id：请求返回时若会话已经切走，就丢弃结果，
+  // 否则会出现"A 会话的旧消息被塞进 B 会话"的串台。
+  const olderReqSessionRef = useRef<string | null>(null);
   // streaming 的同步镜像：state 批处理有延迟，handleSend 用 ref 读取最新值，
   // 避免刚切到新会话时旧 streaming=true 还没刷新就被 if(streaming) return 拦截
   const streamingRef = useRef(false);
@@ -233,7 +243,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   }, []);
 
   const handleDelete = useCallback(async (msg: Message) => {
-    if (!activeSession || msg.id == null) return;
+    // 删除是写操作，必须有落库后的数字 id（流式中的占位消息还不存在于后端）
+    if (!activeSession || !isPersistedId(msg.id)) return;
     if (!confirm("确定删除这条消息？删除后从会话移除，后续对话不再带上其上下文。")) return;
     try {
       await deleteMessage(activeSession, msg.id);
@@ -278,7 +289,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   }, [activeSession]);
 
   const handleQuote = useCallback((m: Message) => {
-    setQuote({ role: m.role, content: m.content, message_id: m.id });
+    setQuote({ role: m.role, content: m.content, message_id: isPersistedId(m.id) ? m.id : undefined });
     setTimeout(() => inputRef.current?.focus(), 30);
   }, []);
 
@@ -304,21 +315,63 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   // 后台会话（定时任务等）执行中无 SSE 可连时，供「任务执行中」占位条拉取最新消息。
   // 不清空旧消息/不闪 loading：静默替换；正在流式输出时跳过，避免覆盖实时消息。
+  // 上滚加载更早一页。
+  // 以「当前列表里最旧的已落库消息 id」当 before 游标往后翻；拿到的一页按 id 去重
+  // 前插，并用后端返回的 has_more 决定还能不能继续翻。
+  const handleLoadOlder = useCallback(async () => {
+    const sid = activeSession;
+    if (!sid || loadingOlder) return;
+
+    // 找最旧的「已落库」消息 id：临时 id / 本地乐观消息不能当游标（后端不认识）。
+    const oldest = messagesRef.current.find(
+      (m) => typeof m.id === "number" && Number.isFinite(m.id),
+    );
+    if (typeof oldest?.id !== "number") {
+      setHasOlder(false);
+      return;
+    }
+
+    olderReqSessionRef.current = sid;
+    setLoadingOlder(true);
+    try {
+      const detail = await fetchSessionPage(sid, { limit: MESSAGE_PAGE_SIZE, before: oldest.id });
+      // 会话已切走：丢弃这一页，避免串台
+      if (olderReqSessionRef.current !== sid || !detail) return;
+      const older = mapDetailMessages(detail);
+      if (older.length > 0) {
+        setMessages((prev) => prependOlderMessages(prev, older));
+        fetchAnnotationsFor(older);
+      }
+      setHasOlder(detail.has_more ?? older.length >= MESSAGE_PAGE_SIZE);
+    } catch {
+      // 拉取失败：保留 hasOlder 原值，用户再上滚还能重试
+    } finally {
+      if (olderReqSessionRef.current === sid) {
+        olderReqSessionRef.current = null;
+        setLoadingOlder(false);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSession, loadingOlder]);
+
   const handleRefreshSession = useCallback(async () => {
     const sid = activeSession;
     if (!sid || streaming || bgPolling) return;
-    const detail = await fetchSession(sid).catch(() => null);
+    // 只拉最近一页：这里是「后台会话执行中」的静默刷新，全量拉长会话要好几秒。
+    // 用 replaceTailKeepOlder 保留用户已上滚翻出来的更早历史，不能整表替换。
+    const detail = await fetchSessionPage(sid, { limit: MESSAGE_PAGE_SIZE }).catch(() => null);
     if (!detail) return;
     setSessionTitle(detail.title || "");
     const loaded = mapDetailMessages(detail);
-    setMessages(loaded);
+    setMessages((prev) => replaceTailKeepOlder(prev, loaded));
     fetchAnnotationsFor(loaded);
     setSessionUsage(historicUsageOf(detail));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession, streaming, bgPolling]);
 
   const handleResume = useCallback(async (msg: Message) => {
-    if (!activeSession || msg.id == null) return;
+    // 续跑要指定「从哪条消息之后继续」，必须是后端认得的真实 id
+    if (!activeSession || !isPersistedId(msg.id)) return;
     _setStreaming(true);
     setPendingInjected([]); // 新 run：待处理队列重新开始
     streamAbortRef.current?.abort();
@@ -360,6 +413,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
+
+    // 切会话时先把分页状态归零：否则上一个会话的 hasOlder 会残留，
+    // 新会话（可能只有 3 条）会误以为还能往上翻。
+    // 在途的翻页请求靠 olderReqSessionRef 失配丢弃，不会串到新会话。
+    olderReqSessionRef.current = null;
+    setHasOlder(false);
+    setLoadingOlder(false);
 
     if (!initialSessionId) {
       // 切换到新会话 — 保存当前输入并切换状态机
@@ -426,7 +486,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       fetchAnnotationsFor(cachedMsgs);
     }).catch(() => {});
 
-    fetchSession(initialSessionId)
+    fetchSessionPage(initialSessionId, { limit: MESSAGE_PAGE_SIZE })
       .then(async (detail) => {
         if (cancelled) return;
         // 竞态保护：如果 handleSend 已经基于 initialSessionId 启动了流式响应，
@@ -449,6 +509,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setSelectedModel(detail.model);
         setMode(detail.mode || "");
         setSessionUsage(historicUsageOf(detail));
+        // 首屏只拉了一页：记下后端说的「还有更早的」，上滚时据此决定要不要再请求。
+        // has_more 缺失时（老后端 / 缓存）按「拉满一页就还有」保守推断。
+        setHasOlder(detail.has_more ?? loaded.length >= MESSAGE_PAGE_SIZE);
         // 回写离线缓存：下次点开会话可先用缓存立即渲染（SWR）
         writeSessionDetail(initialSessionId, detail).catch(() => {});
 
@@ -954,6 +1017,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         onActionConfirm={handleActionConfirm}
         onResume={handleResume}
         onRefresh={handleRefreshSession}
+        onLoadOlder={handleLoadOlder}
+        hasOlder={hasOlder}
+        loadingOlder={loadingOlder}
         annotationsByMessage={annotationsByMessage}
         pendingInjected={pendingInjected}
         onRemoveInjected={handleRemoveInjected}
@@ -973,11 +1039,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         key={readingMessage?.id ?? "closed"}
         open={readingMessage != null}
         message={readingMessage}
-        annotations={readingMessage?.id != null ? (annotationsByMessage[readingMessage.id] ?? []) : []}
+        annotations={readingMessage && isPersistedId(readingMessage.id) ? (annotationsByMessage[readingMessage.id] ?? []) : []}
         sessionId={activeSession ?? undefined}
         onClose={() => setReadingMessage(null)}
         onChange={handleAnnotationsChange}
-        onEditContent={readingMessage?.id != null ? (content) => handleEditContent(readingMessage.id!, content) : undefined}
+        onEditContent={readingMessage && isPersistedId(readingMessage.id) ? (content) => handleEditContent(readingMessage.id as number, content) : undefined}
       />
 
       <ShareMode

@@ -73,7 +73,10 @@ export type CardData = SearchResultCard | ImageCard | FileCard;
 
 export interface Message {
   role: "user" | "assistant";
-  id?: number;            // 后端消息行 id（assistant 落库后才有），标注按此持久化
+  // 后端消息行 id（落库后才有），标注按此持久化。
+  // 流式期间占位消息会先用 `tmp:xxx` 形式的临时 id（见 @ethan/shared/chat/history），
+  // 这样气泡从第一帧起就有稳定 key；后端返回真实 id 后再提升成数字。
+  id?: number | string;
   content: string;
   files?: string[];
   toolSteps?: ToolStep[];

@@ -52,7 +52,9 @@ interface ToolTimelineProps {
   /** 取消正在运行的工具调用（tool_call_id）。仅在工具 running 状态可用。 */
   onCancelTool?: (toolCallId: string) => void;
   sessionId?: string;
-  messageId?: number;
+  // 后端消息行 id。流式期间占位消息还是 `tmp:xxx` 临时 id（不是数字），
+  // 此时拿不到「原始参数/结果」接口要的数字 id，直接不渲染这两个入口。
+  messageId?: number | string;
   fetchToolRaw?: (sessionId: string, messageId: number, index: number, field: "args" | "result" | "both", toolCallId?: string) => Promise<{ args?: string; result?: string }>;
 }
 
@@ -400,27 +402,30 @@ function ArgsPopover({ text, maxW = "max-w-[800px]", onFetchFull }: { text: stri
   );
 }
 
-function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool, sessionId, messageId, stepIndex, fetchToolRaw }: { step: ToolStep; isLast: boolean; highlight: boolean; fallbackCards?: SearchResultCard[]; onCancelTool?: (toolCallId: string) => void; sessionId?: string; messageId?: number; stepIndex: number; fetchToolRaw?: (sessionId: string, messageId: number, index: number, field: "args" | "result" | "both", toolCallId?: string) => Promise<{ args?: string; result?: string }> }) {
+function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool, sessionId, messageId, stepIndex, fetchToolRaw }: { step: ToolStep; isLast: boolean; highlight: boolean; fallbackCards?: SearchResultCard[]; onCancelTool?: (toolCallId: string) => void; sessionId?: string; messageId?: number | string; stepIndex: number; fetchToolRaw?: (sessionId: string, messageId: number, index: number, field: "args" | "result" | "both", toolCallId?: string) => Promise<{ args?: string; result?: string }> }) {
   const hasSubs = step.sub_steps && step.sub_steps.length > 0;
   const [subOpen, setSubOpen] = useState(false);
   const isDelegate = step.tool === "delegate_coding";
   const subDoneCount = hasSubs ? step.sub_steps!.filter(s => s.state !== "running").length : 0;
 
+  // 只有落库后的数字 id 才能查；占位消息的 tmp id 会被后端当非法路径参数拒掉。
+  const numericMessageId = typeof messageId === "number" ? messageId : undefined;
+
   const fetchArgs = useMemo(() => {
-    if (!fetchToolRaw || !sessionId || messageId == null) return undefined;
+    if (!fetchToolRaw || !sessionId || numericMessageId == null) return undefined;
     return async () => {
-      const data = await fetchToolRaw(sessionId, messageId, stepIndex, "args", step.id);
+      const data = await fetchToolRaw(sessionId, numericMessageId, stepIndex, "args", step.id);
       return data.args;
     };
-  }, [fetchToolRaw, sessionId, messageId, stepIndex, step.id]);
+  }, [fetchToolRaw, sessionId, numericMessageId, stepIndex, step.id]);
 
   const fetchResult = useMemo(() => {
-    if (!fetchToolRaw || !sessionId || messageId == null) return undefined;
+    if (!fetchToolRaw || !sessionId || numericMessageId == null) return undefined;
     return async () => {
-      const data = await fetchToolRaw(sessionId, messageId, stepIndex, "result", step.id);
+      const data = await fetchToolRaw(sessionId, numericMessageId, stepIndex, "result", step.id);
       return data.result;
     };
-  }, [fetchToolRaw, sessionId, messageId, stepIndex, step.id]);
+  }, [fetchToolRaw, sessionId, numericMessageId, stepIndex, step.id]);
 
   const hasDetail = (step.thought || step.result_detail) && step.state !== "running";
   const [detailOpen, setDetailOpen] = useState(false);

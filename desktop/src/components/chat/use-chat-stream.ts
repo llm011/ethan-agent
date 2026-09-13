@@ -1,5 +1,6 @@
 import type { StreamChunk } from "@/lib/api";
 import { notifyDesktop } from "@/lib/notify";
+import { MESSAGE_PAGE_SIZE, makeTempId, replaceTailKeepOlder } from "@ethan/shared/chat/history";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
 import type { Message, Usage } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
@@ -90,7 +91,10 @@ export async function consumeStream(
   let messageId: number | undefined;
   let finalUsage: Usage | undefined;
   let finalModel: string | undefined;
-  setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel }]);
+  // 占位 assistant 气泡：先生成一个临时 id，让气泡从第一帧起就有稳定 React key
+  // （分页后列表会整体前插，用下标当 key 会错位）。后端落库后提升成真实 id。
+  const placeholderId = makeTempId();
+  setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel, id: placeholderId }]);
 
   let _rafId: number | null = null;
   const buildMsg = (extra?: Partial<Message>): Message => ({
@@ -474,17 +478,22 @@ export async function consumeStream(
           failed = false;
           // 跳过下方的错误渲染，直接进 finally 后的 setMessages
         } else {
-          // 无活跃 run：后端已完成，拉最终结果
-          const { fetchSession } = await import("@/lib/api-sessions");
-          const fresh = await fetchSession(activeSession);
+          // 无活跃 run：后端已完成，拉最终结果。
+          // 只拉最近一页而不是全量：长会话全量拉要好几秒，而这里只是为了定稿
+          // 最后一条 assistant 消息，更早的历史前端已经按页加载过了。
+          const { fetchSessionPage } = await import("@/lib/api-sessions");
+          const fresh = await fetchSessionPage(activeSession, { limit: MESSAGE_PAGE_SIZE });
           if (fresh?.messages?.length) {
             const { mapDetailMessages } = await import("@/components/chat/chat-helpers");
             const freshMsgs = mapDetailMessages(fresh);
             // 后端可能压根没存下用户刚发的那条 query（如建 agent 阶段就失败，
             // 或落库异常）。若这里直接用后端结果整表替换，用户会看到自己发的
             // 消息"凭空消失"。因此把 baseMessages 里后端缺失的 user 消息补回去。
+            //
+            // 关键：不能整表替换 —— 用户上滚翻出来的更早几页不在这一页里，
+            // 直接 setMessages(这一页) 会让它们凭空消失。
             const mergedMsgs = mergeMissingUserMessages(baseMessages, freshMsgs);
-            setMessages(mergedMsgs);
+            setMessages(prev => replaceTailKeepOlder(prev, mergedMsgs));
             setBgPolling(null);
             setConsentRequest(null);
             setCleanupConfirm(null);
@@ -550,7 +559,8 @@ export async function consumeStream(
       mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
       cards: cardsCollected.length > 0 ? (cardsCollected as unknown as Message["cards"]) : undefined,
       matchedSkills: currentMatchedSkills,
-      id: messageId,
+      // 兜底：没有占位气泡可改时新加一条，同样优先用真实 id
+      id: messageId ?? placeholderId,
       intermediateOutput: intermediateOutput || undefined,
       model: finalModel,
       error: lastError || undefined,
