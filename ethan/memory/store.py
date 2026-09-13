@@ -1144,6 +1144,21 @@ class MemoryStore:
             """, (summary.user_id, summary.local_date, summary.pipeline_version, summary.memory_domain)).fetchone()
         return row["id"]
 
+    def count_daily_summaries(self, *, memory_domain: str | None = None) -> int:
+        """日摘要总数。
+
+        过滤口径必须与 `list_daily_summaries` 完全一致 —— 前端拿 `total` 算
+        「还有没有下一页」，两者不自洽就会少翻一页或多转一次圈。
+        """
+        if memory_domain:
+            row = self._get_conn().execute(
+                "SELECT COUNT(*) AS n FROM daily_summaries WHERE memory_domain=?",
+                (memory_domain,),
+            ).fetchone()
+        else:
+            row = self._get_conn().execute("SELECT COUNT(*) AS n FROM daily_summaries").fetchone()
+        return int(row["n"])
+
     def list_daily_summaries(
         self, *, memory_domain: str | None = None, limit: int = 30, offset: int = 0
     ) -> list[dict[str, Any]]:

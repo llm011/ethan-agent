@@ -343,9 +343,15 @@ async def list_daily_summaries_api(
     offset: int = Query(0, ge=0),
     user_id: str = Depends(verify_token),
 ):
+    """日摘要分页。
+
+    和 `/facts`、`/records`、`/insights` 一样返回 `total`：前端拿它判断
+    「还有没有下一页」，缺了就只能靠「本页是否满」猜 —— 恰好整除时会多转一次圈。
+    """
     store = _structured_store()
     try:
-        return {"items": store.list_daily_summaries(memory_domain=domain, limit=limit, offset=offset)}
+        items = store.list_daily_summaries(memory_domain=domain, limit=limit, offset=offset)
+        return {"items": items, "total": store.count_daily_summaries(memory_domain=domain)}
     finally:
         store.close()
 

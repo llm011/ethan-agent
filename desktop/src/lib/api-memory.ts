@@ -297,7 +297,7 @@ export async function wakeScopeMemories(scopeType: string, scopeId: string): Pro
 
 export interface DailySummariesPage {
   items: DailySummary[];
-  /** 后端目前不返回 total；null 表示「不知道」，由调用方按页大小判断。 */
+  /** 后端返回的总条数（用于判断「还有没有下一页」）。null 只为兼容不返回 total 的旧后端。 */
   total: number | null;
 }
 

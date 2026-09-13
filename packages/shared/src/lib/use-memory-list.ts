@@ -9,7 +9,7 @@
  * 各写一版然后慢慢漂移（一处 300ms、一处 250ms，一处提前 2 条、一处提前 10 条）。
  */
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 
 /**
  * 双击判定窗口（毫秒）。
@@ -106,26 +106,4 @@ export function useLoadMoreOnReachEnd(
   }, [hasMore, loading]);
 
   return sentinelRef;
-}
-
-/** 记录某个 tab 是否已经加载过首页，避免来回切 tab 反复请求。 */
-export function useLoadedTabs<T extends string>(): {
-  markLoaded: (key: T) => void;
-  hasLoaded: (key: T) => boolean;
-  reset: (key: T) => void;
-} {
-  const loaded = useRef(new Set<T>());
-  const [, force] = useState(0);
-  return {
-    markLoaded: useCallback((key: T) => {
-      if (!loaded.current.has(key)) {
-        loaded.current.add(key);
-        force((n) => n + 1);
-      }
-    }, []),
-    hasLoaded: useCallback((key: T) => loaded.current.has(key), []),
-    reset: useCallback((key: T) => {
-      loaded.current.delete(key);
-    }, []),
-  };
 }

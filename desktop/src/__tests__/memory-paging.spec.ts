@@ -11,7 +11,9 @@ import {
   MEMORY_PAGE_SIZE,
   appendPage,
   hasMoreAfter,
+  mergePage,
   replaceHeadKeepLater,
+  type LoadedList,
 } from "@ethan/shared/lib/memory-paging";
 
 interface Item {
@@ -120,5 +122,62 @@ describe("replaceHeadKeepLater", () => {
     const fresh = page(0, MEMORY_PAGE_SIZE);
     const result = replaceHeadKeepLater(loaded, fresh);
     expect(result.length).toBe(MEMORY_PAGE_SIZE + 5);
+  });
+});
+
+describe("mergePage", () => {
+  const loaded = (items: Item[], offset: number): LoadedList<Item> => ({ items, offset });
+
+  it("刷新第一页时保留已翻出来的页，水位不回退（这是 P0 的回归锁）", () => {
+    // 已翻到第 2 页（页大小 2，共 4 条）
+    const prev = loaded(page(0, 4), 4);
+    // 删掉 m1 → 服务端补一条 m2 上来，第一页变成 [m0, m2]
+    const next = mergePage(prev.items, [item("m0"), item("m2")], 0, true, 2);
+
+    expect(next.items.map((i) => i.id)).toEqual(["m0", "m2", "m3"]);
+    // 关键：水位是 3（跟着保留后的列表走），不是被第一页的 2 打回去。
+    // 旧实现用 items.length 现算 + 整体替换成第一页，这里会退成 2 → 重复拉一页
+    expect(next.offset).toBe(3);
+  });
+
+  it("追加时水位按请求量推进，不因去重而卡住", () => {
+    const prev = loaded(page(0, 3), 3);
+    // 服务端重排，第二页把 m2 又发了一次
+    const next = mergePage(prev.items, page(2, 3), 3, true);
+
+    expect(next.items.map((i) => i.id)).toEqual(["m0", "m1", "m2", "m3", "m4"]);
+    // 去重后列表只有 5 条，但水位必须按「请求了 3 条」走到 6，
+    // 否则下次会从 5 开始拉，把 m4 再拉一遍
+    expect(next.offset).toBe(6);
+  });
+
+  it("换查询时整体重建，不保留上一个查询的页", () => {
+    const prev = loaded(page(0, 4, "a"), 4);
+    const next = mergePage(prev.items, page(0, 2, "b"), 0, false, 2);
+
+    expect(next.items.map((i) => i.id)).toEqual(["b0", "b1"]);
+    expect(next.offset).toBe(2);
+  });
+
+  it("刷新拿到空页时列表与水位都不动（宁可不动也不清空）", () => {
+    const prev = loaded(page(0, 4), 4);
+    const next = mergePage(prev.items, [], 0, true, 2);
+
+    expect(next.items).toBe(prev.items);
+    expect(next.offset).toBe(4);
+  });
+
+  it("第一页没铺满说明本来就到头了，后续页不保留", () => {
+    const prev = loaded(page(0, 4), 4);
+    const next = mergePage(prev.items, page(0, 1), 0, true, 2);
+
+    expect(next.items.map((i) => i.id)).toEqual(["m0"]);
+    expect(next.offset).toBe(1);
+  });
+
+  it("首屏（offset 0 + 新查询）水位等于本页条数", () => {
+    const next = mergePage([], page(0, 2), 0, false, 2);
+    expect(next.items.map((i) => i.id)).toEqual(["m0", "m1"]);
+    expect(next.offset).toBe(2);
   });
 });

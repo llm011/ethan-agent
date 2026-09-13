@@ -101,3 +101,48 @@ export function replaceHeadKeepLater<T extends IdentifiedItem>(
   const freshIds = new Set(fresh.map((i) => i.id));
   return [...fresh, ...kept.filter((i) => !freshIds.has(i.id))];
 }
+
+/** 列表内容 + 它已经覆盖到的服务端偏移。两者必须一起更新，否则会出现缺口或重复。 */
+export interface LoadedList<T> {
+  items: T[];
+  offset: number;
+}
+
+/**
+ * 把刚拉到的一页并入列表，并给出新的偏移水位。
+ *
+ * 这是「刷新首页」和「追加下一页」的统一入口。**水位不能拿 `items.length` 现算**：
+ * 追加时 `appendPage` 会按 id 去重，列表长得比实际拉取的偏移慢；刷新时列表会先
+ * 缩水再涨回来。这两种情况都会让下一次 `loadMore` 用错 offset —— 重复拉已看过的
+ * 页（去重后界面看不出来，只是白转圈），或者跳过一整页。
+ *
+ * 分三种情况：
+ * - `offset > 0`：追加下一页。水位推进到 `offset + 本页条数`。
+ * - `offset === 0` 且 `sameQuery`：刷新第一页。编辑/删除一条记忆后，列表里可能已经
+ *   有用户翻出来的好几页，这里只替换第一页覆盖的范围，后面的原样留着，水位随之
+ *   只前进不回退（否则每编辑一次就丢一页进度）。
+ * - `offset === 0` 且换查询：切 tab / 改日期 / 切归档视图。新查询和旧列表没有关系，
+ *   整体重建，水位归零重算。
+ *
+ * @param prev      当前列表
+ * @param page      刚拉到的一页
+ * @param offset    本次请求用的 offset
+ * @param sameQuery 本次请求和当前列表是不是同一个查询
+ * @param pageSize  本次请求的页大小（算「第一页是否铺满」用）
+ */
+export function mergePage<T extends IdentifiedItem>(
+  prev: T[],
+  page: T[],
+  offset: number,
+  sameQuery: boolean,
+  pageSize: number = MEMORY_PAGE_SIZE,
+): LoadedList<T> {
+  if (offset > 0) {
+    return { items: appendPage(prev, page), offset: offset + page.length };
+  }
+  if (!sameQuery) {
+    return { items: page, offset: page.length };
+  }
+  const items = replaceHeadKeepLater(prev, page, pageSize);
+  return { items, offset: items.length };
+}

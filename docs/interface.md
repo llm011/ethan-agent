@@ -234,8 +234,14 @@ CLI 内部维护 `WorkingMemory` 实例：
 | `GET /memory/records` | `limit` / `offset` / `total`；`type` 支持逗号分隔多值 |
 | `GET /memory/insights` | `limit` / `offset` / `total` |
 | `GET /memory/insights/date/{d}` | 同上（两条分支前端共用一套判断） |
+| `GET /memory/records/summaries` | `limit` / `offset` / `total`；按日期查的那条分支不分页，见下 |
 | `GET /memory/procedures` | **刻意不分页**，只回 `total`，见下 |
 | `GET /memory/records/search` | **刻意不分页**，只有 `limit` |
+
+⚠️ **`/records/summaries` 也带 `total`**（`MemoryStore.count_daily_summaries`，过滤口径与
+`list_daily_summaries` 一致）。缺了它前端只能退回「本页是否满」猜下一页，摘要条数恰好是页大小
+整数倍时会多转一次圈、多发一个空请求。另外按日期查走的是 `/records/summaries/{date}`，那条
+分支**忽略 `offset`**（一天 1-2 条），前端此时不承诺「还有更多」——否则滚到底会反复拉同一份。
 
 ⚠️ **`/facts` 的 status 过滤必须作用在分页之前**。旧实现是
 `list_memories(limit=1000)` 拉回来再在 Python 里按
@@ -264,9 +270,25 @@ system prompt，它长到需要分页本身是另一个问题。要做的话前�
 所以 Android 侧单独记 `factsOffset` / `insightsOffset` / `recordsOffset`（服务端口径的
 已消费条数），而不是用 `list.size`。
 
+Web / Desktop 侧同理，只是换了个形状：列表和它已覆盖的偏移合成一个 `LoadedList`
+（`items` + `offset`，见 `@ethan/shared/lib/memory-paging` 的 `mergePage`）——**两者必须
+一起更新**，用组件里的 `memories.length` 现算就是上面那个坑。三种情况：
+
+- **追加一页**：水位推进到 `offset + 本页条数`，不能拿去重后的列表长度（去重会让 list 长得比
+  实际拉取的偏移慢，水位跟着卡住、把同一页反复拉）。
+- **刷新第一页**（编辑 / 删除 / 唤醒 / 沉淀后）：只替换第一页覆盖的范围
+  （`replaceHeadKeepLater`），用户已经翻出来的后续页原样留着，水位跟着保留后的列表走。
+  直接 `setItems(firstPage)` 会让列表整个缩回第一页，再滚到底又把第二页重发一遍——
+  体感是「越删越翻不到底」。
+- **换查询**（切 tab / 改日期筛选 / 切归档视图）：新列表和旧的没有关系，整体重建，水位重算。
+  判断依据是 `activeTab|dateFilter|showDormant` 组成的查询键，不是「是不是刷新」。
+
+回归测试锁在 `desktop/src/__tests__/memory-paging.spec.ts` 的 `mergePage` 那组。
+
 **双击 tab 回到顶部**：三端都有，且都保留单击切换。Android 走
 `EthanScrollableTabBar(onTabDoubleTap=...)`（不传时仍是原来的 `clickable`，不吃那
-~300ms 延迟），Web/Desktop 走原生 `onDoubleClick`。注意这是**用户主动触发**的滚动——
+~300ms 延迟），Web/Desktop 走 `useDoubleTapTab` 自己计时——原生 `onDoubleClick` 不够用：
+dblclick 一定在 click 之后触发，而那时 tab 已经被切走了。注意这是**用户主动触发**的滚动——
 不要顺手加任何隐式滚动（例如切 tab 时自动回顶），那正是 `FactsListContent` 上方那段
 注释里被删掉的问题。
 

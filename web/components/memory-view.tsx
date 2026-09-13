@@ -22,10 +22,15 @@ import { Badge } from "@ethan/shared/ui/badge";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import {
   MEMORY_PAGE_SIZE,
-  appendPage,
   hasMoreAfter,
+  mergePage,
+  type LoadedList,
 } from "@ethan/shared/lib/memory-paging";
-import { scrollContainerToTop, useDoubleTapTab } from "@ethan/shared/lib/use-memory-list";
+import {
+  scrollContainerToTop,
+  useDoubleTapTab,
+  useLoadMoreOnReachEnd,
+} from "@ethan/shared/lib/use-memory-list";
 import { Archive, Calendar, Check, Loader2, Pencil, RefreshCw, RotateCcw, Trash2, X, Zap } from "lucide-react";
 
 const CJK = /[一-鿿㐀-䶿　-〿＀-￯⺀-⻿]/;
@@ -222,8 +227,12 @@ function DailySummaryCard({ summary }: { summary: DailySummary }) {
 
 export function MemoryView() {
   const [activeTab, setActiveTab] = useState<Tab>("personal");
-  const [memories, setMemories] = useState<StructuredMemory[]>([]);
-  const [summaries, setSummaries] = useState<DailySummary[]>([]);
+  // 列表和它已覆盖的偏移**绑在一起**：分页错位几乎都出在「两者不同步」——
+  // 刷新把列表换回第一页、去重后列表长得比水位慢。合成一个 state 就没法各改各的。
+  const [memoryList, setMemoryList] = useState<LoadedList<StructuredMemory>>({ items: [], offset: 0 });
+  const [summaryList, setSummaryList] = useState<LoadedList<DailySummary>>({ items: [], offset: 0 });
+  const memories = memoryList.items;
+  const summaries = summaryList.items;
   const [dateFilter, setDateFilter] = useState("");
   const [loading, setLoading] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
@@ -252,24 +261,30 @@ export function MemoryView() {
   // 按日期查摘要时不分页（一天通常 1-2 条）；只有「全部日期」才翻页
   const dailyPaged = activeTab === "daily" && !dateFilter;
 
+  // 当前列表对应的是哪个查询。换 tab / 改日期 / 切归档视图 = 换查询，新列表和旧的
+  // 没有关系，必须整体重建；同一个查询下的刷新（编辑/删除/唤醒/沉淀）才保留已翻出来的页。
+  const queryKey = `${activeTab}|${dateFilter}|${showDormant}`;
+  const loadedQueryRef = useRef<string | null>(null);
+
   const loadData = useCallback(async (offset = 0) => {
     if (offset === 0) setLoading(true);
     setEditingId(null);
     setError("");
+    const sameQuery = loadedQueryRef.current === queryKey;
+    loadedQueryRef.current = queryKey;
     try {
       if (activeTab === "daily") {
+        const limit = dailyPaged ? MEMORY_PAGE_SIZE : 90;
         const page = await fetchDailySummariesPage({
           date: dateFilter || undefined,
-          limit: dailyPaged ? MEMORY_PAGE_SIZE : 90,
+          limit,
           offset,
         });
-        if (offset > 0) {
-          setSummaries(prev => [...prev, ...page.items]);
-        } else {
-          setSummaries(page.items);
-        }
-        setHasMore(hasMoreAfter(page.items, page.total ?? undefined, offset));
-        setMemories([]);
+        setSummaryList(prev => mergePage(prev.items, page.items, offset, sameQuery, limit));
+        // 按日期查时后端忽略 offset（一天 1-2 条），这时候不能承诺「还有更多」，
+        // 否则滚到底会反复拉同一份
+        setHasMore(dailyPaged && hasMoreAfter(page.items, page.total ?? undefined, offset));
+        setMemoryList({ items: [], offset: 0 });
         return;
       }
       // 多 type 一次请求（逗号分隔），一个 offset —— 各 type 各分页会错乱
@@ -284,14 +299,10 @@ export function MemoryView() {
       const sorted = [...page.items].sort(
         (a, b) => b.importance - a.importance || b.updated_at - a.updated_at,
       );
-      if (offset > 0) {
-        // 追加分页：不能重排整体（会把已翻出来的页顺序打乱），只在尾部并入
-        setMemories(prev => appendPage(prev, sorted));
-      } else {
-        setMemories(sorted);
-      }
+      // 追加分页时不能重排整体（会把已翻出来的页顺序打乱），mergePage 只在尾部并入
+      setMemoryList(prev => mergePage(prev.items, sorted, offset, sameQuery));
       setHasMore(hasMoreAfter(page.items, page.total, offset));
-      setSummaries([]);
+      setSummaryList({ items: [], offset: 0 });
     } catch (err) {
       console.error(err);
       setError("加载记忆失败，请稍后重试");
@@ -299,33 +310,21 @@ export function MemoryView() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [activeConfig, activeTab, dateFilter, showDormant, dailyPaged]);
+  }, [activeConfig, activeTab, dateFilter, showDormant, dailyPaged, queryKey]);
 
   useEffect(() => {
     loadData(0);
   }, [loadData]);
 
-  /** 滚到底加载下一页。offset 用当前已加载条数（不是页号）。 */
+  /** 滚到底加载下一页。offset 用「已覆盖的偏移水位」，不是当前列表长度。 */
   const loadMore = useCallback(() => {
     if (loadingMore || loading || !hasMore) return;
     setLoadingMore(true);
-    const loaded = activeTab === "daily" ? summaries.length : memories.length;
-    loadData(loaded);
-  }, [activeTab, summaries.length, memories.length, hasMore, loading, loadingMore, loadData]);
+    loadData(activeTab === "daily" ? summaryList.offset : memoryList.offset);
+  }, [activeTab, summaryList.offset, memoryList.offset, hasMore, loading, loadingMore, loadData]);
 
-  // 哨兵进入视野 → 拉下一页。用 IntersectionObserver 而不是 scroll 事件：
-  // 不必每帧读 scrollHeight 触发同步布局。
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !hasMore || loading || loadingMore) return;
-    const observer = new IntersectionObserver(
-      entries => { if (entries.some(e => e.isIntersecting)) loadMore(); },
-      { rootMargin: "200px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore, loadMore]);
+  // 哨兵进入视野 → 拉下一页。observer 的拆卸与回调防抖都在共享 hook 里，两端只此一份。
+  const sentinelRef = useLoadMoreOnReachEnd(hasMore, loading || loadingMore, loadMore);
 
   const scrollToTop = useCallback(() => scrollContainerToTop(viewportRef.current), []);
 

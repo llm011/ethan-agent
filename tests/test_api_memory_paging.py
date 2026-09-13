@@ -10,6 +10,8 @@
 - ``/memory/records`` 的 ``type`` 支持逗号分隔多值，且多值共用**同一个 offset**。
 - ``/memory/insights`` 与 ``/memory/insights/date/{d}`` 形状对齐。
 - ``/memory/procedures`` 刻意不分页（位置下标删除后会整体前移），只补 total。
+- ``/memory/records/summaries`` 同样返回 ``total``：前端靠它判断还有没有下一页，
+  缺了会在条数恰好整除时多拉一个空页。
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from fastapi.testclient import TestClient
 
 from ethan.interface.routers import memory as memory_mod
 from ethan.interface.routers.deps import verify_token
-from ethan.memory.records import MemoryEvidence, MemoryRecord, MemoryStatus
+from ethan.memory.records import DailySummary, MemoryEvidence, MemoryRecord, MemoryStatus
 from ethan.memory.store import MemoryStore
 
 
@@ -302,3 +304,63 @@ def test_procedures_delete_shifts_ids_documented(client, tmp_path, monkeypatch):
     # 「准则 C」从下标 2 前移到 1 —— 分页边界会因此错位
     assert [p["rule"] for p in body["procedures"]] == ["准则 A", "准则 C"]
     assert body["total"] == 2
+
+
+# ── /memory/records/summaries ──────────────────────────────────────────────
+
+def _seed_summaries(store: MemoryStore, dates: list[str], *, domain: str = "general") -> None:
+    for local_date in dates:
+        store.upsert_daily_summary(DailySummary(
+            user_id="", local_date=local_date, pipeline_version="v1",
+            memory_domain=domain, summary_text=f"summary-{local_date}", structured_data={},
+        ))
+
+
+def test_summaries_paging_covers_all_without_gaps(client, store):
+    """日摘要分页必须返回 total，且逐页翻完无重无漏。
+
+    前端 `fetchDailySummariesPage` 靠 `page.total` 判断还有没有下一页；缺了它只能
+    退回「本页是否满」的猜测 —— 条数恰好是页大小整数倍时会多转一次圈、多拉一个空请求。
+    """
+    _seed_summaries(store, [f"2026-07-{d:02d}" for d in range(1, 8)])  # 7 天
+
+    seen: list[str] = []
+    offset = 0
+    while True:
+        body = client.get(
+            "/memory/records/summaries", params={"limit": 3, "offset": offset}
+        ).json()
+        assert body["total"] == 7
+        page = body["items"]
+        assert len(page) <= 3
+        seen.extend(item["id"] for item in page)
+        offset += len(page)
+        if offset >= body["total"] or not page:
+            break
+
+    assert len(seen) == 7
+    assert len(set(seen)) == 7, f"翻页出现重复：{seen}"
+
+
+def test_summaries_total_shares_domain_filter(client, store):
+    """total 必须和 items 同口径 —— 不然前端会以为一直还有下一页。"""
+    _seed_summaries(store, ["2026-07-01", "2026-07-02"], domain="general")
+    _seed_summaries(store, ["2026-07-01", "2026-07-02", "2026-07-03"], domain="companion")
+
+    general = client.get("/memory/records/summaries", params={"domain": "general"}).json()
+    assert general["total"] == 2
+    assert len(general["items"]) == 2
+
+    companion = client.get("/memory/records/summaries", params={"domain": "companion"}).json()
+    assert companion["total"] == 3
+    assert len(companion["items"]) == 3
+
+
+def test_summaries_total_makes_page_boundary_exact(client, store):
+    """恰好整除时，`offset + 本页条数 == total` 能直接判定到头（不必再猜一页）。"""
+    _seed_summaries(store, [f"2026-07-{d:02d}" for d in range(1, 7)])  # 6 天
+
+    body = client.get("/memory/records/summaries", params={"limit": 3, "offset": 3}).json()
+    assert body["total"] == 6
+    assert len(body["items"]) == 3
+    assert 3 + len(body["items"]) >= body["total"], "整除时不应再判为「还有下一页」"
