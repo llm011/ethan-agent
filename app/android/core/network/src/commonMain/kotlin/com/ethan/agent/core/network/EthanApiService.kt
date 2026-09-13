@@ -138,14 +138,24 @@ class EthanApiService(
     suspend fun addModel(model: ModelEntry): OkResponse =
         client.post(url("models")) { jsonBody(model) }.body()
 
+    // 单个模型的更新/删除不走 /models/{provider}/{modelId} 路径参数：model id 本身可能
+    // 含 "/"（如聚合网关的 "trae/glm-5.3-flash"），拼进路径会多出一段、匹配不到。
+    // 与 web/desktop 一致，改用 query 参数 / body 定位（详见 ethan/interface/routers/models.py）。
     suspend fun deleteModel(provider: String, modelId: String): OkResponse =
-        client.delete(url("models/$provider/$modelId")).body()
+        client.delete(url("models")) {
+            parameter("provider", provider)
+            parameter("id", modelId)
+        }.body()
 
     suspend fun discoverModels(body: DiscoverModelsRequest): DiscoverModelsResponse =
         client.post(url("models/discover")) { jsonBody(body) }.body()
 
     suspend fun updateModel(provider: String, modelId: String, model: ModelEntry): OkResponse =
-        client.put(url("models/$provider/$modelId")) { jsonBody(model) }.body()
+        client.put(url("models")) {
+            parameter("provider", provider)
+            parameter("id", modelId)
+            jsonBody(model)
+        }.body()
 
     suspend fun getModes(): ModesResponse = client.get(url("modes")).body()
 
