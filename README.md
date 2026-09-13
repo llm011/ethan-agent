@@ -19,6 +19,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - Behavioral Procedures: learned from user corrections, loaded every conversation (`playbook.json`)
 - User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits)
 - **Proactive memory write**: Agent calls `memory_write` mid-conversation — the write flows through the same candidate→admission pipeline (no separate store, same evidence semantics)
+- **Memory browsing UI** (Web / Desktop / Android): every memory list pages on scroll (facts / records / insights; procedures deliberately don't — see [docs/interface.md](docs/interface.md)), and double-tapping a tab jumps that list back to the top
 
 **Dream — nightly memory consolidation ("做梦")**
 - Every night at 0:00, one unified pass (`run_nightly_consolidation`): re-extract the day's sessions, re-evaluate pending observations across sessions, expire TTL memories, write per-domain daily summaries, rebuild the memory vector index — then "dream": distill cross-session signals (recurring needs ≥3×, errors, success paths) into permanent insights, deduped via sqlite-vec against the freshly-admitted memories
@@ -532,8 +533,8 @@ GET  /models                    # Available models
 POST /chat                      # Chat (stream: true for SSE)
 GET  /sessions                  # Session list
 GET  /sessions/{id}             # Session detail + messages
-GET  /memory/facts              # Memories list (legacy-compatible view)
-GET  /memory/records            # Structured memories (filter: type/domain/status)
+GET  /memory/facts              # Memories list, paged (limit/offset/total)
+GET  /memory/records            # Structured memories, paged (filter: type/domain/status)
 GET  /memory/records/{id}       # Memory detail + evidence chain
 GET  /skills                    # Skill list
 POST /skills                    # Create skill

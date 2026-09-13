@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -52,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -164,6 +166,12 @@ fun EthanTopBar(
  * - 超出屏宽时可手势横向滚动
  * - 选中项有底部圆角指示条
  * - 支持可选副标题（双行模式）
+ * - 可选「双击 tab」回调（见 [onTabDoubleTap]）
+ *
+ * @param onTabDoubleTap 双击某个 tab 时触发（记忆页用它回到列表顶部）。
+ *   为 null 时**完全走原来的 clickable** —— 不会引入双击等待的 ~300ms 延迟，
+ *   所以 Schedule/Settings 这些不传的调用方行为零变化。
+ *   传入后单击切换要等双击窗口过去才生效（与 Web 端的 300ms 口径一致）。
  */
 @Composable
 fun <T> EthanScrollableTabBar(
@@ -176,6 +184,7 @@ fun <T> EthanScrollableTabBar(
     horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp,
     /** 右侧常驻操作（如「事实」tab 收起搜索框后露出的放大镜）。tab 多时会被挤出去滚走。 */
     action: (@Composable () -> Unit)? = null,
+    onTabDoubleTap: ((T) -> Unit)? = null,
 ) {
     val scrollState = rememberScrollState()
     Row(
@@ -192,13 +201,28 @@ fun <T> EthanScrollableTabBar(
             tabs.forEach { tab ->
                 val selected = tab == selectedTab
                 val hasSubtitle = subtitleOf != null
+                // 只有需要双击语义时才走 detectTapGestures：它会为了等第二次点击
+                // 把单击推迟 ~300ms，不能强加给不需要的页面（Schedule/Settings）。
+                val tapModifier = if (onTabDoubleTap != null) {
+                    Modifier.pointerInput(tab) {
+                        detectTapGestures(
+                            onTap = { onTabSelected(tab) },
+                            // 双击：先切过去再回顶，避免「单击切换 + 双击切换两次」
+                            onDoubleTap = {
+                                onTabSelected(tab)
+                                onTabDoubleTap(tab)
+                            },
+                        )
+                    }
+                } else {
+                    Modifier.clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                    ) { onTabSelected(tab) }
+                }
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                        ) { onTabSelected(tab) }
+                    modifier = tapModifier
                         .padding(
                             horizontal = if (hasSubtitle) 16.dp else 12.dp,
                             vertical = if (hasSubtitle) 10.dp else 8.dp,

@@ -293,17 +293,25 @@ class VectorStore:
         conn.commit()
         return len(ids)
 
-    def count_items(self, exclude_types: list[str] | None = None) -> int:
-        """计数条目，可排除指定 type（如排除 fact_sync 镜像条目）。"""
+    def count_items(
+        self, exclude_types: list[str] | None = None, date: str | None = None
+    ) -> int:
+        """计数条目，可排除指定 type（如排除 fact_sync 镜像条目）、可按 date 过滤。
+
+        `date` 过滤与 `list_items` 的 `$.date` 一致，供按日分页的列表返回 total。
+        """
         conn = self._get_conn()
-        if not exclude_types:
-            return conn.execute("SELECT COUNT(*) FROM vec_items").fetchone()[0]
-        placeholders = ",".join("?" * len(exclude_types))
-        return conn.execute(
-            f"""SELECT COUNT(*) FROM vec_items
-               WHERE json_extract(metadata, '$.type') NOT IN ({placeholders})""",
-            exclude_types,
-        ).fetchone()[0]
+        where: list[str] = []
+        params: list = []
+        if exclude_types:
+            placeholders = ",".join("?" * len(exclude_types))
+            where.append(f"json_extract(metadata, '$.type') NOT IN ({placeholders})")
+            params.extend(exclude_types)
+        if date:
+            where.append("json_extract(metadata, '$.date') = ?")
+            params.append(date)
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        return conn.execute(f"SELECT COUNT(*) FROM vec_items{where_sql}", params).fetchone()[0]
 
     def list_items(
         self,

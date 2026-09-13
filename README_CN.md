@@ -17,6 +17,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`playbook.json`）
 - 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）；含「基础特征」「心理与情绪」等章节
 - **主动写记忆**：Agent 在对话中识别到可记忆信息时调用 `memory_write`——写入走同一条候选→准入管道（同一个库、同样的证据语义）
+- **记忆浏览页**（Web / 桌面端 / Android）：各列表下滑自动加载下一页（事实 / 结构化记忆 / 永久记忆；流程刻意不分页，理由见 [docs/interface.md](docs/interface.md)），双击 tab 回到该列表顶部
 
 **做梦——夜间记忆沉淀（"做梦" / dream）**
 - 每晚 0 点跑一次统一沉淀（`run_nightly_consolidation`）：重提取当日 session、跨 session 复评 pending 候选、过期清理、分域日摘要、重建记忆向量索引——然后"做梦"：把白天跨 session 的信号（重复需求 ≥3 次、错误、成功路径）精炼成永久洞察，与刚准入的记忆做 sqlite-vec 去重
@@ -520,8 +521,8 @@ GET  /models                    # 可用模型列表
 POST /chat                      # 对话（stream: true 开启 SSE 流式）
 GET  /sessions                  # 会话列表
 GET  /sessions/{id}             # 会话详情（含消息历史）
-GET  /memory/facts              # 记忆列表（兼容旧格式的视图）
-GET  /memory/records            # 结构化记忆（可按 type/domain/status 过滤）
+GET  /memory/facts              # 记忆列表，分页（limit/offset/total）
+GET  /memory/records            # 结构化记忆，分页（可按 type/domain/status 过滤）
 GET  /memory/records/{id}       # 记忆详情 + 证据链
 GET  /skills                    # Skill 列表
 POST /skills                    # 创建 Skill

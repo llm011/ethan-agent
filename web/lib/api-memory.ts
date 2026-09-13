@@ -180,15 +180,28 @@ export interface DailySummary {
   updated_at: number;
 }
 
+/** 结构化记忆的分页响应（与 /memory/insights 同形状）。 */
+export interface StructuredMemoriesPage {
+  items: StructuredMemory[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 function recordParams(params: {
-  type?: StructuredMemoryType;
+  type?: StructuredMemoryType | StructuredMemoryType[];
   status?: string;
   domain?: "general" | "companion";
   limit?: number;
   offset?: number;
 }): string {
   const q = new URLSearchParams();
-  if (params.type) q.set("type", params.type);
+  // 多 type 用逗号分隔发一个请求 —— 分页要的是「合并后切页」，
+  // 各 type 各发一个请求再 flat 会出现「两半各自还有下一页」，offset 无意义。
+  if (params.type) {
+    const types = Array.isArray(params.type) ? params.type : [params.type];
+    if (types.length > 0) q.set("type", types.join(","));
+  }
   if (params.status) q.set("status", params.status);
   if (params.domain) q.set("domain", params.domain);
   if (params.limit !== undefined) q.set("limit", String(params.limit));
@@ -197,16 +210,33 @@ function recordParams(params: {
   return suffix ? `?${suffix}` : "";
 }
 
+/** 分页拉取结构化记忆（返回 total，供「还有没有下一页」判断）。 */
+export async function fetchStructuredMemoriesPage(params: {
+  type?: StructuredMemoryType | StructuredMemoryType[];
+  status?: string;
+  domain?: "general" | "companion";
+  limit?: number;
+  offset?: number;
+} = {}): Promise<StructuredMemoriesPage> {
+  const res = await fetch(`${API_URL}/memory/records${recordParams(params)}`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch structured memories");
+  const data = await res.json();
+  return {
+    items: data.items ?? [],
+    total: data.total ?? (data.items?.length ?? 0),
+    limit: data.limit ?? params.limit ?? 0,
+    offset: data.offset ?? params.offset ?? 0,
+  };
+}
+
 export async function fetchStructuredMemories(params: {
-  type?: StructuredMemoryType;
+  type?: StructuredMemoryType | StructuredMemoryType[];
   status?: string;
   domain?: "general" | "companion";
   limit?: number;
   offset?: number;
 } = {}): Promise<StructuredMemory[]> {
-  const res = await fetch(`${API_URL}/memory/records${recordParams(params)}`, { headers: headers() });
-  if (!res.ok) throw new Error("Failed to fetch structured memories");
-  return res.json().then(data => data.items);
+  return (await fetchStructuredMemoriesPage(params)).items;
 }
 
 export async function searchStructuredMemories(
@@ -265,21 +295,48 @@ export async function wakeScopeMemories(scopeType: string, scopeId: string): Pro
   return res.json().then(data => data.woken ?? 0);
 }
 
-export async function fetchDailySummaries(params: {
+export interface DailySummariesPage {
+  items: DailySummary[];
+  /** 后端返回的总条数（用于判断「还有没有下一页」）。null 只为兼容不返回 total 的旧后端。 */
+  total: number | null;
+}
+
+/**
+ * 分页拉取每日摘要。
+ *
+ * 注意按日期查时**不分页**（一天通常 1-2 条，一次到位）；只有「全部日期」
+ * 才走 offset 分页。日摘要是按 local_date DESC 的只读归档，offset 不会错位。
+ */
+export async function fetchDailySummariesPage(params: {
   date?: string;
   domain?: "general" | "companion";
   limit?: number;
-} = {}): Promise<DailySummary[]> {
+  offset?: number;
+} = {}): Promise<DailySummariesPage> {
   const q = new URLSearchParams();
   if (params.domain) q.set("domain", params.domain);
   if (params.limit !== undefined) q.set("limit", String(params.limit));
+  if (params.offset !== undefined && !params.date) q.set("offset", String(params.offset));
   const path = params.date
     ? `/memory/records/summaries/${params.date}`
     : "/memory/records/summaries";
   const suffix = q.toString() ? `?${q.toString()}` : "";
   const res = await fetch(`${API_URL}${path}${suffix}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch daily summaries");
-  return res.json().then(data => data.items);
+  const data = await res.json();
+  return {
+    items: data.items ?? [],
+    total: typeof data.total === "number" ? data.total : null,
+  };
+}
+
+export async function fetchDailySummaries(params: {
+  date?: string;
+  domain?: "general" | "companion";
+  limit?: number;
+  offset?: number;
+} = {}): Promise<DailySummary[]> {
+  return (await fetchDailySummariesPage(params)).items;
 }
 
 export async function triggerStructuredConsolidation(targetDate?: string): Promise<{ ok: boolean; result: Record<string, unknown> }> {

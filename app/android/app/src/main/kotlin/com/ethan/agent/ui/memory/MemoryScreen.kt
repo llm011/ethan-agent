@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -75,6 +76,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -103,6 +105,7 @@ import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SimpleMarkdown
 import com.ethan.agent.ui.components.SnackbarContainer
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -145,6 +148,10 @@ fun MemoryScreen(
     onHideSummaries: () -> Unit = {},
     onSummariesDateChange: (String) -> Unit = {},
     onLoadMoreSummaries: () -> Unit = {},
+    // 下滑加载更多（事实 / 永久记忆 / 结构化记忆三个 tab）
+    onLoadMoreFacts: () -> Unit = {},
+    onLoadMoreInsights: () -> Unit = {},
+    onLoadMoreRecords: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
@@ -198,6 +205,30 @@ fun MemoryScreen(
 
     var factsSearchQuery by remember { mutableStateOf("") }
 
+    // 四个 tab 的滚动位置在这里持有，而不是各自的子组件里。
+    //
+    // 原因：tab 由下面 `when (state.tab)` 切换，离开的 tab 整个被销毁、`remember`
+    // 归零。要让「双击当前 tab 回到顶部」够得着当前列表的 state，它必须活得比 tab
+    // 本身久。顺带也修了另一个毛病 —— 切走再切回来，滚动位置不再丢。
+    //
+    // 每个 tab 一个实例（不共用一个）：共用一个的话，事实 tab 的滚动量会被带去
+    // 永久记忆 tab，而两边条数不同，落点毫无意义。
+    val tabListStates = MemoryTab.entries.associateWith { rememberLazyListState() }
+    val scope = rememberCoroutineScope()
+
+    // 双击 tab：切到该 tab 并把它的列表滚回顶部。
+    // 单击仍然只是切换 —— 300ms 的判定延迟由 EthanScrollableTabBar 内部吸收。
+    //
+    // 这里是**用户主动触发**的滚动，与 FactsListContent 那段「不做任何自动滚动」
+    // 的注释不冲突：那边拒绝的是搜索框收起/展开时由代码推断出来的滚动，那种会和
+    // 手指抢位置。双击是明确的用户意图，不会在用户没操作时凭空动列表。
+    val onTabDoubleTap: (MemoryTab) -> Unit = { tab ->
+        onTabChange(tab)
+        tabListStates[tab]?.let { listState ->
+            scope.launch { listState.animateScrollToItem(0) }
+        }
+    }
+
     EthanScaffold(
         topBar = {
             EthanTopBar(
@@ -231,6 +262,7 @@ fun MemoryScreen(
                 selectedTab = state.tab,
                 onTabSelected = { tab -> onTabChange(tab) },
                 labelOf = { it.title },
+                onTabDoubleTap = onTabDoubleTap,
             )
 
             if (state.isLoading) {
@@ -244,6 +276,10 @@ fun MemoryScreen(
                     searchQuery = factsSearchQuery,
                     onSearchChange = { factsSearchQuery = it },
                     onSelect = onSelectFact,
+                    listState = tabListStates.getValue(MemoryTab.Facts),
+                    hasMore = state.factsHasMore,
+                    loadingMore = state.factsLoading,
+                    onLoadMore = onLoadMoreFacts,
                 )
 
                 MemoryTab.Insights -> InsightsTab(
@@ -251,11 +287,19 @@ fun MemoryScreen(
                     date = state.insightsDate,
                     onDateChange = onInsightsDateChange,
                     onRefresh = onRefreshInsights,
+                    listState = tabListStates.getValue(MemoryTab.Insights),
+                    hasMore = state.insightsHasMore,
+                    loadingMore = state.insightsLoading,
+                    onLoadMore = onLoadMoreInsights,
                 )
+                // 流程 tab 不接分页：它后面是位置下标当 id，offset 翻页会在删除后
+                // 错位；而且这份列表每次都会整份注入 system prompt，本来就不该长。
+                // 详见 ethan/interface/routers/memory.py 里 list_procedures 的注释。
                 MemoryTab.Procedures -> ProceduresTab(
                     procedures = state.procedures,
                     onEdit = onSelectProcedure,
                     onDelete = onDeleteProcedure,
+                    listState = tabListStates.getValue(MemoryTab.Procedures),
                 )
                 MemoryTab.Records -> RecordsTab(
                     records = state.records,
@@ -266,6 +310,10 @@ fun MemoryScreen(
                     onEdit = onSelectRecord,
                     onConfirm = onConfirmRecord,
                     onDelete = onDeleteRecord,
+                    listState = tabListStates.getValue(MemoryTab.Records),
+                    hasMore = state.recordsHasMore,
+                    loadingMore = state.recordsLoading,
+                    onLoadMore = onLoadMoreRecords,
                 )
             }
         }
@@ -390,20 +438,75 @@ private fun EditorMetaRow(target: MemoryEditTarget) {
 
 // ── Facts tab ────────────────────────────────────────────────────────────────
 
+/**
+ * 滚到接近列表底部就预拉下一页。
+ *
+ * `derivedStateOf` 必须包着 —— 不包的话每帧滚动都会读 `layoutInfo` 并触发重组。
+ * `remember(loadedCount, hasMore)` 再包一层：只有「已加载条数」或 `hasMore` 变了
+ * 才重建这个 state，滚动本身不会。
+ *
+ * 与 `SummariesDialog` 里那段是同一套写法，只是抽出来给三个 tab 共用。
+ *
+ * @param loadedCount 数据列表的条数（**不是** LazyColumn 的 item 数 —— 列表头部
+ *   还挂着搜索框/筛选 chips 这类非数据 item，拿 item 数去比会提前预拉）
+ * @param threshold 距底部多少项时触发
+ */
+@Composable
+private fun LoadMoreOnReachEnd(
+    listState: LazyListState,
+    loadedCount: Int,
+    hasMore: Boolean,
+    onLoadMore: () -> Unit,
+    threshold: Int = 2,
+) {
+    val nearEnd by remember(loadedCount, hasMore) {
+        derivedStateOf {
+            if (!hasMore) return@derivedStateOf false
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            last >= loadedCount - threshold
+        }
+    }
+    LaunchedEffect(nearEnd) {
+        if (nearEnd) onLoadMore()
+    }
+}
+
+/** 列表尾部的「正在加载下一页」指示器。 */
+@Composable
+private fun LoadMoreIndicator() {
+    Box(
+        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+    }
+}
+
 @Composable
 private fun FactsListContent(
     facts: List<FactItem>,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     onSelect: (FactItem) -> Unit,
+    listState: LazyListState,
+    hasMore: Boolean,
+    loadingMore: Boolean,
+    onLoadMore: () -> Unit,
 ) {
-    val listState = rememberLazyListState()
-
     val filteredFacts = if (searchQuery.isBlank()) {
         facts
     } else {
         facts.filter { it.fact.content.contains(searchQuery, ignoreCase = true) }
     }
+
+    // 本地过滤时不能翻页：这里的 filteredFacts 只是「已加载的那几页」里筛出来的，
+    // 继续往后拉只会让结果集在用户眼皮底下变长，越筛越多。
+    LoadMoreOnReachEnd(
+        listState = listState,
+        loadedCount = filteredFacts.size,
+        hasMore = hasMore && searchQuery.isBlank() && !loadingMore,
+        onLoadMore = onLoadMore,
+    )
 
     // 搜索框是**列表的第一项**，跟着内容一起滑走。
     //
@@ -446,6 +549,9 @@ private fun FactsListContent(
         } else {
             items(filteredFacts, key = { it.index }) { item ->
                 FactListCard(item, onClick = { onSelect(item) })
+            }
+            if (hasMore) {
+                item(key = "__load_more__") { LoadMoreIndicator() }
             }
         }
     }
@@ -509,6 +615,10 @@ private fun InsightsTab(
     date: String,
     onDateChange: (String) -> Unit,
     onRefresh: () -> Unit,
+    listState: LazyListState,
+    hasMore: Boolean,
+    loadingMore: Boolean,
+    onLoadMore: () -> Unit,
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
     val datePickerState = rememberDatePickerState()
@@ -568,13 +678,23 @@ private fun InsightsTab(
             )
             return@Column
         }
+        LoadMoreOnReachEnd(
+            listState = listState,
+            loadedCount = insights.size,
+            hasMore = hasMore && !loadingMore,
+            onLoadMore = onLoadMore,
+        )
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(insights, key = { it.id }) { item ->
                 InsightCard(item)
+            }
+            if (hasMore) {
+                item(key = "__load_more__") { LoadMoreIndicator() }
             }
         }
     }
@@ -608,6 +728,7 @@ private fun ProceduresTab(
     procedures: List<Procedure>,
     onEdit: (Procedure) -> Unit,
     onDelete: (String) -> Unit,
+    listState: LazyListState,
 ) {
     if (procedures.isEmpty()) {
         EthanEmptyState(
@@ -618,6 +739,7 @@ private fun ProceduresTab(
         return
     }
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         // 顶部只留 8dp（原本四边都是 16dp）—— tab 栏刚结束，再垫 16dp 显得中间空了
         // 一段。左右和底部保持 16dp。
@@ -695,9 +817,12 @@ private fun RecordsTab(
     onEdit: (StructuredRecord) -> Unit,
     onConfirm: (String) -> Unit,
     onDelete: (String) -> Unit,
+    listState: LazyListState,
+    hasMore: Boolean,
+    loadingMore: Boolean,
+    onLoadMore: () -> Unit,
 ) {
     val chipsScrollState = rememberScrollState()
-    val listState = rememberLazyListState()
 
     val statuses = listOf(
         null to "全部", "pending" to "候选",
@@ -707,6 +832,16 @@ private fun RecordsTab(
     // 筛选 chips + 搜索框都是**列表的开头两项**，跟着内容一起滑走。
     // 和「事实」tab 同一套做法，理由见 FactsListContent 上方的注释 ——
     // 核心就一句：不改变列表视口高度，就不会和用户的滚动位置打架。
+    //
+    // 搜索走的是后端 `/records/search`，它只有 limit、没有 offset（FTS 排序不
+    // 稳定，要分页得先给它加游标，是独立的一件事）。所以搜索态下不分页，
+    // 由 ViewModel 侧把 recordsHasMore 置 false，这里再挡一层。
+    LoadMoreOnReachEnd(
+        listState = listState,
+        loadedCount = records.size,
+        hasMore = hasMore && search.isBlank() && !loadingMore,
+        onLoadMore = onLoadMore,
+    )
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -753,6 +888,9 @@ private fun RecordsTab(
                     onConfirm = { onConfirm(record.id) },
                     onDelete = { onDelete(record.id) },
                 )
+            }
+            if (hasMore) {
+                item(key = "__load_more__") { LoadMoreIndicator() }
             }
         }
     }

@@ -282,7 +282,11 @@ class EthanApiService(
 
     // ── Memory: facts / episodes / procedures ───────────────────────────────
 
-    suspend fun getFacts(): FactsResponse = client.get(url("memory/facts")).body()
+    suspend fun getFacts(limit: Int? = null, offset: Int? = null): FactsResponse =
+        client.get(url("memory/facts")) {
+            if (limit != null) parameter("limit", limit)
+            if (offset != null) parameter("offset", offset)
+        }.body()
 
     suspend fun updateFact(id: String, body: FactUpdateRequest) {
         client.patch(url("memory/facts/$id")) { jsonBody(body) }
@@ -316,8 +320,15 @@ class EthanApiService(
             parameter("offset", offset)
         }.body()
 
-    suspend fun getInsightsByDate(dateStr: String): InsightsByDateResponse =
-        client.get(url("memory/insights/date/$dateStr")).body()
+    suspend fun getInsightsByDate(
+        dateStr: String,
+        limit: Int? = null,
+        offset: Int? = null,
+    ): InsightsByDateResponse =
+        client.get(url("memory/insights/date/$dateStr")) {
+            if (limit != null) parameter("limit", limit)
+            if (offset != null) parameter("offset", offset)
+        }.body()
 
     suspend fun consolidateMemory(): ConsolidateResponse =
         client.post(url("memory/consolidate")).body()

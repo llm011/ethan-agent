@@ -291,7 +291,13 @@ data class Fact(
 )
 
 @Serializable
-data class FactsResponse(val facts: List<Fact> = emptyList())
+data class FactsResponse(
+    val facts: List<Fact> = emptyList(),
+    /** 过滤后的总条数（供分页判断「还有没有下一页」）。老后端不返回时按页大小兜底。 */
+    val total: Int = 0,
+    val limit: Int = 0,
+    val offset: Int = 0,
+)
 
 @Serializable
 data class FactUpdateRequest(val content: String)
@@ -320,8 +326,18 @@ data class Procedure(
     @SerialName("created_at") @Serializable(with = EpochSecondsSerializer::class) val createdAt: Long = 0,
 )
 
+/**
+ * 流程列表响应。
+ *
+ * 后端**刻意不分页**：`id` 是 enumerate 出来的位置下标，删除后整体前移，
+ * offset 分页会让客户端拿陈旧下标去改另一条准则；且准则被整份注入 system prompt，
+ * 语义上就该短。所以这里只有 [total]，没有 limit/offset。
+ */
 @Serializable
-data class ProceduresResponse(val procedures: List<Procedure> = emptyList())
+data class ProceduresResponse(
+    val procedures: List<Procedure> = emptyList(),
+    val total: Int = 0,
+)
 
 /** 改写一条准则。`rule` 是新的正文；后端按位置下标寻址（`Procedure` 无独立 id）。 */
 @Serializable

@@ -642,13 +642,23 @@ class MemoryStore:
                 changed += 1
         return changed
 
-    def list_memories(
-        self, *, memory_type: str | None = None, dimension: str | None = None,
+    @staticmethod
+    def _list_filters(
+        *, memory_type: str | list[str] | None = None, dimension: str | None = None,
         scope_type: str | None = None, scope_id: str | None = None,
-        memory_domain: str | None = None, status: str | None = None,
+        memory_domain: str | None = None, status: str | list[str] | None = None,
         memory_role: str | None = None,
-        limit: int = 100, offset: int = 0,
-    ) -> list[MemoryRecord]:
+    ) -> tuple[str, list[Any]]:
+        """把过滤参数拼成 `(where_sql, params)`。
+
+        `list_memories` 与 `count_memories` 共用这一份，避免两处 WHERE 各写一遍后
+        悄悄漂移 —— 分页语义错位（"翻到头但条数比 total 少"）大半就是这么来的。
+
+        `memory_type` / `status` 额外接受**列表**，生成 `IN (?, ?)`：facts 页要
+        `status in (active, superseded)`，Web 的「决定与约定」tab 要
+        `type in (decision, relationship)`，都是多值。空列表视为「不限制」而不是
+        「匹配不到任何东西」—— 否则前端传空数组会把列表清空。
+        """
         clauses: list[str] = []
         params: list[Any] = []
         for column, value in (
@@ -657,15 +667,58 @@ class MemoryStore:
             ("memory_domain", memory_domain), ("status", status),
             ("memory_role", memory_role),
         ):
-            if value is not None:
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                if not value:
+                    continue
+                placeholders = ",".join("?" * len(value))
+                clauses.append(f"{column} IN ({placeholders})")
+                params.extend(value)
+            else:
                 clauses.append(f"{column}=?")
                 params.append(value)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        return where, params
+
+    def list_memories(
+        self, *, memory_type: str | list[str] | None = None, dimension: str | None = None,
+        scope_type: str | None = None, scope_id: str | None = None,
+        memory_domain: str | None = None, status: str | list[str] | None = None,
+        memory_role: str | None = None,
+        limit: int = 100, offset: int = 0,
+    ) -> list[MemoryRecord]:
+        where, params = self._list_filters(
+            memory_type=memory_type, dimension=dimension, scope_type=scope_type,
+            scope_id=scope_id, memory_domain=memory_domain, status=status,
+            memory_role=memory_role,
+        )
         params.extend([limit, offset])
         rows = self._get_conn().execute(
             f"SELECT * FROM memories {where} ORDER BY updated_at DESC, id LIMIT ? OFFSET ?", params
         ).fetchall()
         return [self._record_from_row(r) for r in rows]
+
+    def count_memories(
+        self, *, memory_type: str | list[str] | None = None, dimension: str | None = None,
+        scope_type: str | None = None, scope_id: str | None = None,
+        memory_domain: str | None = None, status: str | list[str] | None = None,
+        memory_role: str | None = None,
+    ) -> int:
+        """计数（过滤参数与 `list_memories` 完全一致）。
+
+        分页接口返回 `total` 用。注意调用方必须把**同一套过滤条件**传给这里，
+        否则 total 与 items 对不上。
+        """
+        where, params = self._list_filters(
+            memory_type=memory_type, dimension=dimension, scope_type=scope_type,
+            scope_id=scope_id, memory_domain=memory_domain, status=status,
+            memory_role=memory_role,
+        )
+        row = self._get_conn().execute(
+            f"SELECT COUNT(*) FROM memories {where}", params
+        ).fetchone()
+        return row[0] if row else 0
 
     def get_memory(self, memory_id: str) -> MemoryRecord | None:
         row = self._get_conn().execute(
@@ -1090,6 +1143,21 @@ class MemoryStore:
                   AND pipeline_version=? AND memory_domain=?
             """, (summary.user_id, summary.local_date, summary.pipeline_version, summary.memory_domain)).fetchone()
         return row["id"]
+
+    def count_daily_summaries(self, *, memory_domain: str | None = None) -> int:
+        """日摘要总数。
+
+        过滤口径必须与 `list_daily_summaries` 完全一致 —— 前端拿 `total` 算
+        「还有没有下一页」，两者不自洽就会少翻一页或多转一次圈。
+        """
+        if memory_domain:
+            row = self._get_conn().execute(
+                "SELECT COUNT(*) AS n FROM daily_summaries WHERE memory_domain=?",
+                (memory_domain,),
+            ).fetchone()
+        else:
+            row = self._get_conn().execute("SELECT COUNT(*) AS n FROM daily_summaries").fetchone()
+        return int(row["n"])
 
     def list_daily_summaries(
         self, *, memory_domain: str | None = None, limit: int = 30, offset: int = 0

@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   DailySummary,
   StructuredMemory,
   StructuredMemoryType,
-  fetchDailySummaries,
-  fetchStructuredMemories,
+  fetchDailySummariesPage,
+  fetchStructuredMemoriesPage,
   forgetStructuredMemory,
   triggerStructuredConsolidation,
   updateStructuredMemory,
@@ -17,6 +17,17 @@ import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Button } from "@ethan/shared/ui/button";
 import { Badge } from "@ethan/shared/ui/badge";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import {
+  MEMORY_PAGE_SIZE,
+  hasMoreAfter,
+  mergePage,
+  type LoadedList,
+} from "@ethan/shared/lib/memory-paging";
+import {
+  scrollContainerToTop,
+  useDoubleTapTab,
+  useLoadMoreOnReachEnd,
+} from "@ethan/shared/lib/use-memory-list";
 import { Archive, Calendar, Check, Loader2, Pencil, RefreshCw, RotateCcw, Trash2, X, Zap } from "lucide-react";
 
 const CJK = /[一-鿿㐀-䶿　-〿＀-￯⺀-⻿]/;
@@ -213,60 +224,118 @@ function DailySummaryCard({ summary }: { summary: DailySummary }) {
 
 export function MemoryView() {
   const [activeTab, setActiveTab] = useState<Tab>("personal");
-  const [memories, setMemories] = useState<StructuredMemory[]>([]);
-  const [summaries, setSummaries] = useState<DailySummary[]>([]);
+  // 列表和它已覆盖的偏移**绑在一起**：分页错位几乎都出在「两者不同步」——
+  // 刷新把列表换回第一页、去重后列表长得比水位慢。合成一个 state 就没法各改各的。
+  const [memoryList, setMemoryList] = useState<LoadedList<StructuredMemory>>({ items: [], offset: 0 });
+  const [summaryList, setSummaryList] = useState<LoadedList<DailySummary>>({ items: [], offset: 0 });
+  const memories = memoryList.items;
+  const summaries = summaryList.items;
   const [dateFilter, setDateFilter] = useState("");
   const [loading, setLoading] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showDormant, setShowDormant] = useState(false);
   const [error, setError] = useState("");
-  // 操作提示（成功/失败），3 秒后自动清除
-  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
     description: string;
     onConfirm: () => void;
   }>({ open: false, description: "", onConfirm: () => {} });
-
-  const activeConfig = useMemo(() => TABS.find(tab => tab.key === activeTab) || TABS[0], [activeTab]);
-
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setEditingId(null);
-    setError("");
-    try {
-      if (activeTab === "daily") {
-        setSummaries(await fetchDailySummaries({ date: dateFilter || undefined, limit: 90 }));
-        setMemories([]);
-        return;
-      }
-      const types = activeConfig.types || [];
-      const batches = await Promise.all(types.map(type => fetchStructuredMemories({
-        type,
-        status: showDormant ? "dormant" : "active",
-        domain: activeConfig.domain || "general",
-        limit: 100,
-      })));
-      setMemories(batches.flat().sort((a, b) => b.importance - a.importance || b.updated_at - a.updated_at));
-      setSummaries([]);
-    } catch (err) {
-      console.error(err);
-      setError("加载记忆失败，请稍后重试");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeConfig, activeTab, dateFilter, showDormant]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  // 分页：hasMore 由后端 total 推；loadingMore 防重入（滚到底会连续触发）
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(null), 3000);
     return () => clearTimeout(t);
   }, [notice]);
+
+  const activeConfig = useMemo(() => TABS.find(tab => tab.key === activeTab) || TABS[0], [activeTab]);
+
+  // 按日期查摘要时不分页（一天通常 1-2 条）；只有「全部日期」才翻页
+  const dailyPaged = activeTab === "daily" && !dateFilter;
+
+  // 当前列表对应的是哪个查询。换 tab / 改日期 / 切归档视图 = 换查询，新列表和旧的
+  // 没有关系，必须整体重建；同一个查询下的刷新（编辑/删除/唤醒/沉淀）才保留已翻出来的页。
+  const queryKey = `${activeTab}|${dateFilter}|${showDormant}`;
+  const loadedQueryRef = useRef<string | null>(null);
+
+  const loadData = useCallback(async (offset = 0) => {
+    if (offset === 0) setLoading(true);
+    setEditingId(null);
+    setError("");
+    const sameQuery = loadedQueryRef.current === queryKey;
+    loadedQueryRef.current = queryKey;
+    try {
+      if (activeTab === "daily") {
+        const limit = dailyPaged ? MEMORY_PAGE_SIZE : 90;
+        const page = await fetchDailySummariesPage({
+          date: dateFilter || undefined,
+          limit,
+          offset,
+        });
+        setSummaryList(prev => mergePage(prev.items, page.items, offset, sameQuery, limit));
+        // 按日期查时后端忽略 offset（一天 1-2 条），这时候不能承诺「还有更多」，
+        // 否则滚到底会反复拉同一份
+        setHasMore(dailyPaged && hasMoreAfter(page.items, page.total ?? undefined, offset));
+        setMemoryList({ items: [], offset: 0 });
+        return;
+      }
+      // 多 type 一次请求（逗号分隔），一个 offset —— 各 type 各分页会错乱
+      const types = activeConfig.types || [];
+      const page = await fetchStructuredMemoriesPage({
+        type: types.length === 1 ? types[0] : types,
+        status: showDormant ? "dormant" : "active",
+        domain: activeConfig.domain || "general",
+        limit: MEMORY_PAGE_SIZE,
+        offset,
+      });
+      const sorted = [...page.items].sort(
+        (a, b) => b.importance - a.importance || b.updated_at - a.updated_at,
+      );
+      // 追加分页时不能重排整体（会把已翻出来的页顺序打乱），mergePage 只在尾部并入
+      setMemoryList(prev => mergePage(prev.items, sorted, offset, sameQuery));
+      setHasMore(hasMoreAfter(page.items, page.total, offset));
+      setSummaryList({ items: [], offset: 0 });
+    } catch (err) {
+      console.error(err);
+      setError("加载记忆失败，请稍后重试");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [activeConfig, activeTab, dateFilter, showDormant, dailyPaged, queryKey]);
+
+  // 依赖 `loadData` 即隐含依赖 `activeConfig`：它只在 activeTab 变化时才换引用，
+  // 等价于「切 tab 就整份重拉」。这是刻意的 —— 哪天把 TABS 改成动态生成（每次渲染新建
+  // 数组）会让 useMemo 失效，那时必须先改这里，否则会变成请求风暴。
+  useEffect(() => {
+    loadData(0);
+  }, [loadData]);
+
+  /** 滚到底加载下一页。offset 用「已覆盖的偏移水位」，不是当前列表长度。 */
+  const loadMore = useCallback(() => {
+    if (loadingMore || loading || !hasMore) return;
+    setLoadingMore(true);
+    loadData(activeTab === "daily" ? summaryList.offset : memoryList.offset);
+  }, [activeTab, summaryList.offset, memoryList.offset, hasMore, loading, loadingMore, loadData]);
+
+  // 哨兵进入视野 → 拉下一页。observer 的拆卸与回调防抖都在共享 hook 里，两端只此一份。
+  const sentinelRef = useLoadMoreOnReachEnd(hasMore, loading || loadingMore, loadMore);
+
+  const scrollToTop = useCallback(() => scrollContainerToTop(viewportRef.current), []);
+
+  // 单击切 tab（延迟 ~300ms 生效）、双击「切到该 tab + 回到顶部」
+  const handleTabClick = useDoubleTapTab<Tab>(
+    useCallback((key: Tab) => setActiveTab(key), []),
+    useCallback((key: Tab) => {
+      setActiveTab(key);
+      scrollToTop();
+    }, [scrollToTop]),
+  );
 
   const handleSave = async (memory: StructuredMemory, content: string) => {
     await updateStructuredMemory(memory.id, { content });
@@ -324,7 +393,7 @@ export function MemoryView() {
         onCancel={() => setConfirmState(prev => ({ ...prev, open: false }))}
       />
 
-      <header className="h-12 border-b border-border flex items-center px-4 gap-3 shrink-0">
+      <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 gap-3 shrink-0">
         <div className="flex-1 overflow-x-auto">
           <div className="flex gap-4 min-w-max pr-2">
             {TABS.map(tab => (
@@ -333,7 +402,8 @@ export function MemoryView() {
                 className={`text-sm font-medium transition-colors hover:text-primary whitespace-nowrap ${
                   activeTab === tab.key ? "text-primary" : "text-muted-foreground"
                 }`}
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => handleTabClick(tab.key)}
+                title="双击回到顶部"
               >
                 {tab.label}
               </button>
@@ -350,12 +420,12 @@ export function MemoryView() {
           <Archive className="h-3.5 w-3.5 mr-1" />
           归档
         </Button>
-        <Button variant="ghost" size="icon" onClick={loadData} disabled={loading} aria-label="刷新记忆">
+        <Button variant="ghost" size="icon" onClick={() => loadData()} disabled={loading} aria-label="刷新记忆">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
         </Button>
       </header>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1" viewportRef={viewportRef}>
         <div className="p-4 pb-6 max-w-5xl mx-auto w-full space-y-3">
           {activeTab === "daily" && (
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -412,6 +482,14 @@ export function MemoryView() {
             />
           ))}
           {activeTab === "daily" && summaries.map(summary => <DailySummaryCard key={summary.id} summary={summary} />)}
+
+          {/* 分页哨兵：进入视野就拉下一页；hasMore 时显示转圈 */}
+          <div ref={sentinelRef} className="h-px" aria-hidden />
+          {hasMore && (
+            <div className="flex justify-center py-4">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
         </div>
       </ScrollArea>
     </div>
