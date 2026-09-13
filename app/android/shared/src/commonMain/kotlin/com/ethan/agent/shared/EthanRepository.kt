@@ -54,6 +54,7 @@ import com.ethan.agent.core.model.StopBackgroundTaskResponse
 import com.ethan.agent.core.model.ConfirmRecordResponse
 import com.ethan.agent.core.model.ConsolidateResponse
 import com.ethan.agent.core.model.DailySummariesResponse
+import com.ethan.agent.core.model.DailySummaryDatesResponse
 import com.ethan.agent.core.model.DeckResponse
 import com.ethan.agent.core.model.DeleteAnnotationResponse
 import com.ethan.agent.core.model.DeleteMessageResponse
@@ -617,6 +618,10 @@ class EthanRepository(
 
     suspend fun getDailySummaryByDate(dateStr: String, domain: String? = null): DailySummariesResponse {
         return api.getDailySummaryByDate(dateStr, domain)
+    }
+
+    suspend fun getDailySummaryDates(domain: String? = null): DailySummaryDatesResponse {
+        return api.getDailySummaryDates(domain)
     }
 
     // ── Schedule 扩展 ─────────────────────────────────────────────────────

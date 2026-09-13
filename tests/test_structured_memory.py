@@ -269,6 +269,66 @@ def test_daily_summary_upsert_is_idempotent(tmp_path):
     store.close()
 
 
+def test_list_daily_summary_dates_dedup_and_order(tmp_path):
+    """日期集合：同一天多个 domain 只算一条，且按日期倒序。"""
+    store = MemoryStore(tmp_path / "memory.db")
+    for local_date in ("2026-07-15", "2026-07-16", "2026-08-01"):
+        for domain in ("general", "companion"):
+            store.upsert_daily_summary(DailySummary(
+                user_id="", local_date=local_date, pipeline_version="v1",
+                memory_domain=domain, summary_text="x", structured_data={},
+            ))
+
+    # 去重（3 天 × 2 domain = 6 行，但只有 3 个日期）+ 倒序
+    assert store.list_daily_summary_dates() == ["2026-08-01", "2026-07-16", "2026-07-15"]
+    # 按 domain 过滤时，两个 domain 各自都覆盖这三天
+    assert store.list_daily_summary_dates(memory_domain="general") == [
+        "2026-08-01", "2026-07-16", "2026-07-15",
+    ]
+    # limit 生效，且截的是最新的
+    assert store.list_daily_summary_dates(limit=2) == ["2026-08-01", "2026-07-16"]
+    store.close()
+
+
+def test_summary_dates_route_not_shadowed_by_date_str(tmp_path, monkeypatch):
+    """路由顺序回归：`/records/summaries/dates` 不能被 `/{date_str}` 抢走。
+
+    FastAPI 按注册顺序匹配。若 "dates" 落到 `/{date_str}`，`date.fromisoformat("dates")`
+    会抛 ValueError → 400。这条测试锁死注册顺序，别把它挪到 `{date_str}` 下面。
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from ethan.interface.routers import memory as memory_router
+
+    db = tmp_path / "memory.db"
+    seed = MemoryStore(db)
+    seed.upsert_daily_summary(DailySummary(
+        user_id="", local_date="2026-07-15", pipeline_version="v1",
+        memory_domain="general", summary_text="x", structured_data={},
+    ))
+    seed.close()
+
+    # TestClient 在别的线程里跑路由，不能跨线程共用一个 sqlite 连接，
+    # 所以每次调用都新建 store（这和真实的 _structured_store 行为一致）。
+    monkeypatch.setattr(memory_router, "_structured_store", lambda: MemoryStore(db))
+
+    app = FastAPI()
+    # router 自带 prefix="/memory"，线上再由 api.py 加 "/api"，这里是等价的简版
+    app.include_router(memory_router.router, prefix="/api")
+    app.dependency_overrides[memory_router.verify_token] = lambda: "u1"
+    client = TestClient(app)
+
+    res = client.get("/api/memory/records/summaries/dates")
+    assert res.status_code == 200, res.text
+    assert res.json() == {"dates": ["2026-07-15"]}
+
+    # 老接口不受影响：仍能按具体日期查
+    res = client.get("/api/memory/records/summaries/2026-07-15")
+    assert res.status_code == 200, res.text
+    assert len(res.json()["items"]) == 1
+
+
 @pytest.mark.anyio
 async def test_structured_consolidation_is_idempotent(isolated_paths):
     from ethan.memory.structured_consolidation import run_structured_consolidation
