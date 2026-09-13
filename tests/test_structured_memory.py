@@ -287,7 +287,49 @@ def test_list_daily_summary_dates_dedup_and_order(tmp_path):
     ]
     # limit 生效，且截的是最新的
     assert store.list_daily_summary_dates(limit=2) == ["2026-08-01", "2026-07-16"]
+    # count 返回去重后的真实天数，不受 limit 影响 —— 路由靠它判断是否被截断
+    assert store.count_daily_summary_dates() == 3
+    assert store.count_daily_summary_dates(memory_domain="general") == 3
+    assert store.count_daily_summary_dates(memory_domain="companion") == 3
     store.close()
+
+
+def test_summary_dates_route_reports_truncation(tmp_path, monkeypatch):
+    """日期集被 limit 截断时，路由要如实报 total / truncated，而不是静默少几格。
+
+    回归 P2：以前只返回一个 dates 数组且硬编码上限，前端无法区分「更早的日子
+    真没有」和「更早的日子没返回」。现在 total 给出去重总数，truncated 说明有截断。
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from ethan.interface.routers import memory as memory_router
+
+    db = tmp_path / "memory.db"
+    seed = MemoryStore(db)
+    for local_date in ("2026-07-15", "2026-07-16", "2026-08-01"):
+        seed.upsert_daily_summary(DailySummary(
+            user_id="", local_date=local_date, pipeline_version="v1",
+            memory_domain="general", summary_text="x", structured_data={},
+        ))
+    seed.close()
+
+    monkeypatch.setattr(memory_router, "_structured_store", lambda: MemoryStore(db))
+
+    app = FastAPI()
+    app.include_router(memory_router.router, prefix="/api")
+    app.dependency_overrides[memory_router.verify_token] = lambda: "u1"
+    client = TestClient(app)
+
+    # 主动用小 limit 触发截断：返回最近 2 天，但 total 仍是 3
+    res = client.get("/api/memory/records/summaries/dates", params={"limit": 2})
+    assert res.status_code == 200, res.text
+    assert res.json() == {"dates": ["2026-08-01", "2026-07-16"], "total": 3, "truncated": True}
+
+    # 不截断时 truncated=false
+    res = client.get("/api/memory/records/summaries/dates")
+    assert res.status_code == 200, res.text
+    assert res.json()["truncated"] is False
 
 
 def test_summary_dates_route_not_shadowed_by_date_str(tmp_path, monkeypatch):
@@ -321,7 +363,7 @@ def test_summary_dates_route_not_shadowed_by_date_str(tmp_path, monkeypatch):
 
     res = client.get("/api/memory/records/summaries/dates")
     assert res.status_code == 200, res.text
-    assert res.json() == {"dates": ["2026-07-15"]}
+    assert res.json() == {"dates": ["2026-07-15"], "total": 1, "truncated": False}
 
     # 老接口不受影响：仍能按具体日期查
     res = client.get("/api/memory/records/summaries/2026-07-15")

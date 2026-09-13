@@ -132,6 +132,13 @@ data class MemoryUiState(
      * 这是**全量索引**，不随 [summariesDate] 变，也不进分页。
      */
     val summaryDates: Set<String> = emptySet(),
+    /**
+     * [summaryDates] 是否被后端上限截断（还有更早的日期没返回）。
+     *
+     * 为 true 时，比 [summaryDates] 里最早一天更早的日子**不代表没内容**，
+     * 只是没拉回来 —— 日历要提示「还有更早的」，不能把它们当成空日子置灰。
+     */
+    val summaryDatesTruncated: Boolean = false,
     // Loading
     val isLoading: Boolean = false,
     val isConsolidating: Boolean = false,
@@ -451,8 +458,10 @@ class MemoryViewModel(
     fun loadSummaryDates() {
         viewModelScope.launch {
             try {
-                val dates = repository.getDailySummaryDates().dates.toSet()
-                _state.update { it.copy(summaryDates = dates) }
+                val resp = repository.getDailySummaryDates()
+                _state.update {
+                    it.copy(summaryDates = resp.dates.toSet(), summaryDatesTruncated = resp.truncated)
+                }
             } catch (_: Exception) {
                 // 保持原样（空集合 → 日历全可选）
             }

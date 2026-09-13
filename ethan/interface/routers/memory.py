@@ -5,6 +5,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from ethan.memory.store import (
+    DAILY_SUMMARY_DATES_MAX,
+)
+
 from .deps import verify_token
 
 router = APIRouter(prefix="/memory")
@@ -311,17 +315,23 @@ async def list_daily_summaries_api(
 @router.get("/records/summaries/dates")
 async def list_daily_summary_dates_api(
     domain: str | None = Query(None),
-    limit: int = Query(400, ge=1, le=3660),
+    limit: int = Query(DAILY_SUMMARY_DATES_MAX, ge=1, le=DAILY_SUMMARY_DATES_MAX),
     user_id: str = Depends(verify_token),
 ):
-    """所有有日摘要的日期（倒序去重）。供前端日历把「没有摘要的日子」置灰。
+    """有日摘要的日期（倒序去重）。供前端日历把「没有摘要的日子」置灰。
+
+    返回 `{dates, total, truncated}`：`total` 是去重后的真实天数，`truncated` 表示
+    `dates` 被 `limit` 截断（还有更早的日期没返回）。前端据此可以提示「还有更早的」，
+    而不是把更早的日子静默置灰成「没内容」。
 
     ⚠️ 这个路由必须定义在 `/records/summaries/{date_str}` **之前**：FastAPI 按注册
     顺序匹配，否则 "dates" 会被当成 date_str 传进 `date.fromisoformat()` 直接 400。
     """
     store = _structured_store()
     try:
-        return {"dates": store.list_daily_summary_dates(memory_domain=domain, limit=limit)}
+        dates = store.list_daily_summary_dates(memory_domain=domain, limit=limit)
+        total = store.count_daily_summary_dates(memory_domain=domain)
+        return {"dates": dates, "total": total, "truncated": total > len(dates)}
     finally:
         store.close()
 

@@ -76,6 +76,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -107,6 +108,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -168,6 +170,7 @@ fun MemoryScreen(
             summaries = state.summaries,
             date = state.summariesDate,
             summaryDates = state.summaryDates,
+            datesTruncated = state.summaryDatesTruncated,
             loading = state.summariesLoading,
             hasMore = state.summariesHasMore,
             onDateChange = onSummariesDateChange,
@@ -901,6 +904,7 @@ private fun SummariesDialog(
     summaries: List<JsonElement>,
     date: String,
     summaryDates: Set<String>,
+    datesTruncated: Boolean,
     loading: Boolean,
     hasMore: Boolean,
     onDateChange: (String) -> Unit,
@@ -909,10 +913,18 @@ private fun SummariesDialog(
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
     // 同一个实例跨重组复用（否则每次重组新建一个，等于重置）。
-    // LaunchedEffect 把最新的日期全集同步进去 —— 集合是异步到的，
-    // 和下面「每次打开重建 state」互为保险。
+    // 日期全集是异步到的，用 snapshotFlow 在快照感知的收集器里写入 —— 不要写成
+    // `LaunchedEffect(summaryDates) { selectable.update(summaryDates) }`：那样写入
+    // 发生在普通协程里，只能保证「关掉重开时重建 state」那条路生效；弹窗已经开着、
+    // 数据后到时格子是否重算，取决于 DatePicker 内部是快照读还是构建期一次性读，
+    // 不保证。走 snapshotFlow 后写入发生在快照观察链路上，行为确定。
+    // （同款写法见 ChatScreen.kt 的 snapshotFlow { isAtBottom }。）
     val selectable = remember { SummaryDatesSelectable(summaryDates) }
-    LaunchedEffect(summaryDates) { selectable.update(summaryDates) }
+    LaunchedEffect(selectable) {
+        snapshotFlow { summaryDates }
+            .distinctUntilChanged()
+            .collect { selectable.update(it) }
+    }
     // usePlatformDefaultWidth = false 是关键：Compose 的 Dialog 默认会被平台约束到
     // 一个较窄的宽度（约屏宽 80% 再减去系统边距），光在内容里写 fillMaxWidth() 是
     // 撑不开的 —— 这正是「弹窗不够宽、正文挤成窄条」的原因。
@@ -998,9 +1010,11 @@ private fun SummariesDialog(
                 // 说明「灰格子 = 那天没有摘要」。不给提示的话，用户会以为日历坏了。
                 // 只在确实拿到了日期全集时显示：空集合代表还没拉到或真的一条都没有，
                 // 那时日历是全放开的，这句话就不成立了。
+                // 若日期集被后端上限截断（还有更早的没返回），要额外说明 —— 否则用户
+                // 会以为更早的那些灰格子也是「没内容」，其实只是没拉回来。
                 if (summaryDates.isNotEmpty()) {
                     Text(
-                        text = "灰色日期没有日摘要",
+                        text = if (datesTruncated) "灰色日期没有日摘要；更早的日期未加载" else "灰色日期没有日摘要",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         // 左侧对齐日期条的图标（日期条 padding 12dp + 图标前 12dp），

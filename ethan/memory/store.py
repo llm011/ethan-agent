@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = "4"
 
+# 前端日历一次能拿到的「有日摘要的日期」上限（按天一条，一年 366）。
+# 这个值只是防御性上限，不是业务约束——见 list_daily_summary_dates 的 docstring。
+DAILY_SUMMARY_DATES_MAX = 3660
+
 
 class MemoryStore:
     """Canonical store for structured memories and their evidence."""
@@ -1114,11 +1118,16 @@ class MemoryStore:
         return [row for row in rows if row["local_date"] == local_date]
 
     def list_daily_summary_dates(
-        self, *, memory_domain: str | None = None, limit: int = 400
+        self, *, memory_domain: str | None = None, limit: int = DAILY_SUMMARY_DATES_MAX
     ) -> list[str]:
-        """所有存在日摘要的 local_date，倒序去重。
+        """存在日摘要的 local_date，倒序去重。
 
-        给前端日历用：让「没有摘要的日子」置灰不可选。
+        ⚠️ 返回的是**受 [limit] 截断后的最近 N 天**，不是全集。调用方若需要判断
+        「是否还有更早的日期被截掉」，用 [count_daily_summary_dates] 对比长度；
+        不要拿本方法的返回长度当总数。
+
+        给前端日历用：让「没有摘要的日子」置灰不可选。默认 [DAILY_SUMMARY_DATES_MAX]
+        （≈10 年）远大于实际使用年限，正常不会截断。
 
         单独走一条 `GROUP BY` 而不是复用 `list_daily_summaries` 再过滤 —— 后者会把
         每条摘要的正文（动辄几 KB）全读进内存，而这里只要日期串。
@@ -1134,6 +1143,19 @@ class MemoryStore:
                 GROUP BY local_date ORDER BY local_date DESC LIMIT ?
             """, (limit,)).fetchall()
         return [row["local_date"] for row in rows]
+
+    def count_daily_summary_dates(self, *, memory_domain: str | None = None) -> int:
+        """有日摘要的天数（去重）。用于判断 list_daily_summary_dates 是否被 limit 截断。"""
+        if memory_domain:
+            row = self._get_conn().execute(
+                "SELECT COUNT(DISTINCT local_date) FROM daily_summaries WHERE memory_domain=?",
+                (memory_domain,),
+            ).fetchone()
+        else:
+            row = self._get_conn().execute(
+                "SELECT COUNT(DISTINCT local_date) FROM daily_summaries"
+            ).fetchone()
+        return int(row[0]) if row else 0
 
     def claim_job(self, job: ConsolidationJob) -> bool:
         with self.transaction() as conn:
