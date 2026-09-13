@@ -2,7 +2,6 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 from ethan.core.config import get_config
 from ethan.core.context_budget import compress_previous_round_tools, enforce_context_budget
@@ -232,12 +231,13 @@ class Agent:
 
     def _load_system_files(self) -> None:
         """启动时一次性读入 system 目录下的 md 文件，避免每次对话都做磁盘 I/O。"""
+        from ethan.core.paths import system_dir as _system_dir
         from ethan.core.paths import user_profile_path
 
         cfg = get_config()
         workspace = cfg.defaults.workspace
         # system/*.md 全局共享（ethan 角色定义）；user_profile.md 按 profile 隔离
-        system_dir = Path(workspace) / "system"
+        system_dir = _system_dir()
         for name in ("identity", "soul", "agent", "tools"):
             p = system_dir / f"{name}.md"
             if p.exists():

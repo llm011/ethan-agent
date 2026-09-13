@@ -189,9 +189,9 @@ def reload_naming_rules() -> None:
 
 
 def _naming_rules_path() -> Path:
-    from ethan.core.config import get_config
+    from ethan.core.paths import system_dir
 
-    return Path(get_config().defaults.workspace) / "system" / "naming.md"
+    return system_dir() / "naming.md"
 
 
 def _load_naming_rules() -> str:

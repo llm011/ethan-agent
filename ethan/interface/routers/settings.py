@@ -1,5 +1,4 @@
 """settings 路由：agent/system/provider/channel 配置 + onboarding + upload + prompt preview。"""
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -33,7 +32,7 @@ async def onboarding_status(user_id: str = Depends(verify_token)):
 
 @router.post("/onboarding/complete")
 async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Depends(verify_token)):
-    from ethan.core.config import CONFIG_DIR
+    from ethan.core.paths import system_dir
     from ethan.core.services.onboarding import mark_onboarded
 
     agent_name = req.agent_name.strip() or "Ethan"
@@ -41,7 +40,7 @@ async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Dep
     mark_onboarded(user_id)
 
     if agent_name != "Ethan":
-        identity_path = CONFIG_DIR / "system" / "identity.md"
+        identity_path = system_dir() / "identity.md"
         if identity_path.exists():
             content = identity_path.read_text(encoding="utf-8")
             identity_path.write_text(content.replace("Ethan", agent_name), encoding="utf-8")
@@ -206,15 +205,17 @@ class SystemSettingsPatch(BaseModel):
 
 @router.get("/settings/system", dependencies=[Depends(verify_token)])
 async def get_system_settings():
-    system_dir = Path(os.path.expanduser("~/.ethan/system"))
-    files = {k: system_dir / f"{k}.md" for k in ("identity", "soul", "agent", "tools", "heartbeat", "naming")}
+    from ethan.core.paths import system_dir
+    d = system_dir()
+    files = {k: d / f"{k}.md" for k in ("identity", "soul", "agent", "tools", "heartbeat", "naming")}
     return {k: (p.read_text(encoding="utf-8") if p.exists() else "") for k, p in files.items()}
 
 
 @router.patch("/settings/system", dependencies=[Depends(verify_token)])
 async def update_system_settings(req: SystemSettingsPatch):
-    system_dir = Path(os.path.expanduser("~/.ethan/system"))
-    system_dir.mkdir(parents=True, exist_ok=True)
+    from ethan.core.paths import system_dir
+    d = system_dir()
+    d.mkdir(parents=True, exist_ok=True)
     mapping = {
         "identity": req.identity,
         "soul": req.soul,
@@ -228,7 +229,7 @@ async def update_system_settings(req: SystemSettingsPatch):
             continue
         if not val.strip():
             continue  # 空串视为不修改,避免误清空
-        (system_dir / f"{name}.md").write_text(val, encoding="utf-8")
+        (d / f"{name}.md").write_text(val, encoding="utf-8")
     # 命名规则改了要清缓存，否则标题生成仍用旧规则
     if req.naming is not None:
         from ethan.memory.session import reload_naming_rules
