@@ -29,6 +29,21 @@ class Procedure:
     hit_count: int = 0
 
 
+def _mask_rule(rule: str) -> str:
+    """把准则文本里出现的已知 secret 真值换成 <secret:name> 引用。
+
+    准则会被 `build_context()` 拼进 system prompt，**每轮都发往 LLM provider** ——
+    真值一旦落盘就等于反复外发。写入路径（`add` / `update`）必须都过这一道。
+
+    只是 `str.replace` 已知的本地 secret 真值，不是给用户输入做通用脱敏：
+    手写的普通文本不会被碰，所以不存在「误伤用户内容」的问题。
+
+    函数内 import 沿用原写法，避免与 secrets_store 产生模块级循环依赖。
+    """
+    from ethan.core.services.secrets_store import mask_text
+    return mask_text(rule)
+
+
 class ProcedureStore:
     def __init__(self, path: Path = PROCEDURES_FILE):
         self._path = path
@@ -66,8 +81,7 @@ class ProcedureStore:
         self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def add(self, rule: str, context: str = "") -> None:
-        from ethan.core.services.secrets_store import mask_text
-        rule = mask_text(rule)
+        rule = _mask_rule(rule)
         for p in self._procedures:
             if p.rule.lower().strip() == rule.lower().strip():
                 p.hit_count += 1
@@ -97,8 +111,11 @@ class ProcedureStore:
 
         新 rule 与**其他**条目重复时返回 False（不改）—— 去重逻辑和 `add`
         一致，否则会出现两条一模一样的准则。
-        编辑不走 `_save` 的 mask_text：用户手动输入的内容不该被当成密钥打码，
-        真正的密钥过滤在写入侧（`add` / `procedure_write` 工具）已经做过。
+
+        新 rule 和 `add` 一样过 `_mask_rule`：准则会被 `build_context()` 拼进
+        system prompt 反复外发，含凭证的文本必须落盘前就换成 `<secret:name>` 引用。
+        别把这里当成「给用户输入做通用脱敏」—— `mask_text` 只替换已知 secret
+        真值，手写的普通文本原样保留。
 
         :param rule: 新内容；空白串视为非法，返回 False
         :param context: None = 保持原值
@@ -107,6 +124,7 @@ class ProcedureStore:
             return False
         if not rule or not rule.strip():
             return False
+        rule = _mask_rule(rule)
         normalized = rule.lower().strip()
         for i, p in enumerate(self._procedures):
             if i != index and p.rule.lower().strip() == normalized:

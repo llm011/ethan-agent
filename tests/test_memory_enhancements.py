@@ -528,6 +528,35 @@ class TestProcedureStoreUpdate:
         assert store.update(-1, "X") is False
         assert [p.rule for p in store.all()] == ["准则 A"]
 
+    def test_masks_known_secret_like_add_does(self, tmp_path, monkeypatch):
+        """含凭证的准则不能明文落盘 —— 它会被 build_context() 拼进 system prompt 反复外发。
+
+        update 曾经是 add 的旁路（add 有 mask_text、update 没有），这里钉住两条路径一致。
+        """
+        import ethan.core.services.secrets_store as secrets_mod
+        monkeypatch.setattr(
+            secrets_mod, "all_secret_values", lambda: [("ghp_realtoken123", "github_pat")],
+        )
+
+        store = self._store(tmp_path, "准则 A")
+        assert store.update(0, "用 ghp_realtoken123 拉代码") is True
+
+        # 内存态与磁盘态都必须是引用而不是真值
+        assert store.all()[0].rule == "用 <secret:github_pat> 拉代码"
+        from ethan.memory.procedures import ProcedureStore
+        reloaded = ProcedureStore(path=tmp_path / "playbook.json").all()[0].rule
+        assert reloaded == "用 <secret:github_pat> 拉代码"
+        assert "ghp_realtoken123" not in (tmp_path / "playbook.json").read_text(encoding="utf-8")
+
+    def test_plain_text_is_not_touched_by_masking(self, tmp_path, monkeypatch):
+        """mask_text 只替换已知 secret 真值，手写的普通文本要原样保留（不是通用脱敏）。"""
+        import ethan.core.services.secrets_store as secrets_mod
+        monkeypatch.setattr(secrets_mod, "all_secret_values", lambda: [("ghp_realtoken123", "github_pat")])
+
+        store = self._store(tmp_path, "准则 A")
+        assert store.update(0, "回答前先查一遍 git 状态") is True
+        assert store.all()[0].rule == "回答前先查一遍 git 状态"
+
 
 class TestProcedureEndpoints:
     """PATCH/DELETE /memory/procedures/{id} 的状态码契约（Android 端据此提示）。"""
@@ -576,3 +605,16 @@ class TestProcedureEndpoints:
         """int() 抛 ValueError 不该冒成 500。"""
         assert client.patch("/memory/procedures/abc", json={"rule": "X"}).status_code == 400
         assert client.delete("/memory/procedures/abc").status_code == 400
+
+    def test_patch_does_not_persist_known_secret_in_plaintext(self, client, monkeypatch):
+        """走一遍真实触发路径：PATCH 带凭证的 rule → 落盘的是 <secret:name> 引用。"""
+        import ethan.core.services.secrets_store as secrets_mod
+        monkeypatch.setattr(
+            secrets_mod, "all_secret_values", lambda: [("ghp_realtoken123", "github_pat")],
+        )
+
+        assert client.patch(
+            "/memory/procedures/0", json={"rule": "用 ghp_realtoken123 拉代码"},
+        ).status_code == 200
+        rules = [p["rule"] for p in client.get("/memory/procedures").json()["procedures"]]
+        assert rules[0] == "用 <secret:github_pat> 拉代码"
