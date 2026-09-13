@@ -12,6 +12,7 @@ import {
 import type { Message } from "@ethan/shared/chat/types";
 import type { Annotation, AnnotationColor, AnnotationType } from "@/lib/api";
 import { createAnnotation, deleteAnnotation, updateAnnotationOffset, updateMessage } from "@/lib/api";
+import { isPersistedId } from "@ethan/shared/chat/history";
 import { MarkdownContent } from "./markdown";
 import { applyHighlights, getSelectionOffsets, type HighlightSpan } from "@/lib/highlight";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
@@ -188,7 +189,9 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
   };
 
   const doSave = async () => {
-    if (!message || message.id == null || saving) return;
+    // 编辑是写操作，必须有落库后的数字 id
+    if (!message || !isPersistedId(message.id) || saving) return;
+    const messageId = message.id;
     if (draft === message.content) {
       setEditing(false);
       return;
@@ -196,7 +199,7 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
     setSaving(true);
     setSaveError(null);
     try {
-      await updateMessage(sessionId ?? "", message.id, draft);
+      await updateMessage(sessionId ?? "", messageId, draft);
       onEditContent?.(draft);
       pendingRelocateRef.current = true;
       setEditing(false);
@@ -235,9 +238,11 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
   };
 
   const doCreate = async (type: AnnotationType, color?: AnnotationColor, note?: string | null) => {
-    if (!sel || message.id == null) return;
+    // 标注按 message_id 持久化，同样要求真实 id
+    if (!sel || !isPersistedId(message.id)) return;
+    const messageId = message.id;
     const payload = {
-      message_id: message.id,
+      message_id: messageId,
       type,
       color: color ?? null,
       start: sel.start,

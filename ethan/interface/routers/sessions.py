@@ -146,12 +146,36 @@ async def mark_session_read(session_id: str, user_id: str = Depends(verify_token
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: str, user_id: str = Depends(verify_token)):
+async def get_session(
+    session_id: str,
+    limit: int | None = None,
+    before: int | None = None,
+    user_id: str = Depends(verify_token),
+):
+    """会话详情。
+
+    limit/before 为分页参数（都省略 = 全量返回，兼容旧前端）：
+    - limit：最多返回多少条消息（取最近 limit 条）
+    - before：只取 id 小于它的消息（上滚加载更早一页时传上一页最旧那条的 id）
+
+    响应额外带 `has_more` 与 `oldest_id`：前者表示还有更早的消息可加载，
+    后者是本次返回的最旧一条的 id，前端下次上滚时把它当 before 传回来。
+    """
     store = await get_session_store()
-    session = await store.load(session_id)
+    paged = limit is not None or before is not None
+    session = await store.load(session_id, limit=limit, before=before)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     from ethan.core.run_manager import RunManager
+
+    _msgs = [m for m in session.messages if m.role in ("user", "assistant")]
+    oldest_id = next((getattr(m, "id", None) for m in _msgs if getattr(m, "id", None)), None)
+    has_more = False
+    if paged and oldest_id is not None:
+        # 「还有更早的」只可能在有 before 下界或取了整页时成立；实际按 id 再查一次最准，
+        # 避免用 len(msgs)==limit 猜测（恰好整除时会多请求一次空页）。
+        has_more = await store.has_more_messages(session_id, oldest_id)
+
     return {
         "id": session.id,
         "title": session.title,
@@ -159,6 +183,9 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
         "source": getattr(session, "source", "web"),
         "mode": getattr(session, "mode", "") or "",
         "pinned_at": getattr(session, "pinned_at", 0) or 0,
+        # 分页元信息：has_more=False 时前端不再继续上滚请求
+        "has_more": has_more,
+        "oldest_id": oldest_id,
         # 该会话是否有正在进行的生成（producer 未结束）。前端据此决定刷新后重连流。
         # 此处 session 已从当前用户的 store 取到（归属已确认），仍传 user_id 做纵深防御。
         "active_run": RunManager.instance().has_active(session_id, user_id=user_id),
@@ -191,7 +218,7 @@ async def get_session(session_id: str, user_id: str = Depends(verify_token)):
                 "status": getattr(m, "status", "completed"),
                 "error": getattr(m, "error", None) or "",
             }
-            for m in session.messages if m.role in ("user", "assistant")
+            for m in _msgs
         ],
     }
 

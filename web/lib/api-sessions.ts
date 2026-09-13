@@ -182,6 +182,31 @@ export async function createSession(model?: string, mode?: string): Promise<{ id
   return res.json();
 }
 
+/**
+ * 按页拉取会话消息（分页版 fetchSession）。
+ *
+ * - `limit`：最多取多少条（不传 = 全量，等价于旧行为）
+ * - `before`：只取 id 小于它的消息，用于「上滚加载更早一页」
+ *
+ * 返回体比 SessionDetail 多了 `has_more` / `oldest_id`：前端据此决定还能不能继续上滚、
+ * 以及下次把哪个 id 当 before 传回来。
+ *
+ * 注意：分页结果**不写入离线缓存**。缓存的是「整个会话」的语义，只存一页会让
+ * 离线时看到残缺历史。离线场景仍走 fetchSession 的全量 / 缓存路径。
+ */
+export async function fetchSessionPage(
+  id: string,
+  opts: { limit?: number; before?: number } = {},
+): Promise<SessionDetail & { has_more?: boolean; oldest_id?: number | null }> {
+  const params = new URLSearchParams();
+  if (opts.limit != null) params.set("limit", String(opts.limit));
+  if (opts.before != null) params.set("before", String(opts.before));
+  const qs = params.toString();
+  const res = await fetch(`${API_URL}/sessions/${id}${qs ? `?${qs}` : ""}`, { headers: headers() });
+  if (!res.ok) throw new Error("Session not found");
+  return res.json();
+}
+
 export async function fetchSession(id: string): Promise<SessionDetail> {
   // 离线时先返回缓存
   if (isOffline()) {

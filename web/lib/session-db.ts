@@ -3,6 +3,7 @@
  * 所有操作静默失败（reject → resolve null），绝不抛错影响主流程。
  */
 
+import { mergeOlderMessagesIntoCache } from "@ethan/shared/chat/history";
 import type { SessionDetail, SessionInfo } from "./api-sessions";
 
 const DB_NAME = "ethan-offline";
@@ -144,6 +145,34 @@ export async function updateSessionDetail(
   const record = await withStore<SessionRecord>(STORE_SESSIONS, "readonly", (store) => store.get(sessionId));
   if (!record) return;
   const next: SessionRecord = { id: sessionId, detail: updater(record.detail), accessedAt: Date.now() };
+  await withStore(STORE_SESSIONS, "readwrite", (store) => store.put(next));
+}
+
+/**
+ * 把一页消息并入**已有**的全量缓存；没有缓存则什么都不做。
+ *
+ * 缓存语义是「整个会话」——`fetchSession` 离线时只读它。分页结果只有最近 N 条，
+ * 直接 `writeSessionDetail` 会把全量缓存降级成残页（离线打开长会话只剩 30 条且
+ * 更早历史永久不可达）。所以分页路径只**合并**、不覆盖：
+ * - 按 id 合并进旧 messages（新页优先，覆盖流式期间的中间态）
+ * - 裁剪到全量缓存原本的最旧 id 以内，避免把「缓存只覆盖到 id=5」悄悄扩成「到 id=1
+ *   但中间 2..4 缺失」，那会让离线阅读出现空洞
+ * - 没有缓存时保持没有——宁可离线无缓存，也不要一份残缺缓存
+ */
+export async function mergeSessionPageIntoCache(
+  sessionId: string,
+  page: SessionDetail,
+): Promise<void> {
+  const record = await withStore<SessionRecord>(STORE_SESSIONS, "readonly", (store) => store.get(sessionId));
+  if (!record) return;
+  // 合并规则是纯函数，收在 @ethan/shared 里（两端共用 + 单测），这里只管存储
+  const merged = mergeOlderMessagesIntoCache(record.detail.messages, page.messages);
+  if (!merged) return;
+  const next: SessionRecord = {
+    id: sessionId,
+    detail: { ...record.detail, ...page, messages: merged as SessionDetail["messages"] },
+    accessedAt: Date.now(),
+  };
   await withStore(STORE_SESSIONS, "readwrite", (store) => store.put(next));
 }
 

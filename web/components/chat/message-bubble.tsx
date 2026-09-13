@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { Quote as QuoteIcon, BookOpen as BookOpenIcon, Share2 as ShareIcon, Plus as PlusIcon, Send as SendIcon, Trash2 as TrashIcon, RotateCcw as RotateCcwIcon, X as XIcon, RefreshCw as RefreshCwIcon } from "lucide-react";
 import { ToolTimeline } from "@ethan/shared/components/tool-timeline";
 import { SwimlaneDiagram } from "@ethan/shared/components/swimlane-diagram";
+import { isPersistedId } from "@ethan/shared/chat/history";
 import { fmtTokens } from "@/lib/utils";
 import { A2uiCard } from "./a2ui-card";
 import { McpAppView } from "./mcp-app-view";
@@ -279,7 +280,8 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
   }, [annotations, msg.content, isStreaming, msg.role]);
 
   const loadIntermediate = async () => {
-    if (!sessionId || !msg.id || !msg.intermediateBlobId || intermediateLoading || intermediateContent) return;
+    // 必须是落库后的数字 id：流式占位消息的 tmp id 发出去会被后端当非法参数拒掉
+    if (!sessionId || !isPersistedId(msg.id) || !msg.intermediateBlobId || intermediateLoading || intermediateContent) return;
     setIntermediateLoading(true);
     setIntermediateError(null);
     try {
@@ -318,7 +320,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
           </Tooltip>
         )}
         {/* 悬浮阅读按钮（仅 assistant 且已有稳定 id） */}
-        {msg.role === "assistant" && onRead && !isStreaming && msg.id != null && (
+        {msg.role === "assistant" && onRead && !isStreaming && isPersistedId(msg.id) && (
           <Tooltip>
             <TooltipTrigger
               render={
@@ -343,7 +345,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   className={`absolute -top-2 ${
                     msg.role === "user"
                       ? "-left-14"
-                      : onRead && msg.id != null
+                      : onRead && isPersistedId(msg.id)
                         ? "-right-21"
                         : "-right-14"
                   } opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-accent`}
@@ -365,7 +367,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                   className={`absolute -top-2 ${
                     msg.role === "user"
                       ? "-left-21"
-                      : onRead && msg.id != null
+                      : onRead && isPersistedId(msg.id)
                         ? "-right-28"
                         : "-right-21"
                   } opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 flex items-center justify-center rounded-md bg-muted border border-border text-muted-foreground hover:text-destructive hover:bg-accent`}

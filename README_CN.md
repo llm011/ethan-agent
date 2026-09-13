@@ -85,7 +85,10 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 **会话打开速度**
 - Agent 读到的图片落盘到 `~/.ethan/assets/images/<session_id>/`，卡片只存相对路径，不再内联 base64——这正是以前点开会话要等好几秒的原因
+- 消息**按页加载**：首屏只取最近 30 条，向上滚动时再加载更早的页（`GET /sessions/{id}` 的 `limit` / `before`，配 `has_more` / `oldest_id` 当游标）。实测最大的真实会话，打开从 1602ms / 9.06MB 降到 10ms / 304KB
+- 流式与分页安全共存：一轮生成结束后把新的末尾并入已加载的历史，而不是整表替换——用户上滚翻出来的更早几页不会凭空消失
 - 打开会话先渲染本地缓存（Web 走 IndexedDB、桌面端走 localStorage），网络结果后台覆盖；历史遗留的内联 base64 卡片在启动时一次性转成资产路径
+- 分页结果**只合并进已有缓存、绝不覆盖**——缓存是整个会话的语义，写入最近 30 条会把离线可读的历史降级成残页（更早历史永久不可达）
 
 **多渠道**
 - CLI REPL、Web UI（Next.js）、**Android App**（Kotlin/Compose）、飞书（WebSocket 长连接，无需公网 IP）
@@ -689,6 +692,11 @@ EOF
 让 Agent 读一张本地图片，再点回该会话
 DevTools Network 里 GET /sessions/{id} 的响应体应是几百 KB 量级（不是 MB）
 卡片图片走 assets/images/ 路径，而不是 data:image/png;base64 开头
+
+# 4. 长会话分页验证
+点开一个几百条以上的会话，看 GET /sessions/{id}?limit=30 的首屏请求——
+响应体应只有最近 30 条，约几百 KB；向上滚动时再发带 before=<oldest_id> 的请求
+翻到头（回到第一条 user 消息）后不再发请求（响应里 has_more=false）
 ```
 
 ### 知识库

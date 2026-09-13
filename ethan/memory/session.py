@@ -1049,7 +1049,21 @@ class SessionStore:
             await self.save_message(session_id, msg)
         await self.touch(session_id)
 
-    async def load(self, session_id: str) -> Session | None:
+    async def load(
+        self,
+        session_id: str,
+        limit: int | None = None,
+        before: int | None = None,
+    ) -> Session | None:
+        """加载会话及其消息。
+
+        limit / before 用于分页：只取「最近 limit 条」或「id 小于 before 的最近 limit 条」。
+        两者都为 None 时行为与分页前完全一致（全量加载），保证既有调用方不受影响。
+
+        分页时按 id 倒序取 limit 条再翻回正序返回，因此 session.messages 始终是
+        时间正序（与全量加载一致），调用方无需关心取的是哪一段。判断还有没有更早的
+        消息用 has_more_messages()。
+        """
         import json
 
         from ethan.providers.base import ToolCall
@@ -1080,10 +1094,32 @@ class SessionStore:
             i for i in _pending if isinstance(i, dict) and i.get("id") and i.get("content")
         ]
 
-        async with self._db.execute(
-            "SELECT id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning, model, error FROM messages WHERE session_id = ? ORDER BY id",
-            (session_id,),
-        ) as cursor:
+        _MSG_COLS = (
+            "id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, "
+            "quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, "
+            "intermediate_blob_id, status, reasoning, model, error"
+        )
+        if limit is None and before is None:
+            _sql = f"SELECT {_MSG_COLS} FROM messages WHERE session_id = ? ORDER BY id"
+            _params: tuple = (session_id,)
+        else:
+            # 取「比 before 更早的最近 limit 条」：先按 id 倒序 + LIMIT 命中目标窗口，
+            # 再在 Python 里翻回正序（SQL 末尾的 ORDER BY 是外层，用来恢复正序）。
+            _where = "session_id = ?"
+            _params = [session_id]
+            if before is not None:
+                _where += " AND id < ?"
+                _params.append(before)
+            _sql = (
+                f"SELECT * FROM (SELECT {_MSG_COLS} FROM messages WHERE {_where} "
+                "ORDER BY id DESC LIMIT ?) ORDER BY id"
+            )
+            # limit 缺省（只传了 before）时取「比 before 更早的全部」：SQLite 的
+            # LIMIT -1 就是不限量。不能对 None 直接 int()，那会 TypeError → 500。
+            _params.append(max(1, int(limit)) if limit is not None else -1)
+            _params = tuple(_params)
+
+        async with self._db.execute(_sql, _params) as cursor:
             async for r in cursor:
                 tool_calls = []
                 if r[3]:
@@ -1132,6 +1168,22 @@ class SessionStore:
                 )
 
         return session
+
+    async def has_more_messages(self, session_id: str, before: int) -> bool:
+        """session 里是否还有 id 小于 before 的消息（分页时判断能否继续上滚加载）。"""
+        async with self._db.execute(
+            "SELECT 1 FROM messages WHERE session_id = ? AND id < ? LIMIT 1",
+            (session_id, before),
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+    async def count_messages(self, session_id: str) -> int:
+        """会话的消息总数（前端展示「还有 N 条更早」之类的提示时用）。"""
+        async with self._db.execute(
+            "SELECT COUNT(*) FROM messages WHERE session_id = ?", (session_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return int(row[0]) if row else 0
 
     async def load_session_cards(self, session_id: str) -> list[dict] | None:
         """只取 messages 的 cards 列（files 路由构建交付授权集合用）。

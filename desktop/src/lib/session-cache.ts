@@ -11,6 +11,7 @@
  * 但单条会话消息量大时仍需留意，故限制 MAX_ENTRIES 而非无限缓存。
  */
 
+import { mergeOlderMessagesIntoCache } from "@ethan/shared/chat/history";
 import type { SessionDetail } from "./api-sessions";
 
 const CACHE_PREFIX = "ethan_session:";
@@ -87,6 +88,28 @@ export function updateSessionCacheMessages(
   try {
     const updated = updater(cached.detail);
     writeSessionCache(sessionId, updated);
+  } catch {}
+}
+
+/**
+ * 把一页消息并入**已有**的全量缓存；没有缓存则什么都不做。
+ *
+ * 缓存语义是「整个会话」。分页结果只有最近 N 条，直接 writeSessionCache 会把全量
+ * 缓存降级成残页（离线打开长会话只剩 30 条，更早历史永久不可达）。所以分页路径
+ * 只**合并**、不覆盖：
+ * - 按 id 合并进旧 messages（新页优先，覆盖流式期间的中间态）
+ * - 裁剪到全量缓存原本的最旧 id 以内，避免把「缓存覆盖到 id=5」悄悄扩成「到 id=1
+ *   但中间 2..4 缺失」，那会让离线阅读出现空洞
+ * - 没有缓存时保持没有——宁可离线无缓存，也不要一份残缺缓存
+ */
+export function mergeSessionPageIntoCache(sessionId: string, page: SessionDetail): void {
+  const cached = readSessionCache(sessionId);
+  if (!cached) return;
+  // 合并规则是纯函数，收在 @ethan/shared 里（两端共用 + 单测），这里只管存储
+  const merged = mergeOlderMessagesIntoCache(cached.detail.messages, page.messages);
+  if (!merged) return;
+  try {
+    writeSessionCache(sessionId, { ...cached.detail, ...page, messages: merged });
   } catch {}
 }
 
