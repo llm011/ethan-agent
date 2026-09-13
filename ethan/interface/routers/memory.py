@@ -298,11 +298,12 @@ async def trigger_structured_consolidation(
 async def list_daily_summaries_api(
     domain: str | None = Query(None),
     limit: int = Query(30, ge=1, le=366),
+    offset: int = Query(0, ge=0),
     user_id: str = Depends(verify_token),
 ):
     store = _structured_store()
     try:
-        return {"items": store.list_daily_summaries(memory_domain=domain, limit=limit)}
+        return {"items": store.list_daily_summaries(memory_domain=domain, limit=limit, offset=offset)}
     finally:
         store.close()
 

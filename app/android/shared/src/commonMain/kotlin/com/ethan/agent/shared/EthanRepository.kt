@@ -607,8 +607,12 @@ class EthanRepository(
         return api.consolidateRecords(targetDate)
     }
 
-    suspend fun getDailySummaries(domain: String? = null, limit: Int = 30): DailySummariesResponse {
-        return api.getDailySummaries(domain, limit)
+    suspend fun getDailySummaries(
+        domain: String? = null,
+        limit: Int = 30,
+        offset: Int = 0,
+    ): DailySummariesResponse {
+        return api.getDailySummaries(domain, limit, offset)
     }
 
     suspend fun getDailySummaryByDate(dateStr: String, domain: String? = null): DailySummariesResponse {

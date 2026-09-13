@@ -305,6 +305,8 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onConsolidateRecords = { vm.triggerRecordsConsolidate() },
                     onLoadSummaries = vm::loadSummaries,
                     onHideSummaries = vm::hideSummaries,
+                    onSummariesDateChange = vm::setSummariesDate,
+                    onLoadMoreSummaries = vm::loadMoreSummaries,
                 )
             }
 

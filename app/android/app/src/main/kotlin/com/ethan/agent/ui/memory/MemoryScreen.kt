@@ -51,6 +51,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -68,6 +69,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -133,6 +136,8 @@ fun MemoryScreen(
     onConsolidateRecords: () -> Unit = {},
     onLoadSummaries: () -> Unit = {},
     onHideSummaries: () -> Unit = {},
+    onSummariesDateChange: (String) -> Unit = {},
+    onLoadMoreSummaries: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
@@ -155,7 +160,15 @@ fun MemoryScreen(
 
     // Daily summaries sheet
     if (state.showSummaries) {
-        SummariesDialog(summaries = state.summaries, onDismiss = onHideSummaries)
+        SummariesDialog(
+            summaries = state.summaries,
+            date = state.summariesDate,
+            loading = state.summariesLoading,
+            hasMore = state.summariesHasMore,
+            onDateChange = onSummariesDateChange,
+            onLoadMore = onLoadMoreSummaries,
+            onDismiss = onHideSummaries,
+        )
     }
 
     // 编辑页覆盖层：事实 / 流程 / 结构化记忆共用一个编辑器。
@@ -835,11 +848,43 @@ private fun RecordMetaRow(record: StructuredRecord) {
  *
  * 字段是从 `JsonElement` 里按 key 取的（后端返回的是自由 JSON），取不到就不显示。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SummariesDialog(summaries: List<JsonElement>, onDismiss: () -> Unit) {
+private fun SummariesDialog(
+    summaries: List<JsonElement>,
+    date: String,
+    loading: Boolean,
+    hasMore: Boolean,
+    onDateChange: (String) -> Unit,
+    onLoadMore: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    val datePickerState = rememberDatePickerState()
     // usePlatformDefaultWidth = false 是关键：Compose 的 Dialog 默认会被平台约束到
     // 一个较窄的宽度（约屏宽 80% 再减去系统边距），光在内容里写 fillMaxWidth() 是
     // 撑不开的 —— 这正是「弹窗不够宽、正文挤成窄条」的原因。
+    // 日期选择：Web 端是 `daily` 页签上放一个 `<input type="date">`（memory-view.tsx:365），
+    // 这里做成弹窗里的一行，语义等价 —— 选一天只看那天的摘要，清空回到全部。
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDatePicker = false
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        onDateChange(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(millis)))
+                    }
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+            },
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogPropertiesCompat.wide,
@@ -853,25 +898,96 @@ private fun SummariesDialog(summaries: List<JsonElement>, onDismiss: () -> Unit)
                 Text(
                     "日摘要",
                     style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 10.dp),
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp),
                 )
 
-                if (summaries.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text("暂无日摘要", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        // 左右只留 12dp、不用 16dp：这是全屏宽的弹窗，
-                        // 正文段落希望尽量宽（用户明确要求）。
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                // 日期行：点整条开系统日期选择器；有日期时右侧出现「清除」。
+                // 样式与 InsightsTab 的日期条保持一致（同样的底色和圆角），
+                // 同一个 App 里两处「按日期筛选」不该长得不一样。
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                            .clickable { showDatePicker = true }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(summaries) { item -> DailySummaryCard(item) }
+                        Icon(
+                            Icons.Default.CalendarToday,
+                            contentDescription = "选择日期",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = date.ifBlank { "全部日期" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (date.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    if (date.isNotBlank()) {
+                        TextButton(onClick = { onDateChange("") }) { Text("清除") }
                     }
                 }
 
+                when {
+                    // 切日期时先转圈，不要先闪一下「暂无日摘要」再出内容 —— 那是两帧假信息
+                    loading && summaries.isEmpty() -> LoadingBox()
+                    summaries.isEmpty() -> {
+                        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Text(
+                                if (date.isBlank()) "暂无日摘要" else "$date 没有日摘要",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    else -> {
+                        val listState = rememberLazyListState()
+                        // 滚到接近底部就预拉下一页。用 derivedStateOf 包一层，
+                        // 否则每帧滚动都会重算并触发重组。
+                        val nearEnd by remember(summaries.size, hasMore) {
+                            derivedStateOf {
+                                val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                                hasMore && last >= summaries.size - 2
+                            }
+                        }
+                        LaunchedEffect(nearEnd) {
+                            if (nearEnd) onLoadMore()
+                        }
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.weight(1f),
+                            // 左右只留 12dp、不用 16dp：这是全屏宽的弹窗，
+                            // 正文段落希望尽量宽（用户明确要求）。
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(summaries) { item -> DailySummaryCard(item) }
+                            if (hasMore) {
+                                item {
+                                    Box(
+                                        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 关闭按钮固定在弹窗底部，底下压一条分隔线。
+                // 之前按钮和列表之间没有任何视觉区隔，正文滚到底时最后一行的字
+                // 正好贴着按钮，看起来像文字被按钮盖住了。
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.End,

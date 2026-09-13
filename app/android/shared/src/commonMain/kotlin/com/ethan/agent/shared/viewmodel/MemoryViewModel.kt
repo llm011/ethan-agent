@@ -39,6 +39,14 @@ data class FactItem(
 val FactItem.recordId: String
     get() = fact.id.ifBlank { index }
 
+/**
+ * 日摘要弹窗每页条数。
+ *
+ * 摘要正文是多段 Markdown，一条动辄几 KB —— 以前一次拉 30 条再一次性渲染，
+ * 打开弹窗要卡一下。取 20 是为了「滚一屏还有内容」和「首屏够快」的折中。
+ */
+private const val DAILY_SUMMARIES_PAGE = 20
+
 fun List<Fact>.toFactItems(includeSuperseded: Boolean = false): List<FactItem> {
     return mapIndexedNotNull { index, fact ->
         if (!includeSuperseded && fact.superseded) return@mapIndexedNotNull null
@@ -107,6 +115,16 @@ data class MemoryUiState(
     // Daily summaries
     val summaries: List<JsonElement> = emptyList(),
     val showSummaries: Boolean = false,
+    /**
+     * 日摘要弹窗里选中的日期（`YYYY-MM-DD`，空 = 全部日期）。
+     *
+     * 与 [insightsDate] 分开维护：两个弹窗/页签各自筛选，互不干扰。
+     */
+    val summariesDate: String = "",
+    /** 日摘要是否正在加载（切日期时给弹窗转圈，而不是先闪「暂无日摘要」）。 */
+    val summariesLoading: Boolean = false,
+    /** 弹窗列表是否还有更早的摘要可以加载（按 [DAILY_SUMMARIES_PAGE] 分页）。 */
+    val summariesHasMore: Boolean = false,
     // Loading
     val isLoading: Boolean = false,
     val isConsolidating: Boolean = false,
@@ -411,15 +429,70 @@ class MemoryViewModel(
 
     // ── Daily summaries ────────────────────────────────────────────────────────
 
+    /**
+     * 打开日摘要弹窗：按当前 [MemoryUiState.summariesDate] 重新拉第一页。
+     *
+     * 以前是「一次拉 30 条全塞列表」，而且只有全部日期、没法按天看。现在：
+     * - 有日期 → 走 `summaries/{date}`（一天通常 1-2 条，一次到位）；
+     * - 无日期 → 走列表接口，首页取 [DAILY_SUMMARIES_PAGE] 条，滚到底再拉下一页。
+     *
+     * 分页用 `offset`：日摘要是**按 local_date DESC 排序的只读归档**，
+     * 不像消息那样会增量追加，offset 不会错位。
+     */
     fun loadSummaries() {
+        val date = _state.value.summariesDate
+        _state.update { it.copy(showSummaries = true, summariesLoading = true) }
         viewModelScope.launch {
             try {
-                val items = repository.getDailySummaries(limit = 30).items
-                _state.update { it.copy(summaries = items, showSummaries = true) }
+                val items = if (date.isNotBlank()) {
+                    repository.getDailySummaryByDate(date).items
+                } else {
+                    repository.getDailySummaries(limit = DAILY_SUMMARIES_PAGE).items
+                }
+                _state.update {
+                    it.copy(
+                        summaries = items,
+                        summariesLoading = false,
+                        // 按日期查一定是一次性全量；无日期时按返回条数判断是否还有更早的
+                        summariesHasMore = date.isBlank() && items.size >= DAILY_SUMMARIES_PAGE,
+                    )
+                }
             } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e)) }
+                _state.update {
+                    it.copy(summariesLoading = false, error = repository.friendlyError(e))
+                }
             }
         }
+    }
+
+    /** 弹窗里的「加载更早」：按 offset 续拉下一页，追加到列表尾部（列表是日期降序）。 */
+    fun loadMoreSummaries() {
+        val s = _state.value
+        if (s.summariesLoading || !s.summariesHasMore || s.summariesDate.isNotBlank()) return
+        _state.update { it.copy(summariesLoading = true) }
+        viewModelScope.launch {
+            try {
+                val items = repository.getDailySummaries(limit = DAILY_SUMMARIES_PAGE, offset = s.summaries.size).items
+                _state.update {
+                    it.copy(
+                        summaries = it.summaries + items,
+                        summariesLoading = false,
+                        summariesHasMore = items.size >= DAILY_SUMMARIES_PAGE,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(summariesLoading = false, error = repository.friendlyError(e))
+                }
+            }
+        }
+    }
+
+    /** 弹窗里换日期（空串 = 全部日期），立刻重新加载。 */
+    fun setSummariesDate(date: String) {
+        if (_state.value.summariesDate == date) return
+        _state.update { it.copy(summariesDate = date) }
+        loadSummaries()
     }
 
     fun hideSummaries() {

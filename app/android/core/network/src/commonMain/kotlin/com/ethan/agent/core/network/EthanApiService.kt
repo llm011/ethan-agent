@@ -371,10 +371,11 @@ class EthanApiService(
             parameter("target_date", targetDate)
         }.body()
 
-    suspend fun getDailySummaries(domain: String? = null, limit: Int = 30): DailySummariesResponse =
+    suspend fun getDailySummaries(domain: String? = null, limit: Int = 30, offset: Int = 0): DailySummariesResponse =
         client.get(url("memory/records/summaries")) {
             parameter("domain", domain)
             parameter("limit", limit)
+            parameter("offset", offset)
         }.body()
 
     suspend fun getDailySummaryByDate(dateStr: String, domain: String? = null): DailySummariesResponse =
