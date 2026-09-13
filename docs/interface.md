@@ -221,6 +221,57 @@ CLI 内部维护 `WorkingMemory` 实例：
 另：侧边栏的取数 effect 以「所在区块」而不是完整 `pathname` 作依赖，避免 `/chat/[id]`
 之间切换时把会话列表/定时任务重新拉一遍。
 
+### 记忆列表的分页（不要往回退）
+
+记忆页三端（Android / Web / Desktop）的列表都是**下滑加载更多**，接口统一
+`limit` + `offset`，响应统一带 `total`（前端按 `offset + 本页条数 < total` 推
+「还有没有下一页」）。`total` 比 `has_more` EXISTS 探测更适合这里——前端要显示
+条数，且各接口都有便宜的计数路径（`MemoryStore.count_memories`）。
+
+| 接口 | 分页 |
+|------|------|
+| `GET /memory/facts` | `limit` / `offset` / `total`，**status 过滤下推到 SQL** |
+| `GET /memory/records` | `limit` / `offset` / `total`；`type` 支持逗号分隔多值 |
+| `GET /memory/insights` | `limit` / `offset` / `total` |
+| `GET /memory/insights/date/{d}` | 同上（两条分支前端共用一套判断） |
+| `GET /memory/procedures` | **刻意不分页**，只回 `total`，见下 |
+| `GET /memory/records/search` | **刻意不分页**，只有 `limit` |
+
+⚠️ **`/facts` 的 status 过滤必须作用在分页之前**。旧实现是
+`list_memories(limit=1000)` 拉回来再在 Python 里按
+`status in ("active", "superseded")` 过滤——先取 1000 再过滤再切页，**一定会漏数据**，
+且返回条数与 `limit` 无关。现在 `list_memories` / `count_memories` 的 `status` /
+`memory_type` 都收多值（`IN (...)`），过滤和计数共用 `_list_filters()` 拼 WHERE，
+`limit` / `offset` 作用在过滤后的集合上。回归测试锁在
+`tests/test_api_memory_paging.py::test_facts_status_filter_applies_before_paging`。
+
+⚠️ **`/procedures` 不做的理由**（别以后当成遗漏补上）：`Procedure` 没有 id 字段，
+路由用 `enumerate(store._procedures)` 现造位置下标，删除走 `pop(idx)`——offset
+分页在这种列表上翻页途中删一条就会漏读/重复，而 `rule` 也不能当 key（它正是要被改的
+字段）。更根本的是这份列表**语义上就该短**：`build_context()` 把全部准则注入每一次
+system prompt，它长到需要分页本身是另一个问题。要做的话前置工作是先给 `Procedure`
+加稳定 `uuid` 并迁移存量 JSON。
+
+**前端侧的 offset 不能用「本地列表长度」。** 三端各自都会在客户端做一层过滤/去重，
+本地条数可能小于服务端已经翻过的条数，拿它当 offset 会原地打转并把后面的条目整段跳过：
+
+- Android `toFactItems()` 会滤掉 superseded（而后端 `/facts` 的 status 过滤**包含**
+  superseded）；
+- Android insights 的 by-date 分支逐条解码 `JsonElement`，失败的会被丢掉；
+- 三端的 `appendPage` 都按 id 去重，后端按 `updated_at DESC` 重排时下一遍可能又发来
+  已加载的行。
+
+所以 Android 侧单独记 `factsOffset` / `insightsOffset` / `recordsOffset`（服务端口径的
+已消费条数），而不是用 `list.size`。
+
+**双击 tab 回到顶部**：三端都有，且都保留单击切换。Android 走
+`EthanScrollableTabBar(onTabDoubleTap=...)`（不传时仍是原来的 `clickable`，不吃那
+~300ms 延迟），Web/Desktop 走原生 `onDoubleClick`。注意这是**用户主动触发**的滚动——
+不要顺手加任何隐式滚动（例如切 tab 时自动回顶），那正是 `FactsListContent` 上方那段
+注释里被删掉的问题。
+
+**流程 tab 也因此只有双击回顶、没有分页。**
+
 ---
 
 ## HTTP API（`ethan/interface/api.py`）
