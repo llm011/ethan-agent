@@ -309,6 +309,9 @@ export function MemoryView() {
     }
   }, [activeConfig, activeTab, dateFilter, showDormant, dailyPaged, queryKey]);
 
+  // 依赖 `loadData` 即隐含依赖 `activeConfig`：它只在 activeTab 变化时才换引用，
+  // 等价于「切 tab 就整份重拉」。这是刻意的 —— 哪天把 TABS 改成动态生成（每次渲染新建
+  // 数组）会让 useMemo 失效，那时必须先改这里，否则会变成请求风暴。
   useEffect(() => {
     loadData(0);
   }, [loadData]);
