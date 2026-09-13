@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
@@ -41,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -240,20 +243,35 @@ private fun CollapsibleSessionGroup(
             modifier = Modifier.weight(1f),
         )
 
-        // 红色未读数 badge
+        // 红色未读数 badge。
+        //
+        // 居中的关键在 `lineHeight = fontSize`：Text 的布局盒高取的是 lineHeight
+        // （不设就继承 bodyMedium 的 ~20sp），而字形只有 10sp 高。盒高和字形高不等
+        // 时，contentAlignment 居中的是「盒子」而不是「字形」，字形就会整体偏上。
+        // 再叠上 includeFontPadding 那点不对称的顶/底留白，就明显不居中。
+        //
+        // 形状用「扁胶囊」而不是固定大小的正圆：Web 端就是 `text-[9px] px-1.5
+        // py-0.2 rounded-full`，高度贴着文字、宽度随内容（「9+」和「3」不一样宽）。
+        // 写死 size(20.dp) 的话数字只占圆的四成，看着空旷；用户把系统字号调大后
+        // 还会装不下。这里 minWidth 只用来兜住单个数字时不至于挤成一条。
         if (unreadCount > 0) {
             Box(
                 modifier = Modifier
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.error),
+                    .defaultMinSize(minWidth = 15.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.error)
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = if (unreadCount > 9) "9+" else unreadCount.toString(),
                     color = MaterialTheme.colorScheme.onError,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
+                    style = LocalTextStyle.current.copy(
+                        fontSize = 10.sp,
+                        lineHeight = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false),
+                    ),
                 )
             }
             Spacer(Modifier.width(8.dp))
