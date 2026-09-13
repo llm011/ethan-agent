@@ -1,5 +1,7 @@
 package com.ethan.agent.ui.chat
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBarsPadding
 import com.ethan.agent.shared.viewmodel.ChatUiState
 import com.ethan.agent.shared.viewmodel.ConnectionState
 
@@ -35,7 +37,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -62,6 +66,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -99,16 +104,20 @@ import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.ethan.agent.R
 import com.ethan.agent.core.model.FileSignature
+import com.ethan.agent.core.model.ModelSelection
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.fullId
 import com.ethan.agent.shared.UiMessage
+import com.ethan.agent.ui.components.EthanBadge
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
+import com.ethan.agent.ui.components.ModelDropdown
 import com.ethan.agent.ui.components.SnackbarContainer
 import com.ethan.agent.ui.components.ToolTimeline
 import com.ethan.agent.ui.components.SimpleMarkdown
@@ -119,6 +128,10 @@ import java.util.Locale
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalConfiguration
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -153,6 +166,10 @@ fun ChatScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var showPlusSheet by remember { mutableStateOf(false) }
+    // 超级权限「关→开」时的二次确认（开启是高危方向，必须让用户明确知道代价）
+    var showAutoConsentConfirm by remember { mutableStateOf(false) }
+    // 阅读模式（双击气泡进入）：非空时全屏覆盖在聊天页之上
+    var readingMessage by remember { mutableStateOf<UiMessage?>(null) }
     // 渐进加载：初始只渲染最后 10 条，向上滚动加载更多
     val pageSize = 10
     var visibleCount by remember { mutableStateOf(pageSize) }
@@ -262,7 +279,7 @@ fun ChatScreen(
                 // Upload section
                 Surface(
                     onClick = { filePicker.launch("*/*"); showPlusSheet = false },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -278,7 +295,9 @@ fun ChatScreen(
 
                 HorizontalDivider()
 
-                // Model selector
+                // 模型选择器 —— 对齐 Web 的 ModelSelect：
+                // 显示 alias/description 而非裸 id，右侧标 provider 消歧，选中值为 provider/id。
+                // 组件化后与设置页的「默认模型 / 轻量模型」共用同一份实现。
                 Text("模型", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (state.modelAmbiguous) {
                     Text(
@@ -287,54 +306,63 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                var modelExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(expanded = modelExpanded, onExpandedChange = { modelExpanded = it }) {
-                    AssistChip(
-                        onClick = { modelExpanded = true },
-                        // 歧义时裸 id 并不在候选列表里，直接展示会让用户以为已经选中；
-                        // 与 web 的 unmatchedLabel 一致，改成「请指定一个」的提示文案
-                        label = {
-                            Text(
-                                if (state.modelAmbiguous) "有多个 provider 提供该模型，请指定一个"
-                                else state.selectedModel ?: "选择模型",
-                                maxLines = 1,
-                            )
-                        },
-                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
-                    )
-                    ExposedDropdownMenu(expanded = modelExpanded, onDismissRequest = { modelExpanded = false }) {
-                        state.models.forEach { model ->
-                            DropdownMenuItem(
-                                // label 用别名（或描述/id），副标题标 provider，方便分辨不同 provider 的同名模型
-                                text = {
-                                    Column {
-                                        Text(model.alias.firstOrNull() ?: model.description.ifBlank { model.id })
-                                        Text(
-                                            model.provider,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    onModelSelected(model.fullId)
-                                    modelExpanded = false
-                                },
-                            )
-                        }
-                    }
-                }
+                ModelDropdown(
+                    models = state.models,
+                    value = state.selectedModel,
+                    onValueChange = onModelSelected,
+                )
 
-                // Mode chips
+                // 模式选择器 —— Web 上是单个下拉（不是一排 chip）。原来用 Row 排 FilterChip，
+                // 选项一多就把最后一个挤到只剩一个字宽换行，窄屏尤其明显。
                 if (state.modes.isNotEmpty()) {
                     Text("模式", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        state.modes.forEach { mode ->
-                            FilterChip(
-                                selected = state.selectedMode == mode.key,
-                                onClick = { onModeSelected(if (state.selectedMode == mode.key) "" else mode.key) },
-                                label = { Text(mode.label) },
+                    var modeExpanded by remember { mutableStateOf(false) }
+                    val currentMode = remember(state.modes, state.selectedMode) {
+                        state.modes.firstOrNull { it.key == state.selectedMode }
+                    }
+                    ExposedDropdownMenuBox(expanded = modeExpanded, onExpandedChange = { modeExpanded = it }) {
+                        OutlinedTextField(
+                            value = currentMode?.label ?: "",
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            placeholder = { Text("模式") },
+                            leadingIcon = currentMode?.icon?.takeIf { it.isNotBlank() }?.let { icon ->
+                                { Text(icon) }
+                            },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modeExpanded) },
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = modeExpanded,
+                            onDismissRequest = { modeExpanded = false },
+                            modifier = Modifier.heightIn(max = 360.dp),
+                        ) {
+                            // 首项是「不指定模式」——对应 Web 的 `__default__` 空选项
+                            DropdownMenuItem(
+                                text = { Text("默认（不指定）") },
+                                onClick = {
+                                    onModeSelected("")
+                                    modeExpanded = false
+                                },
                             )
+                            state.modes.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (mode.icon.isNotBlank()) {
+                                                Text(mode.icon)
+                                                Spacer(Modifier.width(8.dp))
+                                            }
+                                            Text(mode.label)
+                                        }
+                                    },
+                                    onClick = {
+                                        onModeSelected(mode.key)
+                                        modeExpanded = false
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -464,10 +492,14 @@ fun ChatScreen(
     }
 
     Scaffold(
+        // 外层 Scaffold 已不再分发 inset（见 EthanApp.kt），这里自己的顶栏要负责
+        // 状态栏区域，否则标题会被状态栏文字压住。
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .statusBarsPadding()
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -483,6 +515,10 @@ fun ChatScreen(
                     text = state.title,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
+                    // 单行 + 省略号：标题过长时不能换行把右侧的连接状态徽章挤走
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 ConnectionStateIndicator(state.connectionState, state.isResuming)
             }
@@ -582,10 +618,23 @@ fun ChatScreen(
                             }
                         }
                     }
-                    itemsIndexed(visibleMessages) { _, msg ->
-                        MessageBubble(msg, serverUrl = state.serverUrl, sessionId = state.sessionId, signFile = onSignFile, onLongPress = {
-                            onQuote(Quote(role = msg.role, content = msg.content))
-                        })
+                    itemsIndexed(visibleMessages, key = { index, msg ->
+                        "${state.sessionId ?: ""}#${state.messages.size - visibleMessages.size + index}#${msg.role}"
+                    }) { _, msg ->
+                        MessageBubble(
+                            message = msg,
+                            serverUrl = state.serverUrl,
+                            sessionId = state.sessionId,
+                            signFile = onSignFile,
+                            onLongPress = {
+                                // 长按：为空消息做不了什么（没有可引用的正文），直接忽略
+                                if (msg.content.isNotBlank()) {
+                                    onQuote(Quote(role = msg.role, content = msg.content))
+                                }
+                            },
+                            // 双击进入阅读模式（对齐 Web 的阅读模式入口）
+                            onOpenReading = { readingMessage = msg },
+                        )
                     }
                 }
             }
@@ -632,7 +681,7 @@ fun ChatScreen(
                                     contentDescription = img.filename,
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .clip(RoundedCornerShape(8.dp)),
+                                        .clip(MaterialTheme.shapes.small),
                                     contentScale = ContentScale.Crop,
                                 )
                                 Surface(
@@ -703,9 +752,9 @@ fun ChatScreen(
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.surface,
-                    shadowElevation = 6.dp,
-                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    shape = MaterialTheme.shapes.extraLarge,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
                     Row(
                         Modifier
@@ -732,9 +781,14 @@ fun ChatScreen(
                                 )
                             }
                         }
-                        // 超级权限开关
+                        // 超级权限开关。关闭→开启时必须过一道二次确认（见本 composable
+                        // 末尾的 AlertDialog）：长时间运行时用户容易忘了自己开着自动批准，
+                        // 导致普通 shell / 写文件操作一路放行。取消弹窗则保持关闭。
                         Surface(
-                            onClick = onToggleAutoConsent,
+                            onClick = {
+                                if (state.autoConsent) onToggleAutoConsent() // 关：降权，直接生效
+                                else showAutoConsentConfirm = true          // 开：先弹警示
+                            },
                             shape = CircleShape,
                             color = if (state.autoConsent) MaterialTheme.colorScheme.tertiaryContainer
                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -836,14 +890,100 @@ fun ChatScreen(
                     } // end outer Row
                 } // end Surface
 
-                Text(
-                    text = "对话由 AI 生成",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
-                )
+                // 底部状态行：左侧放「当前模型 + 运行状态」，右侧固定一行免责声明。
+                // 之前只有居中的「对话由 AI 生成」，既浪费了一整行高度，也没告诉
+                // 用户正在用哪个模型、是否在生成中 —— 这两件事恰好在手机上最需要
+                // 一眼看到（模型选错要立刻发现，生成中要能判断该不该等）。
+                Row(
+                    // 左侧留 8dp：这段文字原来紧贴屏幕边缘（外层只有 12dp 的
+                    // horizontal padding，视觉上正好压在气泡的左对齐线上），
+                    // 和上方气泡的起始位置对不齐，看着「太靠左」。
+                    Modifier.fillMaxWidth().padding(start = 8.dp, top = 2.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    // 显示**可读名**（alias/description）而不是 provider/id 原始值 ——
+                    // 与模型选择器里的选中名、Web 的展示口径一致。落库/提交仍用 fullId。
+                    state.selectedModel?.takeIf { it.isNotBlank() }?.let { raw ->
+                        Text(
+                            text = ModelSelection.findById(state.models, raw)
+                                ?.let(ModelSelection::displayNameOf) ?: raw,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                    when {
+                        state.isResuming -> FooterStatusDot("重连中", MaterialTheme.colorScheme.tertiary)
+                        state.isStreaming -> FooterStatusDot("生成中", MaterialTheme.colorScheme.primary)
+                        state.connectionState == ConnectionState.Disconnected ->
+                            FooterStatusDot("已断开", MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = "对话由 AI 生成",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        maxLines = 1,
+                        // 固定靠右：模型名过长时省略号吃掉的是左侧的空间，
+                        // 免责声明始终贴住右边缘（用户明确要求靠右对齐）。
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.wrapContentWidth(align = Alignment.End),
+                    )
+                }
             } // end input Column (bottom-aligned)
         }
+    }
+
+    // 阅读模式：全屏覆盖在聊天页之上（不在 Scaffold 里，避免继承 padding/FAB）。
+    // 这样退出时聊天页的滚动位置原封不动 —— 用户回到的就是离开时那一屏。
+    readingMessage?.let { msg ->
+        ReadingModeScreen(message = msg, onClose = { readingMessage = null })
+    }
+
+    // 超级权限二次确认：只在关→开时弹一次。取消则不改状态（保持关闭）。
+    // 与 Web/Desktop 的文案保持一致（三端同一份说明）。
+    if (showAutoConsentConfirm) {
+        AlertDialog(
+            onDismissRequest = { showAutoConsentConfirm = false },
+            icon = { Icon(Icons.Default.Shield, contentDescription = null) },
+            title = { Text("开启超级权限？") },
+            text = {
+                Text(
+                    "开启后，普通工具授权（读写文件、执行普通 shell 命令等）将不再弹窗，" +
+                        "直接放行；高危命令（rm -rf 等）仍会确认。\n\n" +
+                        "请确认你了解当前正在对话的 Agent 会做什么。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAutoConsentConfirm = false
+                    onToggleAutoConsent()
+                }) { Text("开启") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAutoConsentConfirm = false }) { Text("取消") }
+            },
+        )
+    }
+}
+
+/** 底部状态行的小圆点 + 文案（生成中 / 重连中 / 已断开）。 */
+@Composable
+private fun FooterStatusDot(label: String, color: androidx.compose.ui.graphics.Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(Modifier.size(5.dp).clip(CircleShape).background(color))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            maxLines = 1,
+        )
     }
 }
 
@@ -855,33 +995,27 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
         state == ConnectionState.Disconnected -> Pair(MaterialTheme.colorScheme.error, "已断开")
         else -> return
     }
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = color.copy(alpha = 0.15f),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = color,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-        )
-    }
+    EthanBadge(
+        text = label,
+        containerColor = color.copy(alpha = 0.15f),
+        contentColor = color,
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, signFile: (suspend (String) -> FileSignature?)? = null, onLongPress: () -> Unit) {
+private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, signFile: (suspend (String) -> FileSignature?)? = null, onLongPress: () -> Unit, onOpenReading: () -> Unit = {}) {
     val isUser = message.role == "user"
+    // 对齐 Web（web/components/chat/message-bubble.tsx）：
+    //   用户   bg-primary/10 text-foreground
+    //   助手   bg-muted
+    // 之前用户气泡是实心 primary + onPrimary 文字，在一片浅色里非常刺眼，也和 Web 对不上。
     val bubbleColor = if (isUser) {
-        MaterialTheme.colorScheme.primary
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
     } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        MaterialTheme.colorScheme.surfaceVariant
     }
-    val textColor = if (isUser) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
+    val textColor = MaterialTheme.colorScheme.onSurface
 
     Row(
         modifier = Modifier
@@ -893,7 +1027,7 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
         // Assistant avatar (left)
         if (!isUser) {
             Image(
-                painter = painterResource(id = R.mipmap.ic_launcher_round),
+                painter = painterResource(id = R.drawable.ethan_logo_avatar),
                 contentDescription = "Assistant",
                 modifier = Modifier
                     .size(30.dp)
@@ -902,9 +1036,10 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
             Spacer(Modifier.width(6.dp))
         }
 
-        // Bubble content
+        // Bubble content —— 宽度对齐 Web 的 max-w-[90%]，四角统一 rounded-2xl（18dp）。
+        // 之前是固定 310dp + 不对称的一角切平，换机型/字号后容易显得局促。
         Column(
-            modifier = Modifier.widthIn(max = 310.dp),
+            modifier = Modifier.weight(1f, fill = false),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
             Surface(
@@ -913,17 +1048,13 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                     indication = null,
                     onClick = {},
                     onLongClick = onLongPress,
+                    onDoubleClick = onOpenReading,
                 ),
-                shape = RoundedCornerShape(
-                    topStart = 18.dp,
-                    topEnd = 18.dp,
-                    bottomStart = if (isUser) 18.dp else 4.dp,
-                    bottomEnd = if (isUser) 4.dp else 18.dp,
-                ),
+                shape = MaterialTheme.shapes.extraLarge,
                 color = bubbleColor,
                 shadowElevation = 0.dp,
             ) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     // 用户消息图片（在文本之前）
                     if (message.images.isNotEmpty()) {
                         Row(
@@ -936,7 +1067,7 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                                     contentDescription = null,
                                     modifier = Modifier
                                         .sizeIn(maxHeight = 160.dp, maxWidth = 160.dp)
-                                        .clip(RoundedCornerShape(8.dp)),
+                                        .clip(MaterialTheme.shapes.small),
                                     contentScale = ContentScale.FillWidth,
                                 )
                             }
@@ -962,10 +1093,87 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                     }
                     // 文本结论在后
                     if (message.content.isNotBlank()) {
-                        SimpleMarkdown(
-                            text = message.content,
-                            textColor = textColor,
-                        )
+                        // 长消息折叠：超过半屏高就截断，底部给「查看全部 / 收起」。
+                        // 只在真实尺寸超过阈值时展开 UI，短消息完全不受影响（无额外高度、无多余按钮）。
+                        val density = LocalDensity.current
+                        val configuration = LocalConfiguration.current
+                        val screenWidthDp = configuration.screenWidthDp.toFloat()
+                        val screenHeightDp = configuration.screenHeightDp.toFloat()
+                        // 用 remember 而不是 rememberSaveable：MessageCollapseState 是自定义类，
+                        // SaveableStateRegistry 只接受能进 Bundle 的类型，直接塞会抛
+                        // IllegalArgumentException 把 App 打崩（已踩过）。而「展开/收起」
+                        // 本来就属于一次性 UI 状态，进程被回收后恢复成折叠态完全可以接受。
+                        //
+                        // key 用 isStreaming 而不是 content：流式期间 content 每帧都变，
+                        // 拿它做 key 会让「生成中就点开查看全部」立刻被重置回折叠态。
+                        val collapseState = remember(message.isStreaming) {
+                            messageCollapseState(
+                                text = message.content,
+                                screenWidthDp = screenWidthDp,
+                                screenHeightDp = screenHeightDp,
+                                fontScale = density.fontScale,
+                            )
+                        }
+                        // 流结束后正文才是最终值（最后一轮 tool 之后还有结论），
+                        // 此时按最终长度重新判定一次；只更新「可折叠与否 / 高度上限」，
+                        // 不动 expanded —— 用户已经手动展开的就别给他收回去。
+                        LaunchedEffect(message.isStreaming, message.content) {
+                            if (!message.isStreaming) {
+                                collapseState.recompute(
+                                    messageCollapseState(
+                                        text = message.content,
+                                        screenWidthDp = screenWidthDp,
+                                        screenHeightDp = screenHeightDp,
+                                        fontScale = density.fontScale,
+                                    )
+                                )
+                            }
+                        }
+                        Column(
+                            modifier = if (collapseState.collapsible) {
+                                Modifier
+                                    // animateContentSize 全程只跟约束走，不碰滚动位置，
+                                    // 所以展开/收起不会把用户的阅读位置顶走。
+                                    .animateContentSize()
+                                    .clipToBounds()
+                                    .then(
+                                        if (collapseState.expanded) Modifier
+                                        else Modifier.heightIn(max = collapseState.maxHeight)
+                                    )
+                            } else {
+                                Modifier
+                            },
+                        ) {
+                            SimpleMarkdown(
+                                text = message.content,
+                                textColor = textColor,
+                            )
+
+                            if (collapseState.collapsible) {
+                                // 「收起」放在内容末尾（用户明确要求「内底部」也要有收起交互），
+                                // 展开后在文末出现，不用回头往上滚。
+                                if (collapseState.expanded) {
+                                    Spacer(Modifier.height(8.dp))
+                                    BubbleActionLink(
+                                        label = "收起",
+                                        onClick = { collapseState.expanded = false },
+                                        color = textColor.copy(alpha = 0.65f),
+                                    )
+                                }
+                            }
+                        }
+                        if (collapseState.collapsible && !collapseState.expanded) {
+                            // 折叠态：按钮钉在气泡底部。外面包一层跟气泡同色的 Surface，
+                            // 让被截断的文字行从按钮底下「透出来」之前先被遮住，
+                            // 视觉上明确是「还有内容没显示」，而不是排版断了。
+                            Surface(color = bubbleColor) {
+                                BubbleActionLink(
+                                    label = "查看全部",
+                                    onClick = { collapseState.expanded = true },
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
                     }
                     // 文件卡片
                     if (message.cards.isNotEmpty()) {
@@ -999,6 +1207,95 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
     }
 }
 
+/**
+ * 长消息折叠的状态：是否可折叠、当前是否展开、折叠高度上限。
+ *
+ * 不是 data class —— `expanded` 是可变状态，直接放在普通类里让 Compose 观察到；
+ * 用 `rememberSaveable(message.content) { ... }` 重建（内容变了就重置回折叠态，
+ * 流式追加期间也不会因为闭包捕获旧值而卡住）。
+ */
+private class MessageCollapseState(
+    collapsible: Boolean,
+    maxHeight: androidx.compose.ui.unit.Dp,
+    expanded: Boolean,
+) {
+    var collapsible by mutableStateOf(collapsible)
+        private set
+    var maxHeight by mutableStateOf(maxHeight)
+        private set
+    var expanded by mutableStateOf(expanded)
+
+    /**
+     * 流结束、正文定型后按最终长度重判一次。
+     * 只更新「要不要折叠 / 折叠高度」，**保留** expanded —— 用户手动展开的
+     * 状态不能被自动重算收回去（否则刚点开就被关上，很像 bug）。
+     * 另外：本来不可折叠的消息若在流结束后变长了，这里也会把它切成可折叠。
+     */
+    fun recompute(next: MessageCollapseState) {
+        if (collapsible == next.collapsible && maxHeight == next.maxHeight) return
+        collapsible = next.collapsible
+        maxHeight = next.maxHeight
+        if (!collapsible) expanded = false
+    }
+}
+
+/** 折叠高度上限：半屏（用户明确要求「半屏高的最大高度」）。 */
+private const val COLLAPSE_SCREEN_FRACTION = 0.5f
+
+/**
+ * 估算「半屏高」并判断是否值得折叠。
+ *
+ * 为什么要估算而不是用 BoxWithConstraints 实测：只有**先**知道是不是长消息，
+ * 才谈得上决定要不要给约束。用 `heightIn(max=...)` 配合 `clipToBounds` 来做截断效果，
+ * animateContentSize 负责展开/收起的过渡——全过程不触碰 LazyColumn 的滚动位置。
+ *
+ * 估算依据：bodyMedium 的字号（14sp）与默认行高（约 22sp 行距 ≈ 1.6×），
+ * 再把字符宽度按 0.55×字号 粗算。只用来判断「要不要折叠」，允许有偏差；
+ * 真的按估算折叠了但内容其实不长，用户点一下「查看全部」即可，不会丢内容。
+ * 反过来（长内容被漏判）才是问题，所以这里刻意估得保守一点（宁可多折叠）。
+ */
+private fun messageCollapseState(
+    text: String,
+    screenWidthDp: Float,
+    screenHeightDp: Float,
+    fontScale: Float,
+): MessageCollapseState {
+    val fontSizeDp = 14f * fontScale          // bodyMedium 基准字号
+    val lineHeightDp = fontSizeDp * 1.62f     // 默认行高约 1.6×
+    val charWidthDp = fontSizeDp * 0.55f      // 中英混排的粗略平均字宽
+
+    // 气泡内可用宽度：屏宽 - LazyColumn 横向 padding(12dp×2) - 头像(30dp+6dp)
+    //                   - 气泡内 padding(16dp×2) - 外层 padding(4dp×2)
+    val contentWidthDp = (screenWidthDp - 100f).coerceAtLeast(fontSizeDp * 8f)
+
+    val charsPerLine = (contentWidthDp / charWidthDp).coerceAtLeast(8f)
+    val lineCount = text.split('\n').sumOf { line ->
+        // 空行也占一行；超长行按字符数折算（Markdown 标记、英文长词会让它偏小，
+        // 所以下面乘了 1.15 的安全系数）
+        kotlin.math.ceil(line.length / charsPerLine).toInt().coerceAtLeast(1)
+    }
+    val estimatedDp = lineCount * lineHeightDp * 1.15f + 24f   // +24dp：气泡上下 padding
+
+    val maxHeightDp = screenHeightDp * COLLAPSE_SCREEN_FRACTION
+    // 折叠能省下的高度不到 80dp 就不折腾用户了
+    val collapsible = estimatedDp > maxHeightDp + 80f
+    return MessageCollapseState(collapsible, maxHeightDp.dp, expanded = false)
+}
+
+/** 气泡底部的行内文字按钮（「查看全部」/「收起」）——轻量、不抢视觉重心。 */
+@Composable
+private fun BubbleActionLink(label: String, onClick: () -> Unit, color: Color) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = color,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+    )
+}
+
 @Composable
 private fun MessageStatsBar(message: UiMessage, isUser: Boolean = false) {
     val hasStats = message.createdAt != null || message.usage != null || message.ttfbMs != null
@@ -1024,48 +1321,55 @@ private fun MessageStatsBar(message: UiMessage, isUser: Boolean = false) {
             )
         }
 
-        // Token usage pill
+        // Token usage pill —— 对齐 Web 的 `bg-green-500/8 text-green-600/50`
         message.usage?.let { u ->
             if (u.input > 0 || u.output > 0) {
                 StatPill(
                     text = "↑${formatTokenCount(u.input)} ↓${formatTokenCount(u.output)}" +
                         if (u.cache > 0) " ⚡${formatTokenCount(u.cache)}" else "",
-                    color = Color(0xFF4CAF50),
+                    color = StatGreen,
                 )
             }
         }
 
-        // TTFB pill
+        // TTFB pill —— Web 用 amber-500
         message.ttfbMs?.let { ms ->
-            StatPill(text = "TTFB ${formatDuration(ms)}", color = Color(0xFFFF9800))
+            StatPill(text = "TTFB ${formatDuration(ms)}", color = StatAmber)
         }
 
-        // Total duration pill
+        // 总耗时 pill —— Web 用 purple-500
         message.totalDurationMs?.let { ms ->
-            StatPill(text = "总 ${formatDuration(ms)}", color = Color(0xFF9C27B0))
+            StatPill(text = "总 ${formatDuration(ms)}", color = StatPurple)
         }
 
-        // Generation duration pill
+        // 实际生成耗时 pill —— Web 用 green-500
         message.generationDurationMs?.let { ms ->
-            StatPill(text = "生成 ${formatDuration(ms)}", color = Color(0xFF009688))
+            StatPill(text = "生成 ${formatDuration(ms)}", color = StatGreen)
         }
     }
 }
 
+// Tailwind 500 号色阶——与 Web 的 message-bubble.tsx 中统计药丸一一对应。
+// 取 600 号（Tailwind 的 text-<hue>-600）作为文字色，因为 Web 的文字是 600 号。
+private val StatAmber = Color(0xFFF59E0B)   // amber-500
+private val StatPurple = Color(0xFFA855F7)  // purple-500
+private val StatGreen = Color(0xFF22C55E)   // green-500
+
+/**
+ * 统计小药丸（token / TTFB / 耗时）。
+ *
+ * 配色对齐 Web 的 `bg-<hue>-500/8 text-<hue>-600/50`：极淡的底色 + 半透明的同色文字。
+ * 之前是用 Material 500 号原色（0xFF4CAF50 之类）+ 12% 底，饱和度太高，在一屏浅色里
+ * 几个彩色小方块特别扎眼，也和 Web 的克制观感不一致。
+ */
 @Composable
 private fun StatPill(text: String, color: Color) {
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = color.copy(alpha = 0.12f),
+    EthanBadge(
+        text = text,
+        containerColor = color.copy(alpha = 0.08f),
+        contentColor = color.copy(alpha = 0.55f),
         modifier = Modifier.padding(end = 4.dp),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = color,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-    }
+    )
 }
 
 private fun formatTokenCount(count: Int): String = when {
@@ -1102,7 +1406,7 @@ private fun EmptyChatState(
     ) {
         // 头像 - 圆形 app logo
         Image(
-            painter = painterResource(id = R.mipmap.ic_launcher_round),
+            painter = painterResource(id = R.drawable.ethan_logo_avatar),
             contentDescription = "Ethan",
             modifier = Modifier.size(72.dp).clip(CircleShape),
         )
@@ -1125,19 +1429,15 @@ private fun EmptyChatState(
             quickActions.forEach { (label, payload) ->
                 Surface(
                     onClick = { onQuickAction(payload) },
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(
-                        1.5.dp,
-                        MaterialTheme.colorScheme.outlineVariant,
-                    ),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
                     Text(
                         text = label,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }

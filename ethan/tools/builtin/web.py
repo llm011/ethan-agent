@@ -61,7 +61,12 @@ class WebFetchTool(BaseTool):
                 proxy_url = load_config().network.proxy or None
             except Exception:
                 pass
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, proxy=proxy_url) as client:
+            # trust_env=False：代理只认 ethan 配置里的 network.proxy，不读环境变量。
+            # 否则用户机器上的 `all_proxy=socks5://...` 会在构造 client 时抛
+            # ImportError（缺 optional 的 socksio 包），整个网页抓取直接失败。
+            async with httpx.AsyncClient(
+                follow_redirects=True, timeout=30.0, proxy=proxy_url, trust_env=False
+            ) as client:
                 if method.upper() == "POST":
                     resp = await client.post(url, headers=headers, content=body.encode() if body else None)
                 else:

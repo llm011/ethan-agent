@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 
 import androidx.compose.foundation.rememberScrollState
@@ -25,8 +26,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -83,7 +86,15 @@ fun SnackbarContainer(snackbarHostState: SnackbarHostState) {
 
 /**
  * 通用顶栏：标题居中，左侧返回按钮，右侧可选操作按钮。
- * 紧凑无多余空白，参考图 3 风格。
+ *
+ * 采用 Gmail 的 edge-to-edge 做法（见 PRD 1.2 C）：
+ * - 背景色**铺到状态栏底下**（顶栏是一条通栏色带，不是浮在内容上方的小条）
+ * - 内容靠 `statusBarsPadding()` 下移到状态栏之下 —— 注意这让开的是**内容**，
+ *   不是顶栏本身；顶栏容器仍然覆盖状态栏区域，所以不会出现「独立色带」。
+ * - 行高 52dp（比 M3 默认 64dp 紧凑，但仍 ≥48dp 触控标准）
+ *
+ * 底色用 `surface`（与页面内容同色，切主题时自动跟随），
+ * 不额外加分隔线 —— 靠色阶与留白区分，避免满屏发丝线。
  */
 @Composable
 fun EthanTopBar(
@@ -92,12 +103,17 @@ fun EthanTopBar(
     onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .padding(horizontal = 4.dp),
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(52.dp)
+                .padding(horizontal = 4.dp),
+        ) {
             // 左侧返回
             if (onBack != null) {
                 IconButton(
@@ -138,6 +154,7 @@ fun EthanTopBar(
                 modifier = Modifier.align(Alignment.CenterEnd),
                 content = actions,
             )
+        }
     }
 }
 
@@ -157,63 +174,71 @@ fun <T> EthanScrollableTabBar(
     modifier: Modifier = Modifier,
     subtitleOf: ((T) -> String)? = null,
     horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp,
+    /** 右侧常驻操作（如「事实」tab 收起搜索框后露出的放大镜）。tab 多时会被挤出去滚走。 */
+    action: (@Composable () -> Unit)? = null,
 ) {
     val scrollState = rememberScrollState()
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState)
-            .padding(horizontal = horizontalPadding),
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        tabs.forEach { tab ->
-            val selected = tab == selectedTab
-            val hasSubtitle = subtitleOf != null
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                    ) { onTabSelected(tab) }
-                    .padding(
-                        horizontal = if (hasSubtitle) 16.dp else 12.dp,
-                        vertical = if (hasSubtitle) 10.dp else 8.dp,
-                    ),
-            ) {
-                Text(
-                    text = labelOf(tab),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    ),
-                    color = if (selected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (hasSubtitle) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(scrollState)
+                .padding(horizontal = horizontalPadding),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            tabs.forEach { tab ->
+                val selected = tab == selectedTab
+                val hasSubtitle = subtitleOf != null
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                        ) { onTabSelected(tab) }
+                        .padding(
+                            horizontal = if (hasSubtitle) 16.dp else 12.dp,
+                            vertical = if (hasSubtitle) 10.dp else 8.dp,
+                        ),
+                ) {
                     Text(
-                        text = subtitleOf!!(tab),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        text = labelOf(tab),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        ),
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(6.dp))
-                } else {
-                    Spacer(Modifier.height(4.dp))
+                    if (hasSubtitle) {
+                        Text(
+                            text = subtitleOf!!(tab),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    } else {
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    Surface(
+                        modifier = Modifier.size(
+                            width = if (hasSubtitle) 32.dp else 24.dp,
+                            height = 3.dp,
+                        ),
+                        shape = RoundedCornerShape(2.dp),
+                        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    ) {}
                 }
-                Surface(
-                    modifier = Modifier.size(
-                        width = if (hasSubtitle) 32.dp else 24.dp,
-                        height = 3.dp,
-                    ),
-                    shape = RoundedCornerShape(2.dp),
-                    color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                ) {}
             }
         }
+        action?.invoke()
     }
 }
 
@@ -229,16 +254,22 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreami
         remember(steps) { steps.map { it.asTerminal() } }
     }
 
-    var expanded by remember { mutableStateOf(true) }
     val totalDuration = effectiveSteps.mapNotNull { it.durationMs }.sum()
     val hasAnyError = effectiveSteps.any { it.state == "error" }
     val hasAnyCancelled = effectiveSteps.any { it.state == "cancelled" }
     val allDone = effectiveSteps.all { it.state != "running" && it.state != "start" }
+    // 用户要求：执行完成后工具列表自动折叠（气泡里一长串日志很占屏），
+    // 只留一行"执行完成 [N步] [耗时]"摘要，点击再展开。
+    // 执行中保持展开，让用户看到当前在跑哪一步。
+    // 折叠发生在「执行中 → 已完成」的跃变那一刻，之后用户手动展开的状态由 userToggled 固定，
+    // 不会被重组的 remember 初始值覆盖（Steps 会持续刷新，但 allDone 已稳定）。
+    var userToggled by remember { mutableStateOf<Boolean?>(null) }
+    val expanded = userToggled ?: !allDone
 
     // 整体带边框的日志卡片
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
     ) {
@@ -247,7 +278,7 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreami
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded },
+                    .clickable { userToggled = !expanded },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -321,8 +352,8 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
     val isCancelled = step.state == "cancelled"
     val isRunning = step.state == "running"
     val statusColor = when {
-        isError -> Color(0xFFE53935)
-        isDone -> Color(0xFF43A047)
+        isError -> StatusError
+        isDone -> StatusSuccess
         isCancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -447,8 +478,8 @@ private fun SubToolStepRow(sub: com.ethan.agent.core.model.SubToolStep, indent: 
     val isError = sub.state == "error"
     val isCancelled = sub.state == "cancelled"
     val statusColor = when {
-        isError -> Color(0xFFE53935)
-        isDone -> Color(0xFF43A047)
+        isError -> StatusError
+        isDone -> StatusSuccess
         isCancelled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -532,6 +563,12 @@ fun SourceBadge(source: String?) {
     Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
 }
 
+/**
+ * 主按钮。
+ *
+ * 用真正的 M3 [Button]（而不是 Surface + Box 手搓）—— 这样才有涟漪、state layer、
+ * disabled 语义和正确的无障碍角色。只覆盖尺寸与圆角。
+ */
 @Composable
 fun EthanPrimaryButton(
     text: String,
@@ -539,26 +576,17 @@ fun EthanPrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    Surface(
+    Button(
         onClick = onClick,
-        enabled = enabled,
         modifier = modifier.heightIn(min = 40.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
+        enabled = enabled,
+        shape = MaterialTheme.shapes.large,
     ) {
-        Box(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-            contentAlignment = androidx.compose.ui.Alignment.Center,
-        ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
-            )
-        }
+        Text(text, style = MaterialTheme.typography.labelLarge)
     }
 }
 
+/** 次按钮：M3 [OutlinedButton]，描边用 outline（而非主色淡化），避免满屏彩色线条。 */
 @Composable
 fun EthanSecondaryButton(
     text: String,
@@ -566,23 +594,13 @@ fun EthanSecondaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    Surface(
+    OutlinedButton(
         onClick = onClick,
-        enabled = enabled,
         modifier = modifier.heightIn(min = 40.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.primary,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+        enabled = enabled,
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
-        Box(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-            contentAlignment = androidx.compose.ui.Alignment.Center,
-        ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
-            )
-        }
+        Text(text, style = MaterialTheme.typography.labelLarge)
     }
 }

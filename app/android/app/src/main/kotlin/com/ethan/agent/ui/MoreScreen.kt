@@ -1,5 +1,7 @@
 package com.ethan.agent.ui
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.ethan.agent.ui.components.EthanGroup
+import com.ethan.agent.ui.components.EthanGroupDivider
+import com.ethan.agent.ui.components.EthanListRow
+import com.ethan.agent.ui.components.EthanSectionHeader
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -34,17 +40,21 @@ private val toolGroups = listOf(
 @Composable
 fun MoreScreen(onNavigate: (String) -> Unit) {
     Scaffold(
+        // 外层 Scaffold 已不再分发 inset（见 EthanApp.kt），本页没有用 EthanTopBar，
+        // 所以状态栏区域得由自己的标题栏承担。其余三边 inset 照常保留。
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 2.dp,
             ) {
                 Text(
                     text = "工具箱",
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
         },
@@ -67,59 +77,16 @@ fun MoreScreen(onNavigate: (String) -> Unit) {
 @Composable
 private fun ToolSection(title: String, items: List<Screen>, onNavigate: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
-        )
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 1.dp,
-            border = androidx.compose.foundation.BorderStroke(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-            ),
-        ) {
-            Column {
-                items.forEachIndexed { index, screen ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onNavigate(screen.route) }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(36.dp),
-                        ) {
-                            screen.icon?.let {
-                                Icon(
-                                    imageVector = it,
-                                    contentDescription = null,
-                                    modifier = Modifier.padding(8.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        }
-                        Text(
-                            text = screen.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                    if (index < items.lastIndex) {
-                        androidx.compose.material3.HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                        )
-                    }
-                }
+        EthanSectionHeader(title = title)
+        // 分组容器 + 统一列表行（与抽屉共用 EthanListRow，替代两份重复实现）。
+        EthanGroup {
+            items.forEachIndexed { index, screen ->
+                if (index > 0) EthanGroupDivider()
+                EthanListRow(
+                    title = screen.title,
+                    icon = screen.icon,
+                    onClick = { onNavigate(screen.route) },
+                )
             }
         }
     }

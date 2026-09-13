@@ -19,6 +19,7 @@ import {
   cancelToolCall,
   injectMessage,
   deleteInjectedMessage,
+  setAutoConsent as setAutoConsentApi,
   updateSessionMode,
   updateSessionModel,
   fetchOnboardingStatus,
@@ -131,7 +132,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleAutoConsentChange = useCallback((v: boolean) => {
     setAutoConsent(v);
     try { localStorage.setItem("ethan:auto-consent", v ? "1" : "0"); } catch {}
-  }, []);
+    // 运行中切换：改的是**正在跑的那个 run** 的 ConsentProvider。没有活跃 run 时
+    // 后端返回 applied=false，此时不改任何东西 —— 下一次发消息的请求体会带上
+    // auto_consent，行为依然正确。失败静默：这只是让开关「提前生效」的优化，
+    // 开关状态本身已经存好了，不值得因此打断用户。
+    if (activeSession) setAutoConsentApi(activeSession, v).catch(() => {});
+  }, [activeSession]);
   const [loadingSession, setLoadingSession] = useState(false);
   const [modes, setModes] = useState<ModeEntry[]>([]);
 

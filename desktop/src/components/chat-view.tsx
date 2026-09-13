@@ -14,6 +14,7 @@ import {
   stopGeneration,
   injectMessage,
   deleteInjectedMessage,
+  setAutoConsent as setAutoConsentApi,
   cancelToolCall,
   updateSessionMode,
   updateSessionModel,
@@ -124,7 +125,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleAutoConsentChange = useCallback((v: boolean) => {
     setAutoConsent(v);
     try { localStorage.setItem("ethan:auto-consent", v ? "1" : "0"); } catch {}
-  }, []);
+    // 运行中切换：改的是**正在跑的那个 run** 的 ConsentProvider，下一次工具调用即生效。
+    // 没有活跃 run 时后端返回 applied=false，不改任何东西 —— 下一次发消息的请求体
+    // 会带上 auto_consent，行为依然正确。失败静默（只是提前生效的优化，不打断用户）。
+    if (activeSession) setAutoConsentApi(activeSession, v).catch(() => {});
+  }, [activeSession]);
   const [loadingSession, setLoadingSession] = useState(false);
   const [modes, setModes] = useState<ModeEntry[]>([]);
 

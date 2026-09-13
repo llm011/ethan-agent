@@ -1,5 +1,7 @@
 package com.ethan.agent.ui
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.DrawerValue
@@ -120,8 +122,15 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 sessions = sessionsState.sessions,
                 unreadSessionIds = sessionsState.unreadSessionIds,
                 onNewChat = {
+                    // 开新会话。两个坑：
+                    //  1. `launchSingleTop = true` 在这里**不能**用 —— Chat 的路由是
+                    //     `chat?sessionId={sessionId}`，去重是按 route 模板比的，所以
+                    //     只要当前已经在 Chat 页（无论带不带 sessionId），这次导航会被
+                    //     静默丢弃，用户看到的就是「点了新建对话没反应，还是当前会话」。
+                    //  2. 直接 navigate 会不断往回退栈里压 chat 条目，来回点几次后
+                    //     返回键要按很多下。所以先 popUpTo 掉已有的 chat，再压新的。
                     navController.navigate("chat") {
-                        launchSingleTop = true
+                        popUpTo("chat?sessionId={sessionId}") { inclusive = true }
                     }
                 },
                 onSessionClick = { id ->
@@ -143,7 +152,17 @@ private fun MainContent(authViewModel: AuthViewModel) {
             )
         },
     ) {
-        Scaffold { innerPadding ->
+        // contentWindowInsets 必须归零：状态栏 inset 由各页面自己的 EthanTopBar
+        // （statusBarsPadding）负责。这里再算一遍的话，同一个状态栏高度会被叠两次，
+        // 实测顶栏文字落到 272px（多出约 74dp 的空白带）—— 就是用户说的
+        // 「header 离顶部那么远」。既然各页自己管，这个外层 Scaffold 就一个 inset
+        // 都不该加，innerPadding 也就不需要了。
+        //
+        // lint 的 UnusedMaterial3ScaffoldPaddingParameter 在这里是误报：它假设
+        // contentPadding 里带着 app bar 的高度，但本 Scaffold 既没有 appBar 也把
+        // contentWindowInsets 归了零，innerPadding 恒为 0，忽略它是刻意的。
+        @Suppress("UnusedMaterial3ScaffoldPaddingParameter")
+        Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0)) { _ ->
             NavHost(
                 navController = navController,
                 startDestination = "chat",
@@ -151,7 +170,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                 exitTransition = slideOut,
                 popEnterTransition = popSlideIn,
                 popExitTransition = popSlideOut,
-                modifier = Modifier.padding(innerPadding),
+                modifier = Modifier.fillMaxSize(),
             ) {
             composable(
                 route = "chat?sessionId={sessionId}",
@@ -268,26 +287,26 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onTabChange = vm::setTab,
                     onBack = { navController.popBackStack() },
                     onSelectFact = vm::selectFact,
-                    onDismissFactEditor = vm::dismissFactEditor,
                     onEditChange = vm::onEditChange,
-                    onSaveFact = vm::saveFact,
-                    onDeleteFact = vm::deleteFact,
-                    onDeleteProcedure = vm::deleteProcedure,
                     onClearError = vm::clearError,
+                    onDismissEditor = vm::dismissEditor,
+                    onSaveEditing = vm::saveEditing,
+                    onDeleteEditing = vm::deleteEditing,
                     onInsightsDateChange = vm::setInsightsDate,
                     onRefreshInsights = vm::loadInsights,
                     onRecordsFilterChange = vm::setRecordsFilter,
                     onRecordsSearchChange = vm::setRecordsSearch,
                     onSelectRecord = vm::selectRecord,
-                    onDismissRecord = vm::dismissRecord,
-                    onRecordEditContent = vm::onRecordEditContent,
-                    onSaveRecord = vm::saveRecord,
+                    onSelectProcedure = vm::selectProcedure,
                     onDeleteRecord = vm::deleteRecord,
+                    onDeleteProcedure = vm::deleteProcedure,
                     onConfirmRecord = vm::confirmRecord,
                     onConsolidate = vm::triggerConsolidate,
                     onConsolidateRecords = { vm.triggerRecordsConsolidate() },
                     onLoadSummaries = vm::loadSummaries,
                     onHideSummaries = vm::hideSummaries,
+                    onSummariesDateChange = vm::setSummariesDate,
+                    onLoadMoreSummaries = vm::loadMoreSummaries,
                 )
             }
 
@@ -404,7 +423,21 @@ private fun MainContent(authViewModel: AuthViewModel) {
             ) {
                 val vm: DocsViewModel = koinViewModel { parametersOf(it.arguments?.getString("slug")) }
                 val state by vm.state.collectAsState()
-                DocsScreen(state = state, onBack = { navController.popBackStack() }, onSelectDoc = vm::selectDoc, onClearError = vm::clearError)
+                val detailSlug = it.arguments?.getString("slug")
+                DocsScreen(
+                    state = state,
+                    onBack = { navController.popBackStack() },
+                    // 点正文里的相对链接 → 换一篇文档。用 navigate（而不是 vm.selectDoc
+                    // 就地换内容）才能让系统返回键回到「上一篇」，符合阅读预期。
+                    //
+                    // **不要加 launchSingleTop**：它是按 route **模板**（`docs/{slug}`）
+                    // 去重，不是按实际参数。在详情页里点另一个 slug 时，栈顶那条恰好也
+                    // 匹配 `docs/{slug}`，于是整次导航被静默丢弃 —— 表现就是「链接点了
+                    // 没反应」（已实测）。重复点同一篇文档也只是多压一层，返回键多按一次
+                    // 即可，代价远小于链接失灵。
+                    onSelectDoc = { slug -> navController.navigate("docs/$slug") },
+                    onClearError = vm::clearError,
+                )
             }
 
             composable(Screen.Logs.route) {

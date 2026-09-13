@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -24,7 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.SkillInfo
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.EthanTopBar
+import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 
@@ -62,7 +63,7 @@ fun SkillsScreen(
 
     val isDetailOpen = state.selected != null || state.isCreating
 
-    Scaffold(
+    EthanScaffold(
         topBar = {
             if (isDetailOpen) {
                 EthanTopBar(
@@ -95,7 +96,7 @@ fun SkillsScreen(
     ) { padding ->
         if (state.isLoading && state.skills.isEmpty()) {
             LoadingBox(Modifier.padding(padding))
-            return@Scaffold
+            return@EthanScaffold
         }
 
         Column(Modifier.fillMaxSize().padding(padding)) {
@@ -206,15 +207,20 @@ private fun SkillDetailContent(
 
 @Composable
 private fun SkillCard(skill: SkillInfo, isSelected: Boolean, onClick: () -> Unit) {
+    // 用真 Card(onClick) 拿涟漪；选中态用 secondaryContainer（与主题同色系，
+    // 比默认的 primaryContainer 淡、不抢眼）。
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = if (isSelected) {
-            androidx.compose.material3.CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-            )
-        } else {
-            androidx.compose.material3.CardDefaults.cardColors()
-        },
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(skill.name, style = MaterialTheme.typography.titleSmall)

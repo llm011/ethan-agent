@@ -146,9 +146,19 @@ class SuperConsentProvider(WebConsentProvider):
     ConsentEvent；破坏性命令照常走 create() + await 弹窗（300s 超时按拒绝）。
     （2026-08-22 调整：此前所有 consent_always=True 的高危都弹窗，curl 等日常
     命令被 env-dump 误判成高危后也被反复弹窗，用户反馈只拦 rm -rf 级破坏。）
+
+    auto_approve 是**实例属性且运行期可变**：用户在生成过程中才点开/关掉超级权限，
+    应当在下一次工具调用就生效，而不是以「发起那一次请求时的状态」为准。
+    客户端通过 POST /api/chat/auto-consent 改这个值。
     """
 
-    auto_approve = True
+    def __init__(self, session_id: str = ""):
+        super().__init__(session_id=session_id)
+        self.auto_approve = True
+
+    def set_auto_approve(self, enabled: bool) -> None:
+        """运行期切换超级权限（用户在生成过程中点开关）。"""
+        self.auto_approve = bool(enabled)
 
 
 class AutoConsentProvider(ConsentProvider):

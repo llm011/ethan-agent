@@ -193,7 +193,7 @@ class ImageSearchTool(BaseTool):
         """调用 SearXNG images 分类搜索。返回原始结果列表。"""
         url = base_url.rstrip("/") + "/search"
         params = {"q": query, "format": "json", "categories": "images", "language": language}
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
         data = resp.json()
@@ -235,7 +235,7 @@ class ImageSearchTool(BaseTool):
             params["apikey"] = api_key
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
                 resp = await client.get(url, params=params)
                 resp.raise_for_status()
             data = resp.json()
@@ -363,7 +363,7 @@ class ImageSearchTool(BaseTool):
             async with semaphore:
                 return await download_one(client, item)
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             tasks = [bounded_download(client, item) for item in items]
             results = await asyncio.gather(*tasks)
 

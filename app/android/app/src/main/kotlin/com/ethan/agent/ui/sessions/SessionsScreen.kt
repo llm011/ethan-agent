@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -123,15 +125,25 @@ fun SessionsScreen(
     ) { padding ->
         var searchExpanded by remember { mutableStateOf(false) }
 
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        // 本页没有 topBar，而 enableEdgeToEdge 下 Scaffold 的 contentPadding 仍包含状态栏
+        // 高度 —— 于是顶部会留出一条空白（筛选条本该紧贴状态栏）。
+        // 这里把状态栏 inset 消费掉，改由筛选条自己用 statusBarsPadding() 顶上去，
+        // 让「返回 + 来源筛选 + 搜索」这条筛选栏充当事实上的顶栏。
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding),
+        ) {
             // Filter bar card
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .statusBarsPadding()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 2.dp,
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Row(
                     modifier = Modifier
@@ -225,7 +237,7 @@ fun SessionsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
@@ -245,7 +257,7 @@ fun SessionsScreen(
                             placeholder = { Text("搜索对话…", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                             modifier = Modifier.weight(1f).height(48.dp),
                             singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
+                            shape = MaterialTheme.shapes.large,
                             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
                                 unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -342,18 +354,16 @@ private fun SessionCard(
     var menuExpanded by remember { mutableStateOf(false) }
     val isPinned = session.pinnedAt > 0
 
+    // 会话卡片：去掉 2dp 阴影 + 淡主色描边（M3 用 surface 色阶表达层级，不靠描边和投影）。
+    // 保留 combinedClickable 是因为需要长按菜单，所以不用 Card(onClick)。
     Surface(
         modifier = Modifier.fillMaxWidth().combinedClickable(
             onClick = onClick,
             onLongClick = { menuExpanded = true },
         ),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 2.dp,
-        border = androidx.compose.foundation.BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-        ),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shadowElevation = 0.dp,
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

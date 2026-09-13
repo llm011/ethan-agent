@@ -1,4 +1,6 @@
-// 主题注册表 —— 桌面端与 Web 端共享同一份定义（改动需两端同步）。
+// 主题注册表 —— 桌面端与 Web 端本应共享同一份定义（改动需两端同步），但目前**已不完全对齐**：
+// Desktop 侧的 ThemeId 多一个 `system`（跟随系统）成员，Web 侧还没有，Web 读到 "system"
+// 只会回落成默认主题。增删主题 id / 改 normalizeThemeId 前，先确认另一端是否也要跟上。
 // 每个主题对应 styles.css / globals.css 里的一段 CSS 变量（通过 className 挂到 <html>）。
 // swatch 是给右上角调色盘图标做「预览小圆点」用的代表色，纯展示、不参与实际配色。
 

@@ -19,22 +19,39 @@ import kotlinx.datetime.*
 import kotlinx.datetime.TimeZone
 import kotlinx.serialization.json.JsonElement
 
-/** Facts from API have no id; backend uses array index for PATCH/DELETE. */
+/**
+ * 列表项 = Fact + 一个稳定的 key。
+ *
+ * **注意 `index` 不再是给后端用的标识**：它只是「原始列表里的位置」，仅用作
+ * LazyColumn 的 key（同一位置换内容时能复用视图）。真正的读改写一律走
+ * [Fact.id]。
+ *
+ * 以前这里注释写的是「Facts from API have no id; backend uses array index」——
+ * 那是错的：后端一直在返回 memory id，是 Kotlin 侧没声明该字段。用位置下标去
+ * PATCH 会错位（详见 `Fact.id` 的注释）。
+ */
 data class FactItem(
     val index: String,
     val fact: Fact,
 )
+
+/** 后端标识：优先用 memory id，老缓存里没有 id 时退回位置下标（至少不会更糟）。 */
+val FactItem.recordId: String
+    get() = fact.id.ifBlank { index }
+
+/**
+ * 日摘要弹窗每页条数。
+ *
+ * 摘要正文是多段 Markdown，一条动辄几 KB —— 以前一次拉 30 条再一次性渲染，
+ * 打开弹窗要卡一下。取 20 是为了「滚一屏还有内容」和「首屏够快」的折中。
+ */
+private const val DAILY_SUMMARIES_PAGE = 20
 
 fun List<Fact>.toFactItems(includeSuperseded: Boolean = false): List<FactItem> {
     return mapIndexedNotNull { index, fact ->
         if (!includeSuperseded && fact.superseded) return@mapIndexedNotNull null
         FactItem(index = index.toString(), fact = fact)
     }
-}
-
-fun List<Fact>.indexOfFact(target: Fact): String {
-    val idx = indexOfFirst { it.content == target.content && it.createdAt == target.createdAt }
-    return if (idx >= 0) idx.toString() else "0"
 }
 
 data class RecordsFilter(
@@ -50,14 +67,34 @@ enum class MemoryTab(val title: String) {
     Records("结构化记忆")
 }
 
+/**
+ * 三张卡（事实 / 流程 / 结构化记忆）共用同一个编辑器。
+ *
+ * 以前每个 tab 各写一套编辑页：事实是「详情页 → 点编辑 → 才进编辑」，流程根本没
+ * 有编辑，结构化记忆点卡片就进编辑（太容易误触）。现在统一成「双击卡片进编辑」，
+ * 编辑页也收敛成一个 —— 顶栏结构、字段排版、底部元信息行都一致。
+ */
+sealed interface MemoryEditTarget {
+    val title: String
+
+    data class Fact(val id: String, val original: com.ethan.agent.core.model.Fact) : MemoryEditTarget {
+        override val title = "编辑事实"
+    }
+
+    data class Procedure(val id: String, val original: com.ethan.agent.core.model.Procedure) : MemoryEditTarget {
+        override val title = "编辑流程"
+    }
+
+    data class Record(val id: String, val original: StructuredRecord) : MemoryEditTarget {
+        override val title = "编辑记录"
+    }
+}
+
 data class MemoryUiState(
     val tab: MemoryTab = MemoryTab.Facts,
     // Facts
     val allFacts: List<Fact> = emptyList(),
     val facts: List<FactItem> = emptyList(),
-    val selectedFact: Fact? = null,
-    val selectedFactIndex: String? = null,
-    val editContent: String = "",
     // Insights
     val insights: List<InsightItem> = emptyList(),
     val insightsDate: String = "",
@@ -67,13 +104,27 @@ data class MemoryUiState(
     val records: List<StructuredRecord> = emptyList(),
     val recordsFilter: RecordsFilter = RecordsFilter(),
     val recordsSearch: String = "",
-    val selectedRecord: StructuredRecord? = null,
-    val recordEditContent: String = "",
+    // ── 共用编辑器（事实 / 流程 / 结构化记忆）──────────────────────────────
+    /** 非空时，编辑页盖在列表之上。 */
+    val editing: MemoryEditTarget? = null,
+    /** 编辑中的正文（三张卡共用）。 */
+    val editContent: String = "",
+    /** 结构化记忆专有：编辑中的置信度 / 重要度。 */
     val recordEditConfidence: Double = 0.0,
     val recordEditImportance: Double = 0.0,
     // Daily summaries
     val summaries: List<JsonElement> = emptyList(),
     val showSummaries: Boolean = false,
+    /**
+     * 日摘要弹窗里选中的日期（`YYYY-MM-DD`，空 = 全部日期）。
+     *
+     * 与 [insightsDate] 分开维护：两个弹窗/页签各自筛选，互不干扰。
+     */
+    val summariesDate: String = "",
+    /** 日摘要是否正在加载（切日期时给弹窗转圈，而不是先闪「暂无日摘要」）。 */
+    val summariesLoading: Boolean = false,
+    /** 弹窗列表是否还有更早的摘要可以加载（按 [DAILY_SUMMARIES_PAGE] 分页）。 */
+    val summariesHasMore: Boolean = false,
     // Loading
     val isLoading: Boolean = false,
     val isConsolidating: Boolean = false,
@@ -131,49 +182,119 @@ class MemoryViewModel(
         }
     }
 
+    // ── 共用编辑器：进入 / 改内容 / 取消 / 保存 / 删除 ────────────────────────
+
     fun selectFact(item: FactItem) {
         _state.update {
             it.copy(
-                selectedFact = item.fact,
-                selectedFactIndex = item.index,
+                editing = MemoryEditTarget.Fact(item.recordId, item.fact),
                 editContent = item.fact.content,
             )
         }
+    }
+
+    fun selectProcedure(procedure: Procedure) {
+        _state.update {
+            it.copy(
+                editing = MemoryEditTarget.Procedure(procedure.id, procedure),
+                editContent = procedure.rule,
+            )
+        }
+    }
+
+    fun selectRecord(record: StructuredRecord) {
+        _state.update {
+            it.copy(
+                editing = MemoryEditTarget.Record(record.id, record),
+                editContent = record.content,
+                recordEditConfidence = record.confidence,
+                recordEditImportance = record.importance,
+            )
+        }
+    }
+
+    /** 关闭编辑页（返回键 / 取消）。不保存。 */
+    fun dismissEditor() {
+        _state.update { it.copy(editing = null, editContent = "") }
     }
 
     fun onEditChange(text: String) {
         _state.update { it.copy(editContent = text) }
     }
 
-    fun dismissFactEditor() {
-        _state.update { it.copy(selectedFact = null, selectedFactIndex = null, editContent = "") }
+    fun onRecordEditConfidence(v: Double) {
+        _state.update { it.copy(recordEditConfidence = v) }
     }
 
-    fun saveFact() {
-        val index = _state.value.selectedFactIndex ?: return
+    fun onRecordEditImportance(v: Double) {
+        _state.update { it.copy(recordEditImportance = v) }
+    }
+
+    /** 保存当前编辑页。按 [MemoryEditTarget] 分派到对应的接口。 */
+    fun saveEditing() {
+        val target = _state.value.editing ?: return
+        val content = _state.value.editContent
         viewModelScope.launch {
             try {
-                repository.updateFact(index, _state.value.editContent)
-                dismissFactEditor()
-                load()
+                when (target) {
+                    is MemoryEditTarget.Fact -> {
+                        repository.updateFact(target.id, content)
+                        dismissEditor()
+                        load()
+                    }
+                    is MemoryEditTarget.Procedure -> {
+                        repository.updateProcedure(target.id, content)
+                        dismissEditor()
+                        load()
+                    }
+                    is MemoryEditTarget.Record -> {
+                        repository.updateRecord(
+                            target.id,
+                            UpdateRecordRequest(
+                                content = content,
+                                confidence = _state.value.recordEditConfidence,
+                                importance = _state.value.recordEditImportance,
+                            ),
+                        )
+                        dismissEditor()
+                        loadRecords()
+                    }
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(error = repository.friendlyError(e)) }
             }
         }
     }
 
-    fun deleteFact(index: String) {
+    /** 删除当前编辑页对应的记录。 */
+    fun deleteEditing() {
+        val target = _state.value.editing ?: return
         viewModelScope.launch {
             try {
-                repository.deleteFact(index)
-                dismissFactEditor()
-                load()
+                when (target) {
+                    is MemoryEditTarget.Fact -> {
+                        repository.deleteFact(target.id)
+                        dismissEditor()
+                        load()
+                    }
+                    is MemoryEditTarget.Procedure -> {
+                        repository.deleteProcedure(target.id)
+                        dismissEditor()
+                        load()
+                    }
+                    is MemoryEditTarget.Record -> {
+                        repository.deleteRecord(target.id)
+                        dismissEditor()
+                        loadRecords()
+                    }
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(error = repository.friendlyError(e)) }
             }
         }
     }
 
+    /** 列表内联删除（流程 tab 左滑、结构化记忆卡片上的垃圾桶）。不经过编辑页。 */
     fun deleteProcedure(id: String) {
         viewModelScope.launch {
             try {
@@ -252,58 +373,11 @@ class MemoryViewModel(
         }
     }
 
-    fun selectRecord(record: StructuredRecord) {
-        _state.update {
-            it.copy(
-                selectedRecord = record,
-                recordEditContent = record.content,
-                recordEditConfidence = record.confidence,
-                recordEditImportance = record.importance,
-            )
-        }
-    }
-
-    fun dismissRecord() {
-        _state.update { it.copy(selectedRecord = null) }
-    }
-
-    fun onRecordEditContent(text: String) {
-        _state.update { it.copy(recordEditContent = text) }
-    }
-
-    fun onRecordEditConfidence(v: Double) {
-        _state.update { it.copy(recordEditConfidence = v) }
-    }
-
-    fun onRecordEditImportance(v: Double) {
-        _state.update { it.copy(recordEditImportance = v) }
-    }
-
-    fun saveRecord() {
-        val id = _state.value.selectedRecord?.id ?: return
-        viewModelScope.launch {
-            try {
-                repository.updateRecord(
-                    id,
-                    UpdateRecordRequest(
-                        content = _state.value.recordEditContent,
-                        confidence = _state.value.recordEditConfidence,
-                        importance = _state.value.recordEditImportance,
-                    ),
-                )
-                dismissRecord()
-                loadRecords()
-            } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e)) }
-            }
-        }
-    }
-
+    /** 卡片上的垃圾桶：直接删，不进编辑页。 */
     fun deleteRecord(id: String) {
         viewModelScope.launch {
             try {
                 repository.deleteRecord(id)
-                dismissRecord()
                 loadRecords()
             } catch (e: Exception) {
                 _state.update { it.copy(error = repository.friendlyError(e)) }
@@ -355,15 +429,70 @@ class MemoryViewModel(
 
     // ── Daily summaries ────────────────────────────────────────────────────────
 
+    /**
+     * 打开日摘要弹窗：按当前 [MemoryUiState.summariesDate] 重新拉第一页。
+     *
+     * 以前是「一次拉 30 条全塞列表」，而且只有全部日期、没法按天看。现在：
+     * - 有日期 → 走 `summaries/{date}`（一天通常 1-2 条，一次到位）；
+     * - 无日期 → 走列表接口，首页取 [DAILY_SUMMARIES_PAGE] 条，滚到底再拉下一页。
+     *
+     * 分页用 `offset`：日摘要是**按 local_date DESC 排序的只读归档**，
+     * 不像消息那样会增量追加，offset 不会错位。
+     */
     fun loadSummaries() {
+        val date = _state.value.summariesDate
+        _state.update { it.copy(showSummaries = true, summariesLoading = true) }
         viewModelScope.launch {
             try {
-                val items = repository.getDailySummaries(limit = 30).items
-                _state.update { it.copy(summaries = items, showSummaries = true) }
+                val items = if (date.isNotBlank()) {
+                    repository.getDailySummaryByDate(date).items
+                } else {
+                    repository.getDailySummaries(limit = DAILY_SUMMARIES_PAGE).items
+                }
+                _state.update {
+                    it.copy(
+                        summaries = items,
+                        summariesLoading = false,
+                        // 按日期查一定是一次性全量；无日期时按返回条数判断是否还有更早的
+                        summariesHasMore = date.isBlank() && items.size >= DAILY_SUMMARIES_PAGE,
+                    )
+                }
             } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e)) }
+                _state.update {
+                    it.copy(summariesLoading = false, error = repository.friendlyError(e))
+                }
             }
         }
+    }
+
+    /** 弹窗里的「加载更早」：按 offset 续拉下一页，追加到列表尾部（列表是日期降序）。 */
+    fun loadMoreSummaries() {
+        val s = _state.value
+        if (s.summariesLoading || !s.summariesHasMore || s.summariesDate.isNotBlank()) return
+        _state.update { it.copy(summariesLoading = true) }
+        viewModelScope.launch {
+            try {
+                val items = repository.getDailySummaries(limit = DAILY_SUMMARIES_PAGE, offset = s.summaries.size).items
+                _state.update {
+                    it.copy(
+                        summaries = it.summaries + items,
+                        summariesLoading = false,
+                        summariesHasMore = items.size >= DAILY_SUMMARIES_PAGE,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(summariesLoading = false, error = repository.friendlyError(e))
+                }
+            }
+        }
+    }
+
+    /** 弹窗里换日期（空串 = 全部日期），立刻重新加载。 */
+    fun setSummariesDate(date: String) {
+        if (_state.value.summariesDate == date) return
+        _state.update { it.copy(summariesDate = date) }
+        loadSummaries()
     }
 
     fun hideSummaries() {

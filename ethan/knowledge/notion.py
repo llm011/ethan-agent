@@ -38,7 +38,7 @@ class NotionKnowledgeBase(KnowledgeBase):
 
     def _client(self):
         import httpx
-        return httpx.Client(base_url=self._api, headers=self._headers(), timeout=30)
+        return httpx.Client(base_url=self._api, headers=self._headers(), timeout=30, trust_env=False)
 
     # ── markdown ⇄ blocks ────────────────────────────────────────────────
     @staticmethod

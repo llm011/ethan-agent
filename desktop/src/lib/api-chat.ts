@@ -132,6 +132,29 @@ export async function streamResume(sessionId: string, signal?: AbortSignal): Pro
 }
 
 /** 停止某 session 进行中的生成；已生成内容会被保存并标记 [已停止]。 */
+/** 运行中切换超级权限（auto_consent）。
+ *
+ *  启动时的 auto_consent 只在发起那一刻写入 run 的 ConsentProvider，用户在生成
+ *  过程中才点开关的话不会生效（体感是「以开始时的状态为准」）。这个接口直接改
+ *  活跃 run 的 provider 实例属性，下一次工具调用即按新策略走。
+ *
+ *  无活跃 run 时后端返回 applied=false（不报错）——开关值本身存在客户端，
+ *  下一次 /api/chat 请求体会带上 auto_consent，行为依然正确。
+ *  非本地来源会被后端 403（超级权限不允许远程打开）。
+ */
+export async function setAutoConsent(
+  sessionId: string,
+  enabled: boolean,
+): Promise<{ ok: boolean; enabled: boolean; applied: boolean; reason?: string }> {
+  const res = await fetch(`${getApiUrl()}/chat/auto-consent`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ session_id: sessionId, enabled }),
+  });
+  if (!res.ok) return { ok: false, enabled, applied: false };
+  return res.json();
+}
+
 export async function stopGeneration(sessionId: string): Promise<{ ok: boolean; stopped: boolean }> {
   const res = await fetch(`${getApiUrl()}/chat/${encodeURIComponent(sessionId)}/stop`, {
     method: "POST",

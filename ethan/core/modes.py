@@ -50,15 +50,18 @@ MINIMAL_TOOLS: tuple[str, ...] = (
 
 # 唯一真相源：所有内置对话模式。
 MODES: tuple[Mode, ...] = (
+    # ── 精简模式 ───────────────────────────────────────────────
+    # 无状态工作态：只挂 MINIMAL_TOOLS 基础工具、system prompt 砍到只剩 soul 等基础原则、
+    # 不注入记忆、不带历史上下文（引用某条消息时才带上那条 + 其 tool 调用与产出文件路径）。
+    # 供「只想要一个能干点活的干净助手、不要被记忆/历史/人格带偏」的场景。
     Mode(
-        key="companion",
-        aliases=("companion", "陪伴", "counselor", "苏念"),
-        label="苏念 · 陪伴倾听",
-        icon="🌸",
-        accent="pink",
-        persona_skills=("companion-listen", "陪伴倾听"),
-        extract_psych=True,
-        blurb="正在以苏念的身份陪伴你，倾诉心事我会先看见你、接住你",
+        key="minimal",
+        aliases=("minimal", "精简", "精简模式"),
+        label="精简模式",
+        icon="⚡",
+        accent="green",
+        minimal=True,
+        blurb="已进入精简模式：只挂基础工具、不用记忆、不带历史上下文；引用消息时仅带上那条消息",
     ),
     Mode(
         key="legal",
@@ -109,19 +112,19 @@ MODES: tuple[Mode, ...] = (
         delegate_agent="opencode",
         blurb="已进入 OpenCode 模式：每条消息都直接交给 OpenCode 在本会话工作目录里执行",
     ),
-    # ── 精简模式 ───────────────────────────────────────────────
-    # 无状态工作态：只挂 MINIMAL_TOOLS 基础工具、system prompt 砍到只剩 soul 等基础原则、
-    # 不注入记忆、不带历史上下文（引用某条消息时才带上那条 + 其 tool 调用与产出文件路径）。
-    # 供「只想要一个能干点活的干净助手、不要被记忆/历史/人格带偏」的场景。
+    # ── 陪伴倾听 ───────────────────────────────────────────────
+    # 放在列表最后：感性陪伴类模式，与前面偏「干活」的模式区分开。
     Mode(
-        key="minimal",
-        aliases=("minimal", "精简", "精简模式"),
-        label="精简模式",
-        icon="⚡",
-        accent="green",
-        minimal=True,
-        blurb="已进入精简模式：只挂基础工具、不用记忆、不带历史上下文；引用消息时仅带上那条消息",
+        key="companion",
+        aliases=("companion", "陪伴", "counselor", "苏念"),
+        label="苏念 · 陪伴倾听",
+        icon="🌸",
+        accent="pink",
+        persona_skills=("companion-listen", "陪伴倾听"),
+        extract_psych=True,
+        blurb="正在以苏念的身份陪伴你，倾诉心事我会先看见你、接住你",
     ),
+
 )
 
 # 默认（工作助手）模式：mode 为空或无法解析时回退到它。

@@ -69,8 +69,13 @@ class AnthropicProvider(BaseProvider):
             # Some relays block the default anthropic-python user-agent
             request.headers["user-agent"] = "python-httpx/0.28.1"
 
+        # trust_env=False：不读环境变量里的 all_proxy/HTTPS_PROXY。否则用户机器上
+        # 的 `all_proxy=socks5://...` 会让 httpx 在构造 client 时因缺 optional 的
+        # socksio 包直接抛 ImportError，对话完全发不出去。代理只认配置里的
+        # `network.proxy` / `provider.proxy`（见 providers/openai_compat.py 同处注释）。
         http_client = httpx.AsyncClient(
             proxy=proxy if proxy else None,
+            trust_env=False,
             event_hooks={"request": [_clean_headers]},
         )
 

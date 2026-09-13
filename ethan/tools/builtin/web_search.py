@@ -322,7 +322,7 @@ class WebSearchTool(BaseTool):
         """SearXNG 指定分类搜索。异常向上传播。"""
         url = base_url.rstrip("/") + "/search"
         params = {"q": query, "format": "json", "categories": category, "language": language}
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
         data = resp.json()
@@ -437,7 +437,7 @@ class WebSearchTool(BaseTool):
         if time_range in ("day", "week", "month"):
             params["time_range"] = time_range
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
         data = resp.json()
@@ -471,6 +471,7 @@ class WebSearchTool(BaseTool):
             timeout=12.0,
             follow_redirects=True,
             headers={"User-Agent": _DDG_UA, "Accept": "application/rss+xml,application/xml,*/*"},
+            trust_env=False,
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
@@ -484,6 +485,7 @@ class WebSearchTool(BaseTool):
             timeout=10.0,
             follow_redirects=True,
             headers={"User-Agent": _DDG_UA, "Referer": "https://news.baidu.com"},
+            trust_env=False,
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
@@ -524,7 +526,7 @@ class WebSearchTool(BaseTool):
         """SearXNG 通用搜索。异常向上传播给 _call_with_retry 处理。"""
         url = base_url.rstrip("/") + "/search"
         params = {"q": query, "format": "json", "language": language}
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
         data = resp.json()
@@ -553,7 +555,7 @@ class WebSearchTool(BaseTool):
 
     async def _tavily_search(self, query: str, max_results: int, api_key: str) -> list[dict]:
         """Tavily 搜索。异常向上传播给 _call_with_retry 处理。"""
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
             resp = await client.post(
                 "https://api.tavily.com/search",
                 json={
@@ -608,8 +610,7 @@ class WebSearchTool(BaseTool):
         # Fallback: HTML 解析
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True, timeout=15.0, headers={"User-Agent": _DDG_UA}
-            ) as client:
+                follow_redirects=True, timeout=15.0, headers={"User-Agent": _DDG_UA}, trust_env=False) as client:
                 resp = await client.post("https://html.duckduckgo.com/html/", data={"q": query})
                 resp.raise_for_status()
             return self._parse_ddg_html(resp.text, max_results)
@@ -663,6 +664,7 @@ class WebSearchTool(BaseTool):
                 "Accept": "text/html,application/xhtml+xml",
                 "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             },
+            trust_env=False,
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()

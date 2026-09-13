@@ -10,6 +10,8 @@ import com.ethan.agent.core.model.AgentSettings
 import com.ethan.agent.core.model.ApiKeyCreated
 import com.ethan.agent.core.model.ApiKeyInfo
 import com.ethan.agent.core.model.AuthResponse
+import com.ethan.agent.core.model.AutoConsentRequest
+import com.ethan.agent.core.model.AutoConsentResponse
 import com.ethan.agent.core.model.ChannelInfo
 import com.ethan.agent.core.model.ChatMessage
 import com.ethan.agent.core.model.ChatRequest
@@ -30,6 +32,7 @@ import com.ethan.agent.core.model.ModelEntry
 import com.ethan.agent.core.model.OnboardingCompleteRequest
 import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.Procedure
+import com.ethan.agent.core.model.ProcedureUpdateRequest
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.RenameSessionRequest
@@ -104,6 +107,15 @@ class EthanRepository(
 ) {
     val config: Flow<AppConfig> = configStore.config
 
+    /**
+     * 后端 API 根地址（形如 `http://host:port/api`）。
+     *
+     * 文档正文里的图片写的是相对路径（`./images/x.jpg`），Compose 的 markdown
+     * 渲染器没法直接加载 —— 需要拼成绝对 URL 才能取到（对齐 Web 的
+     * `resolveDocsImageUrl()`，它拼的也是 `${API_URL}/docs/images/<file>`）。
+     */
+    suspend fun apiBaseUrl(): String = api.apiBaseUrl()
+
     val isLoggedIn: Flow<Boolean> = config.map { it.authToken.isNotBlank() }
 
     /** 超级权限开关（持久化偏好，跨会话/重启保留） */
@@ -112,6 +124,23 @@ class EthanRepository(
     suspend fun setAutoConsent(enabled: Boolean) {
         configStore.setAutoConsentEnabled(enabled)
     }
+
+    // ── 输入框草稿（按会话） ──────────────────────────────────────────
+    // 对齐 Web 的 useInputStore：切会话时各存各的，重进 App 也还在。
+
+    suspend fun draft(sessionId: String?): String = configStore.draft(sessionId)
+
+    suspend fun saveDraft(sessionId: String?, text: String) = configStore.saveDraft(sessionId, text)
+
+    /**
+     * 运行中切换超级权限：把开关推给正在跑的那个 run（见 api.setAutoConsent）。
+     *
+     * 与 [setAutoConsent]（只存本地偏好）不同，这里是「立即生效」的优化：
+     * 没有活跃 run 时后端返回 applied=false，不抛错 —— 本地偏好已经存好，
+     * 下一次发消息的请求体会带上 auto_consent。
+     */
+    suspend fun pushAutoConsent(sessionId: String, enabled: Boolean): AutoConsentResponse =
+        api.setAutoConsent(AutoConsentRequest(sessionId = sessionId, enabled = enabled))
 
     suspend fun repairStoredUrlIfNeeded() {
         configStore.repairStoredUrlIfNeeded()
@@ -387,6 +416,10 @@ class EthanRepository(
         return api.getProcedures().procedures
     }
 
+    suspend fun updateProcedure(id: String, rule: String) {
+        api.updateProcedure(id, ProcedureUpdateRequest(rule))
+    }
+
     suspend fun deleteProcedure(id: String) {
         api.deleteProcedure(id)
     }
@@ -574,8 +607,12 @@ class EthanRepository(
         return api.consolidateRecords(targetDate)
     }
 
-    suspend fun getDailySummaries(domain: String? = null, limit: Int = 30): DailySummariesResponse {
-        return api.getDailySummaries(domain, limit)
+    suspend fun getDailySummaries(
+        domain: String? = null,
+        limit: Int = 30,
+        offset: Int = 0,
+    ): DailySummariesResponse {
+        return api.getDailySummaries(domain, limit, offset)
     }
 
     suspend fun getDailySummaryByDate(dateStr: String, domain: String? = null): DailySummariesResponse {

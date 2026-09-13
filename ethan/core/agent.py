@@ -1742,6 +1742,8 @@ class Agent:
                     # 其余高危（sudo / 管道执行 / env dump / secret 引用等）自动放行
                     # ——用户开启超级权限即接管这部分风险，避免 curl 等日常命令
                     # 被反复弹窗打断（2026-08-22 用户反馈）。
+                    # 注意：每次工具调用都重新读 auto_approve —— 用户可能在生成
+                    # 过程中才点开/关掉开关，必须立即生效（见 /api/chat/auto-consent）。
                     if always and getattr(consent_provider, "auto_approve", False):
                         always = bool(tool.consent_destructive(**tc.arguments)) if tool else always
                     if not always and is_granted(sess_id, scope):

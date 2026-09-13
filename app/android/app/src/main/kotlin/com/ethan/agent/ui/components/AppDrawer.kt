@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
@@ -41,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,13 +53,20 @@ import com.ethan.agent.ui.navigation.Screen
 
 private data class DrawerToolItem(val screen: Screen, val label: String)
 
+/**
+ * 抽屉里的工具入口 —— 必须与 Web 侧边栏逐项对应。
+ *
+ * 「后台任务 Tasks」在 Web 上已经下掉了（`web/components/sidebar.tsx` 只剩
+ * 日程/记忆/知识库/技能/定时任务/文档/设置 七项），Android 还留着会让两端菜单
+ * 对不上。刻意不删 `Screen.BackgroundTasks` 这个路由和目标页 —— 定时任务页
+ * 里仍会跳到它，只是不再从菜单进入。
+ */
 private val drawerToolItems = listOf(
     DrawerToolItem(Screen.Memory, "记忆 Memory"),
     DrawerToolItem(Screen.Knowledge, "知识库 Knowledge"),
     DrawerToolItem(Screen.Skills, "技能 Skills"),
     DrawerToolItem(Screen.Agenda, "日程 Agenda"),
     DrawerToolItem(Screen.Schedule, "定时任务 Schedule"),
-    DrawerToolItem(Screen.BackgroundTasks, "后台任务 Tasks"),
     DrawerToolItem(Screen.Docs, "文档 Docs"),
     DrawerToolItem(Screen.Settings, "设置 Settings"),
 )
@@ -192,36 +202,14 @@ fun AppDrawerContent(
             )
             Spacer(Modifier.height(12.dp))
 
-            // Tool navigation items
+            // Tool navigation items —— 用与 MoreScreen 共用的 EthanListRow，
+            // 替代此前两份各写一遍的图标行。
             drawerToolItems.forEach { item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onNavigate(item.screen.route); onClose() }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        item.screen.icon?.let { icon ->
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                modifier = Modifier.padding(6.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                    Text(
-                        text = item.label,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
+                EthanListRow(
+                    title = item.label,
+                    icon = item.screen.icon,
+                    onClick = { onNavigate(item.screen.route); onClose() },
+                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -255,20 +243,35 @@ private fun CollapsibleSessionGroup(
             modifier = Modifier.weight(1f),
         )
 
-        // 红色未读数 badge
+        // 红色未读数 badge。
+        //
+        // 居中的关键在 `lineHeight = fontSize`：Text 的布局盒高取的是 lineHeight
+        // （不设就继承 bodyMedium 的 ~20sp），而字形只有 10sp 高。盒高和字形高不等
+        // 时，contentAlignment 居中的是「盒子」而不是「字形」，字形就会整体偏上。
+        // 再叠上 includeFontPadding 那点不对称的顶/底留白，就明显不居中。
+        //
+        // 形状用「扁胶囊」而不是固定大小的正圆：Web 端就是 `text-[9px] px-1.5
+        // py-0.2 rounded-full`，高度贴着文字、宽度随内容（「9+」和「3」不一样宽）。
+        // 写死 size(20.dp) 的话数字只占圆的四成，看着空旷；用户把系统字号调大后
+        // 还会装不下。这里 minWidth 只用来兜住单个数字时不至于挤成一条。
         if (unreadCount > 0) {
             Box(
                 modifier = Modifier
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFE53935)),
+                    .defaultMinSize(minWidth = 15.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.error)
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = if (unreadCount > 9) "9+" else unreadCount.toString(),
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onError,
+                    style = LocalTextStyle.current.copy(
+                        fontSize = 10.sp,
+                        lineHeight = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false),
+                    ),
                 )
             }
             Spacer(Modifier.width(8.dp))
@@ -305,7 +308,7 @@ private fun CollapsibleSessionGroup(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFE53935)),
+                                .background(MaterialTheme.colorScheme.error),
                         )
                         Spacer(Modifier.width(8.dp))
                     }

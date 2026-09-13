@@ -9,6 +9,7 @@ import com.ethan.agent.core.model.ConsentInfo
 import com.ethan.agent.core.model.FileSignature
 import com.ethan.agent.core.model.ModeEntry
 import com.ethan.agent.core.model.ModelEntry
+import com.ethan.agent.core.model.ModelSelection
 import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.ToolStep
@@ -23,12 +24,17 @@ import com.ethan.agent.shared.UiMessage
 import com.ethan.agent.shared.UiMessageImage
 import com.ethan.agent.shared.ShareBus
 import kotlinx.datetime.Clock
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -109,6 +115,7 @@ class ChatViewModel(
         loadInitial(sessionId)
         observeSharedText()
         observeAutoConsent()
+        observeDraftPersistence()
     }
 
     /**
@@ -157,6 +164,17 @@ class ChatViewModel(
     private fun loadInitial(sessionId: String?) {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
+
+            // 恢复该会话上次没发出去的草稿（对齐 Web 的 useInputStore）。
+            // 放在最前面且单独 launch：草稿是本地读，不该等网络那一串。
+            launch {
+                try {
+                    val saved = repository.draft(sessionId)
+                    if (saved.isNotBlank()) {
+                        _state.update { if (it.inputText.isBlank()) it.copy(inputText = saved) else it }
+                    }
+                } catch (_: Exception) { }
+            }
 
             // 并行加载元数据（cached flow: 先秒出缓存，再网络刷新）
             launch {
@@ -259,6 +277,53 @@ class ChatViewModel(
     fun onInputChange(text: String) { _state.update { it.copy(inputText = text) } }
 
     /**
+     * 草稿落盘：按 sessionId 各存各的（对齐 Web 的 `useInputStore`）。
+     *
+     * 实现上**订阅 inputText 的变化**而不是在每个清空点手动调用 —— 输入框被写的地方
+     * 有七八处（发送、inject、slash command、分享投递…），逐个补 saveDraft 一定会漏。
+     * 看状态变化就没人能漏掉。
+     *
+     * 攒 400ms 再写：DataStore 是整文件重写 + 内部 Mutex，每敲一个字写一次太费。
+     * sessionId 也订阅了 —— 新会话建好后 key 要从 `@new` 迁到真实 id。
+     */
+    private fun observeDraftPersistence() {
+        viewModelScope.launch {
+            var lastSavedKey: String? = null
+            var lastSavedText: String? = null
+            combine(_state.map { it.inputText }, _state.map { it.sessionId }) { text, sid -> text to sid }
+                .debounce(400)
+                .collect { (text, sid) ->
+                    val key = draftKeyOf(sid)
+                    val prevKey: String? = lastSavedKey
+                    if (text == lastSavedText && key == prevKey) return@collect
+                    // 会话 id 变了（新会话刚建好）且旧 key 里没留下内容：把旧 key 清掉，
+                    // 否则下次新建会话会把刚才发出去的内容又预填回来。
+                    if (prevKey != null && prevKey != key && lastSavedText.isNullOrBlank()) {
+                        runCatching { repository.saveDraft(sessionIdOf(prevKey), "") }
+                    }
+                    lastSavedKey = key
+                    lastSavedText = text
+                    runCatching { repository.saveDraft(sid, text) }
+                }
+        }
+    }
+
+    private fun draftKeyOf(sid: String?): String = sid ?: "@new"
+
+    private fun sessionIdOf(key: String): String? = if (key == "@new") null else key
+
+    override fun onCleared() {
+        super.onCleared()
+        // 页面销毁时 debounce 窗口里的那次写会随 viewModelScope 一起被取消 ——
+        // 用独立作用域把最后一份草稿补上，否则「打完字立刻返回」会丢。
+        val text = _state.value.inputText
+        val sid = _state.value.sessionId
+        CoroutineScope(Dispatchers.Default).launch {
+            runCatching { repository.saveDraft(sid, text) }
+        }
+    }
+
+    /**
      * 消费跨页面（如 Agenda「拆解该安排」）带来的自动发送 prompt。
      * 等模型就绪后再发送（新会话 isLoading 立即为 false，selectedModel 依赖缓存流）。
      * 10s 兜底：超时仍未就绪则退化为预填输入框（不自动发送）——避免 selectedModel=null
@@ -289,6 +354,12 @@ class ChatViewModel(
         _state.update { it.copy(autoConsent = next) }
         viewModelScope.launch {
             try { repository.setAutoConsent(next) } catch (_: Exception) { }
+            // 会话正在跑时，还要把开关推给那个 run —— 否则开关亮着也不生效，
+            // 用户体感是「以开始时的状态为准」。没有活跃 run 时后端 applied=false，
+            // 静默忽略即可（偏好已存好，下一次发消息会带上）。
+            _state.value.sessionId?.takeIf { it.isNotBlank() }?.let { sid ->
+                try { repository.pushAutoConsent(sid, next) } catch (_: Exception) { }
+            }
         }
     }
 
@@ -347,11 +418,20 @@ class ChatViewModel(
                     error = null,
                 )
             }
+            // 发出去了就不再是草稿 —— 上面把 inputText 清空后，
+            // observeDraftPersistence 会把空串写下去（等于删掉这条记录）。
 
             var sessionId = current.sessionId
             if (sessionId == null) {
                 try {
-                    val created = repository.createSession(current.selectedModel, current.selectedMode.ifBlank { null })
+                    // 落库同样的 fullId：会话表里存的 model 会被「恢复会话」读回来直接发出去，
+                    // 存裸 id 等于把同一个 bug 持久化下来。
+                    val created = repository.createSession(
+                        ModelSelection.effectiveValue(current.models, current.selectedModel)
+                            .takeIf { it != ModelSelection.NEED_CHOICE }
+                            ?: current.selectedModel,
+                        current.selectedMode.ifBlank { null },
+                    )
                     sessionId = created.id
                     _state.update { it.copy(sessionId = sessionId, title = created.title) }
                 } catch (e: Exception) {
@@ -372,12 +452,21 @@ class ChatViewModel(
             val assistantIndex = _state.value.messages.size
             _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true, createdAt = Clock.System.now().toEpochMilliseconds() / 1000)) }
 
+            // 发出去之前做最后一道解析：把可能残留的裸 id 升级成 fullId。
+            // 前面几处写入（列表默认 / 设置默认 / 会话恢复）都做了升级，但
+            // `effectiveValue` 在 models 还没加载完时无法升级，会原样返回裸 id；
+            // 这里 models 一定已就绪（sendMessage 依赖它），补这一刀才能保证
+            // 后端 `providers/manager.py` 拿到的是 `provider/id`。
+            val sendModel = ModelSelection
+                .effectiveValue(_state.value.models, _state.value.selectedModel)
+                .takeIf { it != ModelSelection.NEED_CHOICE }   // 重名未定：交给后端按原值处理/报错更明确
+
             streamJob = viewModelScope.launch {
                 try {
                     collectSseStream(
                         flow = repository.streamChat(
                             messages = history,
-                            model = _state.value.selectedModel,
+                            model = sendModel,
                             sessionId = sessionId,
                             quote = userMessage.quote,
                             mode = _state.value.selectedMode,
@@ -439,6 +528,9 @@ class ChatViewModel(
                     flow = repository.resumeStream(sessionId),
                     assistantIndex = assistantIndex,
                     onFirstEvent = { gotAnyEvent = true },
+                    // 复用旧气泡时必须带上它已有的正文（app 切回前台、rotating 等场景），
+                    // 否则回放会把已渲染的内容覆盖掉 —— 见 appendContent 的说明。
+                    localContent = if (reuseLast) msgs.getOrNull(lastIdx)?.content.orEmpty() else "",
                 )
                 _state.update { it.copy(connectionState = ConnectionState.Idle) }
             } catch (e: Exception) {
@@ -471,10 +563,15 @@ class ChatViewModel(
             kotlinx.coroutines.delay(RECONNECT_DELAYS_MS[attempt.coerceAtMost(RECONNECT_DELAYS_MS.lastIndex)])
             try {
                 var gotEvent = false
+                // 带上气泡里已经渲染出来的正文：重连的 backlog 是从头回放的，
+                // 交给 appendContent 做「回放 vs 增量」甄别，避免内容被清空重填或重复。
+                val localContent = _state.value.messages
+                    .getOrNull(assistantIndex)?.content.orEmpty()
                 collectSseStream(
                     flow = repository.resumeStream(sessionId),
                     assistantIndex = assistantIndex,
                     onFirstEvent = { gotEvent = true },
+                    localContent = localContent,
                 )
                 // 204（无活跃 run）返回空流：run 已结束，不算重连成功
                 if (!gotEvent) {
@@ -521,25 +618,59 @@ class ChatViewModel(
         flow: Flow<ChatStreamEvent>,
         assistantIndex: Int,
         onFirstEvent: (() -> Unit)? = null,
+        /**
+         * 断线重连时传入气泡里已有的正文（本地已渲染到的进度）。
+         *
+         * 重连端点（`GET /chat/{id}/stream` → `_sse_from_run`）会**从头回放**这段 run 的
+         * 全部缓冲，而本地 builder 若从空串开始拼，就会出现两个问题：
+         *   1. 回放期间气泡被清空再逐字重填，用户看到字「闪没了」；
+         *   2. `finally` 用这个不完整/被重写的 builder 覆盖气泡 —— 若回放流在补全之前
+         *      结束（run 已 done、缓冲被裁剪），末尾那段内容就永久丢了。
+         * 症状就是「最后一个 chunk 的字没打出来」。所以这里带上本地进度，
+         * 并在回放时取两者较长者（见 appendContent）。
+         */
+        localContent: String = "",
     ) {
         val toolSteps = mutableListOf<ToolStep>()
         val cardsCollected = mutableListOf<com.ethan.agent.core.model.FileCard>()
         var usage: Usage? = null
-        val contentBuilder = StringBuilder()
+        var content = localContent
         var lastFlushMs = 0L
         var firstEvent = true
         val streamStartMs = Clock.System.now().toEpochMilliseconds()
         var ttfbMs: Long? = null
         var firstContentMs: Long? = null
 
+        /**
+         * 合并一个增量 content 事件。
+         *
+         * 正常续流：重放会从 run 的开头重发整段，因此**不能**直接拼接 —— 那样会把
+         * 已经渲染的内容重复一遍（"你好" + 重放的"你好世界" = "你好你好世界"）。
+         *
+         * 判据：如果服务端这次给的片段正好接在本地已渲染内容的后面（`content` 是
+         * `incoming` 的前缀），说明是回放 —— 直接采用服务端的版本（它更权威、
+         * 且天然包含本地可能漏掉的部分）。否则才当作真正的增量追加。
+         */
+        fun appendContent(incoming: String) {
+            val current: String = content
+            content = when {
+                // 回放（含重复回放）：服务端版本覆盖本地，取更长的那份
+                incoming.startsWith(current) -> incoming
+                // 本地已超前（服务端缓冲被裁剪）：保留本地，忽略这次回放
+                current.startsWith(incoming) -> current
+                // 真正的新增量
+                else -> current + incoming
+            }
+        }
+
         fun flush(force: Boolean = false) {
             val now = Clock.System.now().toEpochMilliseconds()
             if (!force && now - lastFlushMs < 50L) return
             lastFlushMs = now
-            val content = contentBuilder.toString()
+            val snapshot = content
             _state.update { s ->
                 val msgs = s.messages.toMutableList()
-                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(content = content)
+                if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(content = snapshot)
                 s.copy(messages = msgs)
             }
         }
@@ -588,12 +719,15 @@ class ChatViewModel(
                             ),
                         )
                     }
+                    // event.content 是跨模块的 nullable 属性，编译器不做 smart cast，
+                    // 这里先落到局部 val 再用，避免跨模块的 `event.content` 不参与 smart cast
                     event.content != null -> {
+                        val chunk = event.content ?: ""
                         if (firstContentMs == null) {
                             firstContentMs = Clock.System.now().toEpochMilliseconds()
                             ttfbMs = firstContentMs!! - streamStartMs
                         }
-                        contentBuilder.append(event.content)
+                        appendContent(chunk)
                         flush()
                         if (_state.value.showScrollToBottom) {
                             _state.update { it.copy(unreadCount = it.unreadCount + 1) }

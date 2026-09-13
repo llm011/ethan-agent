@@ -39,6 +39,7 @@ import com.ethan.agent.core.model.OnboardingCompleteResponse
 import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.PollData
 import com.ethan.agent.core.model.PinnedSessionsResponse
+import com.ethan.agent.core.model.ProcedureUpdateRequest
 import com.ethan.agent.core.model.ProceduresResponse
 import com.ethan.agent.core.model.ProfileRequest
 import com.ethan.agent.core.model.ProfileResponse
@@ -68,6 +69,8 @@ import com.ethan.agent.core.model.DeleteMessageResponse
 import com.ethan.agent.core.model.FastRuleOptionsResponse
 import com.ethan.agent.core.model.FastRulesPatch
 import com.ethan.agent.core.model.FastRulesResponse
+import com.ethan.agent.core.model.AutoConsentRequest
+import com.ethan.agent.core.model.AutoConsentResponse
 import com.ethan.agent.core.model.InjectRequest
 import com.ethan.agent.core.model.InjectResponse
 import com.ethan.agent.core.model.InsightsByDateResponse
@@ -121,8 +124,11 @@ class EthanApiService(
     private val client: HttpClient,
     private val baseUrlProvider: () -> String,
 ) {
+    /** 当前配置推导出的 API 根地址（`scheme://host:port/api`）。 */
+    fun apiBaseUrl(): String = ServerUrlUtils.toApiBaseUrl(baseUrlProvider())
+
     private fun url(path: String): String {
-        val apiBase = ServerUrlUtils.toApiBaseUrl(baseUrlProvider())
+        val apiBase = apiBaseUrl()
         return "${apiBase.trimEnd('/')}/$path"
     }
 
@@ -293,6 +299,10 @@ class EthanApiService(
 
     suspend fun getProcedures(): ProceduresResponse = client.get(url("memory/procedures")).body()
 
+    suspend fun updateProcedure(id: String, body: ProcedureUpdateRequest) {
+        client.patch(url("memory/procedures/$id")) { jsonBody(body) }
+    }
+
     suspend fun deleteProcedure(id: String) {
         client.delete(url("memory/procedures/$id"))
     }
@@ -361,10 +371,11 @@ class EthanApiService(
             parameter("target_date", targetDate)
         }.body()
 
-    suspend fun getDailySummaries(domain: String? = null, limit: Int = 30): DailySummariesResponse =
+    suspend fun getDailySummaries(domain: String? = null, limit: Int = 30, offset: Int = 0): DailySummariesResponse =
         client.get(url("memory/records/summaries")) {
             parameter("domain", domain)
             parameter("limit", limit)
+            parameter("offset", offset)
         }.body()
 
     suspend fun getDailySummaryByDate(dateStr: String, domain: String? = null): DailySummariesResponse =
@@ -525,6 +536,19 @@ class EthanApiService(
 
     suspend fun injectMessage(id: String, body: InjectRequest): InjectResponse =
         client.post(url("chat/$id/inject")) { jsonBody(body) }.body()
+
+    /**
+     * 运行中切换超级权限（auto_consent）。
+     *
+     * 发起 `/api/chat` 时传的 `auto_consent` 只会写进那一刻创建的 ConsentProvider，
+     * 用户在生成过程中才点开关的话不会生效（体感是「以开始时的状态为准」）。
+     * 这个接口直接改活跃 run 的 provider 实例属性，下一次工具调用即按新策略走。
+     *
+     * 无活跃 run 时后端返回 `applied=false`（不是错误）——开关值存在本地配置里，
+     * 下一次发消息的请求体会带上 auto_consent，行为依然正确。
+     */
+    suspend fun setAutoConsent(body: AutoConsentRequest): AutoConsentResponse =
+        client.post(url("chat/auto-consent")) { jsonBody(body) }.body()
 
     // ── Settings 扩展：tool tiers / fast rules ──────────────────────────────
 
