@@ -34,6 +34,7 @@ from ethan.interface.routers import (
     models,
     plugins,
     reading,
+    releases,
     schedule,
     sessions,
     settings,
@@ -240,6 +241,7 @@ app.include_router(ui_resources.router, prefix="/api")  # /api/ui-resources — 
 app.include_router(images.router, prefix="/api")  # /api/images — image_search 下载的图片
 app.include_router(assets.router, prefix="/api")  # /api/assets — 用户上传的图片等资产
 app.include_router(files.router, prefix="/api")  # /api/files — deliver_file 交付文件的下载/预览
+app.include_router(releases.router, prefix="/api")  # /api/releases — Android APK 公开下载（302 到 CDN）
 app.include_router(browser_ws_router)  # /ws/browser, WebSocket, no prefix
 app.include_router(desktop_ws_router)  # /ws/desktop, WebSocket, no prefix
 app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{name}

@@ -165,11 +165,55 @@ jobs:
           path: app/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
-      - name: Attach release APK to GitHub Release
+      # 先算 sha256：客户端下载完会拿这个值校验，所以必须在 attach 之前生成，
+      # 让 .apk 和 .apk.sha256 在同一次 release 里一起出现。
+      - name: Compute APK sha256
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ./app/android
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          sha256sum "$APK" | awk '{print $1}' > "$APK.sha256"
+          echo "APK_PATH=$APK" >> $GITHUB_ENV
+          echo "APK_TAG=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          echo "Computed sha256 for $APK: $(cat "$APK.sha256")"
+
+      - name: Attach release APK + sha256 to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/android/app/build/outputs/apk/release/*.apk
+          files: |
+            app/android/app/build/outputs/apk/release/*.apk
+            app/android/app/build/outputs/apk/release/*.apk.sha256
           body: Android 客户端，下载 APK 安装即可。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 镜像到 Cloudflare R2（cdn.lyb.pub）。客户端的三源降级里这是第一顺位 ——
+      # GitHub 的 release-assets 域名在国内可达性差，那正是下载失败率高的根因。
+      #
+      # continue-on-error：镜像挂了**不能拖死发版**（GitHub Release 成功即算发布成功，
+      # 客户端会自动降级到自建服务端/GitHub 源）。但也正因为如此，失败必须显式喊出来，
+      # 否则会静静地少一个源而没人知道。
+      - name: Upload APK to R2 CDN
+        if: startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
+        env:
+          CDN_ENDPOINT: ${{ secrets.CDN_ENDPOINT }}
+          CDN_ACCESS_KEY: ${{ secrets.CDN_ACCESS_KEY }}
+          CDN_SECRET_KEY: ${{ secrets.CDN_SECRET_KEY }}
+          CDN_BUCKET: ${{ secrets.CDN_BUCKET }}
+          CDN_PUBLIC_URL: ${{ secrets.CDN_PUBLIC_URL }}
+          CDN_REGION: ${{ secrets.CDN_REGION }}
+        run: |
+          set -x
+          SCRIPT=ethan/defaults/skills/upload-cdn/scripts/upload_cdn.py
+          PREFIX="ethan/releases/android/${APK_TAG}"
+          python3 "$SCRIPT" "$APK_PATH" "$PREFIX/app-release.apk" || {
+            echo "::warning::R2 镜像上传失败（APK）。客户端会自动降级到自建服务端/GitHub 源，但 CDN 这个最快的源本轮不可用。"
+            exit 0
+          }
+          python3 "$SCRIPT" "${APK_PATH}.sha256" "$PREFIX/app-release.apk.sha256" || {
+            echo "::warning::R2 镜像上传失败（sha256 侧车）。缺了它客户端仍能下载，只是退化成只校验长度。"
+            exit 0
+          }
+          echo "::notice::已镜像到 R2: ${CDN_PUBLIC_URL:-https://cdn.lyb.pub}/${PREFIX}/app-release.apk"
