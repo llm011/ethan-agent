@@ -279,18 +279,14 @@ def test_list_daily_summary_dates_dedup_and_order(tmp_path):
                 memory_domain=domain, summary_text="x", structured_data={},
             ))
 
-    # 去重（3 天 × 2 domain = 6 行，但只有 3 个日期）+ 倒序
-    assert store.list_daily_summary_dates() == ["2026-08-01", "2026-07-16", "2026-07-15"]
+    # 去重（3 天 × 2 domain = 6 行，但只有 3 个日期）+ 倒序，total 同一条 SQL 里带出
+    assert store.list_daily_summary_dates() == (["2026-08-01", "2026-07-16", "2026-07-15"], 3)
     # 按 domain 过滤时，两个 domain 各自都覆盖这三天
-    assert store.list_daily_summary_dates(memory_domain="general") == [
-        "2026-08-01", "2026-07-16", "2026-07-15",
-    ]
-    # limit 生效，且截的是最新的
-    assert store.list_daily_summary_dates(limit=2) == ["2026-08-01", "2026-07-16"]
-    # count 返回去重后的真实天数，不受 limit 影响 —— 路由靠它判断是否被截断
-    assert store.count_daily_summary_dates() == 3
-    assert store.count_daily_summary_dates(memory_domain="general") == 3
-    assert store.count_daily_summary_dates(memory_domain="companion") == 3
+    assert store.list_daily_summary_dates(memory_domain="general") == (
+        ["2026-08-01", "2026-07-16", "2026-07-15"], 3,
+    )
+    # limit 生效，截的是最新的；total 仍是截断前的完整去重天数（窗口函数在 LIMIT 前求值）
+    assert store.list_daily_summary_dates(limit=2) == (["2026-08-01", "2026-07-16"], 3)
     store.close()
 
 

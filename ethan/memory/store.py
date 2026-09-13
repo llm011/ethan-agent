@@ -1119,43 +1119,42 @@ class MemoryStore:
 
     def list_daily_summary_dates(
         self, *, memory_domain: str | None = None, limit: int = DAILY_SUMMARY_DATES_MAX
-    ) -> list[str]:
-        """存在日摘要的 local_date，倒序去重。
+    ) -> tuple[list[str], int]:
+        """存在日摘要的 local_date（倒序去重），返回 `(最近 N 天, 去重总数)`。
 
-        ⚠️ 返回的是**受 [limit] 截断后的最近 N 天**，不是全集。调用方若需要判断
-        「是否还有更早的日期被截掉」，用 [count_daily_summary_dates] 对比长度；
-        不要拿本方法的返回长度当总数。
+        ⚠️ 第一个元素是**受 [limit] 截断后的最近 N 天**，不是全集。第二个元素是
+        去重后的真实天数，所以 `len(dates) < total` 即表示「还有更早的日期没返回」。
+        不要拿 `len(dates)` 当总数。
+
+        总数用同一条 SQL 的 `COUNT(*) OVER ()` 窗口函数取，而不是另发一条
+        `COUNT(DISTINCT ...)`：两条查询不在同一个事务里，中间若有日结/心跳写入一条
+        日摘要，总数和返回条数就会对不上，`truncated` 会误报或漏报。窗口函数在
+        同一次扫描里算完，没有这个缝隙，也省一条查询。
 
         给前端日历用：让「没有摘要的日子」置灰不可选。默认 [DAILY_SUMMARY_DATES_MAX]
         （≈10 年）远大于实际使用年限，正常不会截断。
 
         单独走一条 `GROUP BY` 而不是复用 `list_daily_summaries` 再过滤 —— 后者会把
         每条摘要的正文（动辄几 KB）全读进内存，而这里只要日期串。
+
+        窗口函数在 LIMIT **之前**求值，所以 total 拿到的是截断前的完整去重天数 ——
+        这正是我们要的「是否还有更早的」判据。
         """
         if memory_domain:
             rows = self._get_conn().execute("""
-                SELECT local_date FROM daily_summaries WHERE memory_domain=?
+                SELECT local_date, COUNT(*) OVER () AS total
+                FROM daily_summaries WHERE memory_domain=?
                 GROUP BY local_date ORDER BY local_date DESC LIMIT ?
             """, (memory_domain, limit)).fetchall()
         else:
             rows = self._get_conn().execute("""
-                SELECT local_date FROM daily_summaries
+                SELECT local_date, COUNT(*) OVER () AS total
+                FROM daily_summaries
                 GROUP BY local_date ORDER BY local_date DESC LIMIT ?
             """, (limit,)).fetchall()
-        return [row["local_date"] for row in rows]
-
-    def count_daily_summary_dates(self, *, memory_domain: str | None = None) -> int:
-        """有日摘要的天数（去重）。用于判断 list_daily_summary_dates 是否被 limit 截断。"""
-        if memory_domain:
-            row = self._get_conn().execute(
-                "SELECT COUNT(DISTINCT local_date) FROM daily_summaries WHERE memory_domain=?",
-                (memory_domain,),
-            ).fetchone()
-        else:
-            row = self._get_conn().execute(
-                "SELECT COUNT(DISTINCT local_date) FROM daily_summaries"
-            ).fetchone()
-        return int(row[0]) if row else 0
+        dates = [row["local_date"] for row in rows]
+        total = int(rows[0]["total"]) if rows else 0
+        return dates, total
 
     def claim_job(self, job: ConsolidationJob) -> bool:
         with self.transaction() as conn:

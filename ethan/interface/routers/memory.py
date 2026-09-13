@@ -324,13 +324,15 @@ async def list_daily_summary_dates_api(
     `dates` 被 `limit` 截断（还有更早的日期没返回）。前端据此可以提示「还有更早的」，
     而不是把更早的日子静默置灰成「没内容」。
 
+    `dates` 和 `total` 由 store 在**同一条 SQL** 里返回（`COUNT(*) OVER ()`），
+    不是两次独立查询 —— 否则中间插进一条日摘要会让 `truncated` 误报/漏报。
+
     ⚠️ 这个路由必须定义在 `/records/summaries/{date_str}` **之前**：FastAPI 按注册
     顺序匹配，否则 "dates" 会被当成 date_str 传进 `date.fromisoformat()` 直接 400。
     """
     store = _structured_store()
     try:
-        dates = store.list_daily_summary_dates(memory_domain=domain, limit=limit)
-        total = store.count_daily_summary_dates(memory_domain=domain)
+        dates, total = store.list_daily_summary_dates(memory_domain=domain, limit=limit)
         return {"dates": dates, "total": total, "truncated": total > len(dates)}
     finally:
         store.close()

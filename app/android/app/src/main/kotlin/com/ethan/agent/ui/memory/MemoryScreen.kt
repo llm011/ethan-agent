@@ -75,6 +75,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -913,15 +914,18 @@ private fun SummariesDialog(
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
     // 同一个实例跨重组复用（否则每次重组新建一个，等于重置）。
-    // 日期全集是异步到的，用 snapshotFlow 在快照感知的收集器里写入 —— 不要写成
-    // `LaunchedEffect(summaryDates) { selectable.update(summaryDates) }`：那样写入
-    // 发生在普通协程里，只能保证「关掉重开时重建 state」那条路生效；弹窗已经开着、
-    // 数据后到时格子是否重算，取决于 DatePicker 内部是快照读还是构建期一次性读，
-    // 不保证。走 snapshotFlow 后写入发生在快照观察链路上，行为确定。
-    // （同款写法见 ChatScreen.kt 的 snapshotFlow { isAtBottom }。）
+    // 日期全集是异步到的（弹窗先显示、数据后到），所以要把它同步进 selectable。
+    //
+    // ⚠️ 必须用 rememberUpdatedState 包一层，不能直接 `snapshotFlow { summaryDates }`：
+    // `summaryDates` 是普通入参而不是 Compose 的 State，snapshotFlow 只跟踪快照对象里
+    // State 的读取，读普通参数捕获不到任何东西 —— flow 只会发一次初值就不动了，
+    // 等于把「弹窗开着、数据后到」这条路彻底堵死。包成 State 之后 snapshotFlow 读的是
+    // `summaryDatesState.value`，写入走快照观察链，DatePicker 里读 selectable 的格子
+    // 才会重算。（同款写法见 ChatScreen.kt 的 snapshotFlow { isAtBottom }。）
+    val summaryDatesState = rememberUpdatedState(summaryDates)
     val selectable = remember { SummaryDatesSelectable(summaryDates) }
     LaunchedEffect(selectable) {
-        snapshotFlow { summaryDates }
+        snapshotFlow { summaryDatesState.value }
             .distinctUntilChanged()
             .collect { selectable.update(it) }
     }
