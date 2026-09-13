@@ -18,6 +18,25 @@ from typing import Any
 from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
 
+def _card_has_inline_image(card: Any) -> bool:
+    """卡片是否带内联图片数据（base64 data URI）。
+
+    这类卡片体积可达 MB 级，绝不能重复挂到 tool_steps 上。落盘为资产文件的
+    卡片 url 形如 "assets/images/..."，不算内联，可以照常挂。
+    """
+    if not isinstance(card, dict):
+        return False
+    url = card.get("url")
+    if isinstance(url, str) and url.startswith("data:"):
+        return True
+    # 兼容其他把 base64 直接放字段里的卡片形态
+    for key in ("data", "dataUrl", "b64", "base64"):
+        v = card.get(key)
+        if isinstance(v, str) and len(v) > 4096:
+            return True
+    return False
+
+
 class StreamCollector:
     def __init__(self):
         self.full: str = ""
@@ -144,9 +163,16 @@ class StreamCollector:
                 step["result_preview"] = item.result_preview or ""
                 step["result_detail"] = item.result_detail or ""
                 step["sub_steps"] = item.sub_steps or []
-                # 结构化卡片（如 web_search 结果）挂到该 step，供前端时间线直接渲染
+                # 结构化卡片（如 web_search 结果）挂到该 step，供前端时间线直接渲染。
+                # 只挂「轻量」卡片：带内联图片 base64 的卡片（file_read / image_search 的
+                # data URI）一旦也挂一份，同一份数据会同时写进 messages.cards 和
+                # tool_steps 两列，单条消息能膨胀到数 MB，前端点开会话要等好几秒。
+                # 这类卡片前端从消息级 cards 渲染即可（tool-timeline 的 fallbackCards
+                # 已覆盖 web_search 的老会话回退）。
                 if getattr(item, "cards", None):
-                    step["cards"] = item.cards
+                    light = [c for c in item.cards if not _card_has_inline_image(c)]
+                    if light:
+                        step["cards"] = light
                 # done/error 时补全 entity_type/entity_id（start 时已设，但兜底）
                 if not step.get("entity_type") and item.entity_type:
                     step["entity_type"] = item.entity_type

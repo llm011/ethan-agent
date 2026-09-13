@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ZoomIn } from "lucide-react";
 import { Lightbox, type LightboxImage } from "./lightbox";
-import { getApiUrl } from "@/lib/api-base";
+import { assetUrl, getApiUrl } from "@/lib/api-base";
 
 // 图片卡片数据结构（image_search 工具产出）
 export interface ImageCard {
@@ -21,10 +21,20 @@ interface ImageGalleryProps {
 }
 
 // 把 card 转成可访问的图片 URL：
-// - 有 local_path（download=true 模式）：转成 /api/images/<filename> 走后端 serve，
-//   避免远程 URL 403/防盗链导致的破图
-// - 无 local_path（download=false 模式）：直接用远程 URL
+// - url 是相对资产路径（file_read / 迁移落盘的 "assets/images/..."）：走 assetUrl()
+//   拼成 /api/assets/images/...（带 immutable 缓存；桌面端自动补 ?token=）
+// - 有 local_path（image_search download=true 模式）：转成 /api/images/<filename>
+// - 无以上两者（image_search download=false 模式）：直接用远程 URL
 function getImageSrc(card: ImageCard): string {
+  // 相对资产路径（file_read / 迁移落盘的 "assets/images/..."）优先，走 assetUrl()
+  if (card.url && !/^(https?:|data:|blob:)/.test(card.url)) {
+    return assetUrl(card.url);
+  }
+  // 远程直链：直接用（image_search download=false）
+  if (card.url && /^https?:/.test(card.url)) {
+    return card.url;
+  }
+  // 本地下载图（image_search download=true）：走 /api/images/<filename>
   if (card.local_path) {
     const filename = card.local_path.split("/").pop() || "";
     if (filename) {

@@ -27,6 +27,17 @@ export function revokePendingBlobUrls(files: PendingFile[]) {
   }
 }
 
+/** 从历史消息里累计 token 用量（缓存命中路径与网络加载路径共用）。 */
+export function historicUsageOf(detail: { messages: any[] }): { input: number; output: number; cache: number } {
+  return detail.messages
+    .filter((m: any) => m.role === "assistant" && m.usage)
+    .reduce((acc: any, m: any) => ({
+      input: acc.input + (m.usage.input || 0),
+      output: acc.output + (m.usage.output || 0),
+      cache: acc.cache + (m.usage.cache || 0),
+    }), { input: 0, output: 0, cache: 0 });
+}
+
 // 清洗后的占位标题：去 markdown 标记 / 命令前缀，截断 40 字
 // 与后端 _auto_title 逻辑对齐，让前端 0ms 显示可读标题
 export function placeholderTitle(text: string): string {

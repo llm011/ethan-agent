@@ -83,6 +83,10 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **Prompt Caching**
 - system prompt 分稳定层/动态层，稳定层缓存 5 分钟，token 成本降至 0.1×
 
+**会话打开速度**
+- Agent 读到的图片落盘到 `~/.ethan/assets/images/<session_id>/`，卡片只存相对路径，不再内联 base64——这正是以前点开会话要等好几秒的原因
+- 打开会话先渲染本地缓存（Web 走 IndexedDB、桌面端走 localStorage），网络结果后台覆盖；历史遗留的内联 base64 卡片在启动时一次性转成资产路径
+
 **多渠道**
 - CLI REPL、Web UI（Next.js）、**Android App**（Kotlin/Compose）、飞书（WebSocket 长连接，无需公网 IP）
 - 飞书鉴权自动引导：当依赖用户身份的调用（如 `--as user` 读群背景上下文）遇到鉴权类错误（99991663 / 99991661 / `need_user_authorization`）时，机器人会向该会话发一张红色引导卡片，指引用户执行 `lark-cli auth login --domain im` 重新授权。同一群 5 分钟内只发一次；网络/参数/not-found 等非鉴权错误不触发。
@@ -680,6 +684,11 @@ EOF
 # 2. Prompt Caching 验证
 连续发 2 条消息，查看第 2 条的 ⚡cache 数字
 若 >0 则缓存命中
+
+# 3. 会话打开速度验证
+让 Agent 读一张本地图片，再点回该会话
+DevTools Network 里 GET /sessions/{id} 的响应体应是几百 KB 量级（不是 MB）
+卡片图片走 assets/images/ 路径，而不是 data:image/png;base64 开头
 ```
 
 ### 知识库
