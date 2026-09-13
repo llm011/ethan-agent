@@ -46,14 +46,21 @@ class AndroidAppUpdater(
         onProgress: (Int) -> Unit,
     ): SharedAppUpdater.InstallResult {
         val urls = info.downloadUrls.ifEmpty { listOf(info.downloadUrl) }
-        ApkDownloadService.start(
+        val started = ApkDownloadService.start(
             context = context,
             version = info.version,
             urls = urls,
             sha256 = info.sha256,
             sizeBytes = info.sizeBytes,
         )
-        return SharedAppUpdater.InstallResult.DownloadStarted
+        // 服务没拉起来（Android 12+ 在后台启动前台服务会被拒）→ 明确回报失败。
+        // 这里返回 DownloadStarted 的话，进度永远不会从 bus 回来，
+        // 状态就卡在「下载中」不动了 —— 用户既看不到失败也没有重试入口。
+        return if (started) {
+            SharedAppUpdater.InstallResult.DownloadStarted
+        } else {
+            SharedAppUpdater.InstallResult.Failed
+        }
     }
 
     override suspend fun installDownloaded(): SharedAppUpdater.InstallResult {

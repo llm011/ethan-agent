@@ -108,7 +108,15 @@ class UpdateViewModel(
         viewModelScope.launch {
             _state.value = UpdateState.Downloading(0)
             DownloadProgressBus.update(DownloadProgressBus.DownloadStatus.Running(0))
-            when (appUpdater.downloadAndInstall(info) { /* 进度走 bus，见 init */ }) {
+            // 「交给后台服务」这一步本身也会抛：Android 12+ 在应用处于后台时启动
+            // 前台服务会抛 `ForegroundServiceStartNotAllowedException`，其他平台实现
+            // 也可能各有各的失败方式。全部兜住 —— 否则协程带着异常结束，`_state`
+            // 会永久停在 `Downloading(0)`：UI 一直显示「下载中」，用户既看不到失败
+            // 也没有重试入口。异常统一按 `Failed` 处理，走下面那条失败分支。
+            val result = runCatching {
+                appUpdater.downloadAndInstall(info) { /* 进度走 bus，见 init */ }
+            }.getOrElse { AppUpdater.InstallResult.Failed }
+            when (result) {
                 // Android：已交给后台服务，状态由 bus 驱动
                 is AppUpdater.InstallResult.DownloadStarted -> Unit
                 is AppUpdater.InstallResult.Triggered -> {

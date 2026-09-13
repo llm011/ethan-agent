@@ -114,6 +114,24 @@ class DownloadPlanTest {
         assertNull(d.nextSourceIndex, "只有一个源时不能指向越界下标")
     }
 
+    /**
+     * 回归锁：**校验没过必须换源，不能当成「已经成功」放弃整个下载**。
+     *
+     * 这正是「多源降级」被绕过的那条路径 —— 首源（CDN）返回一个长度对得上、
+     * sha256 对不上的坏包（坏缓存在 CDN 上很常见），如果这时沿用 `Success`
+     * 传给 `next()`，它会返回 `nextSourceIndex = null` 直接收工，
+     * 自建服务端和 GitHub 兜底两个源根本不会被访问，用户看到的是「所有源都失败了」。
+     */
+    @Test
+    fun `校验未通过必须换源_不能当成成功而放弃`() {
+        val outcome = DownloadPlan.onVerificationFailed()
+        assertTrue(outcome is AttemptOutcome.Fatal, "校验失败是 Fatal，不是 Success/Partial")
+
+        val d = next(sourceIndex = 0, attempts = 1, sourceCount = 3, outcome = outcome)
+        assertEquals(1, d.nextSourceIndex, "必须换到下一个源")
+        assertEquals(0, d.resumeFrom, "坏包不能续传，换源一律从头下")
+    }
+
     // ── classifyCode ────────────────────────────────────────────────────────
 
     @Test

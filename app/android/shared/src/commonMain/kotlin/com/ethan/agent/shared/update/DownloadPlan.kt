@@ -60,6 +60,19 @@ object DownloadPlan {
      *
      * @param attemptsOnSource 已经失败的次数（调用方在失败后 +1 再传进来）。
      */
+    /**
+     * 下载器把包下完了、但**完整性校验没过**时该上报的结果。
+     *
+     * 单独抽成函数（而不是在下载器里就地 `AttemptOutcome.Fatal(...)`）是为了让这条
+     * 语义可测 —— 这里踩过一次真实的坑：校验失败时如果沿用 `Success` 继续往下传，
+     * `next()` 会按「已经成功」直接返回 `nextSourceIndex = null` 放弃整个下载，
+     * 后面两个源（自建服务端 / GitHub 兜底）根本不会被访问。表现是首源返回一个
+     * 「长度对得上、sha256 对不上」的坏包（CDN 坏缓存）时用户看到「所有源都失败了」，
+     * 正好把多源降级绕过去。回归测试见 `DownloadPlanTest`。
+     */
+    fun onVerificationFailed(reason: String = "长度或 sha256 校验未通过"): AttemptOutcome =
+        AttemptOutcome.Fatal(reason)
+
     fun next(
         sourceIndex: Int,
         attemptsOnSource: Int,

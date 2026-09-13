@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -20,11 +21,13 @@ import com.ethan.agent.MainActivity
 import com.ethan.agent.R
 import com.ethan.agent.core.datastore.AppConfigStore
 import com.ethan.agent.shared.update.DownloadProgressBus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -43,6 +46,7 @@ import kotlinx.coroutines.launch
 class ApkDownloadService : Service() {
 
     companion object {
+        private const val TAG = "ApkDownloadService"
         private const val CHANNEL_ID = "apk_download"
         /** 稳定 id：下载过程中反复 notify 是「更新同一条」，不会堆一屏通知。 */
         private const val NOTIFICATION_ID = 0xE7A0
@@ -61,23 +65,40 @@ class ApkDownloadService : Service() {
          */
         private const val FAILED_TEXT = "下载失败：已尝试所有下载源，请检查网络后重试"
 
+        /**
+         * 拉起下载服务。
+         *
+         * @return 是否成功把服务启动起来。**必须自己接住异常并回报**：
+         *   Android 12+ 在应用处于后台时 `startForegroundService` 会抛
+         *   `ForegroundServiceStartNotAllowedException`。让它逃出去的话调用方
+         *   拿不到任何回执，更新状态会永远停在「下载中」—— 用户既看不到失败，
+         *   也没有重试入口。
+         */
         fun start(
             context: Context,
             version: String,
             urls: List<String>,
             sha256: String?,
             sizeBytes: Long,
-        ) {
+        ): Boolean {
             val intent = Intent(context, ApkDownloadService::class.java).apply {
                 putExtra(EXTRA_VERSION, version)
                 putStringArrayListExtra(EXTRA_URLS, ArrayList(urls))
                 putExtra(EXTRA_SHA256, sha256)
                 putExtra(EXTRA_SIZE, sizeBytes)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+                true
+            } catch (e: Exception) {
+                // 后台启动前台服务被系统拒绝（Android 12+），或服务被禁用、
+                // 进程处于受限状态等。都不该让进程崩掉，回报 false 交给上层提示。
+                Log.w(TAG, "无法启动下载服务", e)
+                false
             }
         }
 
@@ -119,31 +140,52 @@ class ApkDownloadService : Service() {
         // 重复 start（用户连点）时先取消上一次，避免两个协程同时写同一个 `.part`
         downloadJob?.cancel()
         downloadJob = scope.launch {
-            DownloadProgressBus.update(DownloadProgressBus.DownloadStatus.Running(0))
+            try {
+                DownloadProgressBus.update(DownloadProgressBus.DownloadStatus.Running(0))
 
-            val downloader = ApkDownloader(applicationContext)
-            val file = downloader.download(
-                urls = urls,
-                expectedSha256 = sha256,
-                expectedSize = sizeBytes,
-                onProgress = { progress ->
-                    DownloadProgressBus.update(DownloadProgressBus.DownloadStatus.Running(progress))
-                    notifyProgress(progress)
-                },
-            )
+                val downloader = ApkDownloader(applicationContext)
+                val file = downloader.download(
+                    urls = urls,
+                    expectedSha256 = sha256,
+                    expectedSize = sizeBytes,
+                    onProgress = { progress ->
+                        DownloadProgressBus.update(DownloadProgressBus.DownloadStatus.Running(progress))
+                        notifyProgress(progress)
+                    },
+                )
 
-            if (file == null) {
+                if (file == null) {
+                    DownloadProgressBus.update(
+                        DownloadProgressBus.DownloadStatus.Failed(FAILED_TEXT)
+                    )
+                    notifyFailed()
+                } else {
+                    DownloadProgressBus.update(DownloadProgressBus.DownloadStatus.Downloaded)
+                    notifyDownloaded()
+                }
+            } catch (e: CancellationException) {
+                // 用户连点重试 / 服务销毁：不是「下载失败」，别报错。
+                // 收尾交给 finally，取消也要走同一条路径。
+                throw e
+            } catch (e: Exception) {
+                // 以前这里没有兜底：非 IOException 的异常会从协程逃出去，
+                // 下面的 stopForeground/stopSelf 不执行，通知栏就永远挂着
+                // 「准备中…」或停在某个进度上，用户以为还在下载。
+                Log.w(TAG, "下载过程中出现未预期异常", e)
                 DownloadProgressBus.update(
                     DownloadProgressBus.DownloadStatus.Failed(FAILED_TEXT)
                 )
                 notifyFailed()
-            } else {
-                DownloadProgressBus.update(DownloadProgressBus.DownloadStatus.Downloaded)
-                notifyDownloaded()
+            } finally {
+                // 无论正常结束、异常还是取消，都要把前台状态摘掉再停服务。
+                // 例外：被 cancel 说明有新的下载接替上来（用户连点），
+                // 这时不能收尾 —— 否则会把新一次下载的前台状态一起停掉。
+                if (isActive) {
+                    // 下载结束就退到后台 —— APK 已在磁盘上，安装由 Activity 触发。
+                    stopForegroundCompat()
+                    stopSelf()
+                }
             }
-            // 下载结束就退到后台 —— APK 已在磁盘上，安装由 Activity 触发。
-            stopForegroundCompat()
-            stopSelf()
         }
 
         return START_NOT_STICKY

@@ -108,7 +108,9 @@ internal class ApkDownloader(
                 etagFile.delete()
             }
 
-            val outcome = try {
+            // `outcome` 要能在校验失败时被改写：`Success` 只代表「HTTP 层面下完了」，
+            // 校验没过说明这个包是坏的，得按 `Fatal` 上报才能触发换源。
+            var outcome: AttemptOutcome = try {
                 attempt(
                     url = url,
                     partFile = partFile,
@@ -142,7 +144,15 @@ internal class ApkDownloader(
                 }
                 // 校验没过：文件是坏的（截断 / CDN 坏缓存 / 半截拼包），
                 // 重试同一个源没意义，删掉重来。
+                //
+                // ⚠️ **必须按 Fatal 上报，不能继续顶着 Success 往下走**：
+                // `DownloadPlan.next()` 对 Success 的语义是「已经成功、不必再做什么」，
+                // 会直接返回 `nextSourceIndex = null` 让整个下载放弃 ——
+                // 后面两个源（自建服务端 / GitHub 兜底）根本不会被访问。
+                // 表现就是首源返回了一个「长度对得上、sha256 对不上」的坏包时，
+                // 用户看到「所有源都失败了」，正是多源降级要解决的问题。
                 partFile.delete()
+                outcome = DownloadPlan.onVerificationFailed()
             }
 
             attempts += 1
