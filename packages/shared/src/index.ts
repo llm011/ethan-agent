@@ -2,4 +2,5 @@
 // Used by both web and desktop, no "use client" directive
 export * from './lib/utils';
 export * from './lib/reading';
+export * from './lib/memory-paging';
 export * from './chat/history';
