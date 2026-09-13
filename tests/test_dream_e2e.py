@@ -239,8 +239,9 @@ async def test_dream_e2e_get_all_memories_filters_fact_sync(isolated_fs):
 
     # get_memories_by_date 按 today 过滤
     by_date = await get_memories_by_date(today)
-    assert len(by_date) == 1
-    assert by_date[0]["metadata"]["type"] == "error"
+    assert by_date["total"] == 1
+    assert len(by_date["items"]) == 1
+    assert by_date["items"][0]["metadata"]["type"] == "error"
 
 
 async def test_dream_e2e_multiple_insights_all_vector_only(isolated_fs):

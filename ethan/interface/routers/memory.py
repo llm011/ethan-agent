@@ -47,14 +47,34 @@ def _procedure_store(user_id: str):
     return ProcedureStore(path=user_procedures_path())
 
 
+# facts 页可见的 status（forgotten/expired 不展示，旧语义里删除即消失）
+VISIBLE_FACT_STATUSES = ("active", "superseded")
+
+
 @router.get("/facts")
-async def get_facts(user_id: str = Depends(verify_token)):
+async def get_facts(
+    limit: int = Query(30, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user_id: str = Depends(verify_token),
+):
+    """分页获取事实。
+
+    **status 过滤必须下推到 SQL，然后才 LIMIT/OFFSET。** 早先是
+    `list_memories(limit=1000)` 拉回来再在 Python 里 `status in (...)`，那是
+    「先取 1000 再过滤」—— 返回条数与 limit 无关，翻页会静默漏数据。现在
+    `statuses` 走 `IN (...)`，`total` 与 `items` 用同一套过滤，两者必然自洽。
+    """
     store = _memory_store()
     try:
-        records = store.list_memories(memory_domain="general", limit=1000)
-        # forgotten/expired 不在 facts 页展示（旧语义里删除即消失）
-        visible = [m for m in records if m.status in ("active", "superseded")]
-        return {"facts": [_record_to_fact(m) for m in visible]}
+        filters = {"memory_domain": "general", "status": list(VISIBLE_FACT_STATUSES)}
+        total = store.count_memories(**filters)
+        records = store.list_memories(**filters, limit=limit, offset=offset)
+        return {
+            "facts": [_record_to_fact(m) for m in records],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     finally:
         store.close()
 
@@ -103,11 +123,25 @@ async def delete_episode(episode_id: str, user_id: str = Depends(verify_token)):
 
 @router.get("/procedures")
 async def list_procedures(user_id: str = Depends(verify_token)):
+    """全量返回行为准则。
+
+    **这里刻意不做 offset 分页**（前端「流程」tab 同理），原因有两条，别当遗漏补上：
+
+    1. `id` 是 `enumerate` 出来的**位置下标**（`Procedure` 没有稳定标识），而
+       `PATCH`/`DELETE` 也按位置操作（`store._procedures.pop(idx)`）。列表一旦在中途
+       被删改，后续所有下标整体前移，分页边界就会漏读/重复 —— 更糟的是客户端会拿着
+       陈旧下标去改**另一条**准则。`rule` 也当不了 key，它正是要被改的字段。
+    2. 这个列表被 `build_context()` **整份注入每一次 system pro​mpt**，语义上就该短。
+       它长到需要分页，是另一个问题（该治的是准则本身，而不是给列表加分页）。
+
+    要真给流程加分页，正确前置是先给 `Procedure` 加稳定 `uuid` 并迁移存量 JSON，
+    那是独立的一步。
+    """
     store = _procedure_store(user_id)
     return {"procedures": [
         {"id": str(i), "rule": p.rule, "context": p.context, "hit_count": p.hit_count, "created_at": p.created_at}
         for i, p in enumerate(store._procedures)
-    ]}
+    ], "total": store.count()}
 
 
 @router.patch("/procedures/{proc_id}")
@@ -161,15 +195,19 @@ async def list_insights(
 
 
 @router.get("/insights/date/{date_str}")
-async def get_insights_by_date(date_str: str, user_id: str = Depends(verify_token)):
-    """获取指定日期沉淀的记忆。"""
+async def get_insights_by_date(
+    date_str: str,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user_id: str = Depends(verify_token),
+):
+    """分页获取指定日期沉淀的记忆（形状与 /insights 对齐）。"""
     from ethan.memory.daily_consolidation import get_memories_by_date
     try:
         d = date.fromisoformat(date_str)
     except ValueError:
         raise HTTPException(400, "Invalid date format, use YYYY-MM-DD")
-    items = await get_memories_by_date(d)
-    return {"date": date_str, "items": items}
+    return await get_memories_by_date(d, limit=limit, offset=offset)
 
 
 @router.post("/consolidate")
@@ -370,11 +408,18 @@ async def list_records(
         memory_domain = domain
         if memory_domain is None:
             memory_domain = "general"
-        records = store.list_memories(
-            memory_type=type, status=status, memory_domain=memory_domain,
-            limit=limit, offset=offset,
-        )
-        return {"items": [_record_to_api(r).model_dump() for r in records]}
+        # `type` 支持逗号分隔的多值（Web 的「决定与约定」tab 映射 decision+relationship）。
+        # 多值走**一次请求、一个 offset**，避免多 type 各分各页导致「两半各自还有下一页」。
+        memory_types = [t for t in (type or "").split(",") if t] or None
+        filters = {"memory_type": memory_types, "status": status, "memory_domain": memory_domain}
+        total = store.count_memories(**filters)
+        records = store.list_memories(**filters, limit=limit, offset=offset)
+        return {
+            "items": [_record_to_api(r).model_dump() for r in records],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     finally:
         store.close()
 

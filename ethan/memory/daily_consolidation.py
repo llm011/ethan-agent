@@ -292,17 +292,24 @@ async def get_all_memories(limit: int = 20, offset: int = 0) -> dict:
         store.close()
 
 
-async def get_memories_by_date(d: date) -> list[dict]:
-    """获取某日沉淀的记忆，过滤掉 fact_sync 同步条目。"""
+async def get_memories_by_date(d: date, limit: int = 20, offset: int = 0) -> dict:
+    """分页获取某日沉淀的记忆（过滤掉 fact_sync 同步条目）。
+
+    返回形状与 `get_all_memories` 对齐（`total/items/limit/offset` + `date`），
+    前端两条分支就能共用同一套分页逻辑。
+    """
     from ethan.memory.vector_store import VectorStore
 
     store = VectorStore(db_path=_memory_db_path())
     try:
-        return store.list_items(
+        day = d.isoformat()
+        total = store.count_items(exclude_types=["fact_sync", "memory"], date=day)
+        items = store.list_items(
             exclude_types=["fact_sync", "memory"],
-            date=d.isoformat(),
-            limit=100,
-            offset=0,
+            date=day,
+            limit=limit,
+            offset=offset,
         )
+        return {"date": day, "total": total, "items": items, "limit": limit, "offset": offset}
     finally:
         store.close()
