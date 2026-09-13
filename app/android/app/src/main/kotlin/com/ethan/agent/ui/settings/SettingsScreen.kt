@@ -67,6 +67,7 @@ import androidx.fragment.app.FragmentActivity
 import com.ethan.agent.auth.BiometricLockManager
 import com.ethan.agent.core.model.AgentSettings
 import com.ethan.agent.core.model.KnowledgeValidateRequest
+import com.ethan.agent.core.model.ModelEntry
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemSettings
 import com.ethan.agent.ui.components.EthanCard
@@ -78,6 +79,8 @@ import com.ethan.agent.ui.components.EthanScrollableTabBar
 import com.ethan.agent.ui.components.EthanTopBar
 import com.ethan.agent.ui.components.EthanScaffold
 import com.ethan.agent.ui.components.LoadingBox
+import com.ethan.agent.ui.components.ModelDropdown
+import com.ethan.agent.ui.components.ModelDropdownValueMode
 import com.ethan.agent.ui.components.SnackbarContainer
 import com.ethan.agent.ui.components.StatusSuccess
 import com.ethan.agent.ui.theme.EthanThemeId
@@ -231,7 +234,7 @@ fun SettingsScreen(
                         SettingsTab.General -> {
                             if (state.isLoading && state.agentSettings == null) LoadingBox()
                             else state.agentSettings?.let {
-                                GeneralTab(it, state.themeId, state.appLockEnabled, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate, onSetAppLock, onClearCache)
+                                GeneralTab(it, state.models, state.themeId, state.appLockEnabled, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate, onSetAppLock, onClearCache)
                             }
                         }
                         SettingsTab.Providers -> {
@@ -371,6 +374,7 @@ private fun ThemePicker(currentThemeId: String, onSetTheme: (String) -> Unit) {
 @Composable
 private fun GeneralTab(
     settings: AgentSettings,
+    models: List<ModelEntry>,
     themeId: String,
     appLockEnabled: Boolean,
     onUpdate: (AgentSettings) -> Unit,
@@ -383,8 +387,28 @@ private fun GeneralTab(
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             OutlinedTextField(settings.agentName, { onUpdate(settings.copy(agentName = it)) }, label = { Text("Agent 名称") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-            OutlinedTextField(settings.defaultModel, { onUpdate(settings.copy(defaultModel = it)) }, label = { Text("默认模型") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-            OutlinedTextField(settings.liteModel, { onUpdate(settings.copy(liteModel = it)) }, label = { Text("轻量模型") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
+            // 模型名不能手敲：裸 id 打错一个字符就是运行时 404，用户也记不住
+            // `ep-20251218165528-tt2hm` 这种机器 ID。
+            //
+            // valueMode = Id：后端 config.defaults.model / lite_model 存的是**裸 id**
+            // （`create_provider(cfg.defaults.model)` 直接拿它建 provider），不能存
+            // provider/id 复合值。这与对话页 selectedModel 用 fullId 是有意的差异。
+            ModelDropdown(
+                models = models,
+                value = settings.defaultModel,
+                onValueChange = { onUpdate(settings.copy(defaultModel = it)) },
+                label = "默认模型",
+                valueMode = ModelDropdownValueMode.Id,
+            )
+            ModelDropdown(
+                models = models,
+                value = settings.liteModel,
+                onValueChange = { onUpdate(settings.copy(liteModel = it)) },
+                label = "轻量模型（可选）",
+                valueMode = ModelDropdownValueMode.Id,
+                allowEmpty = true,
+                emptyLabel = "留空（自动推断）",
+            )
             OutlinedTextField(settings.language, { onUpdate(settings.copy(language = it)) }, label = { Text("语言 (zh/en)") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("心跳")

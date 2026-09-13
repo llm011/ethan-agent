@@ -11,6 +11,7 @@ import com.ethan.agent.core.model.FastRulesPatch
 import com.ethan.agent.core.model.FastRulesResponse
 import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.LarkDepsStatus
+import com.ethan.agent.core.model.ModelEntry
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemPromptPreview
 import com.ethan.agent.core.model.SystemSettings
@@ -38,6 +39,8 @@ data class SettingsUiState(
     val serverVersion: String? = null,
     val agentSettings: AgentSettings? = null,
     val providers: Map<String, ProviderConfig> = emptyMap(),
+    /** 可选模型列表 —— 通用 tab 的「默认模型 / 轻量模型」下拉框用（与对话页同源）。 */
+    val models: List<ModelEntry> = emptyList(),
     val systemSettings: SystemSettings? = null,
     val profile: String = "",
     val channels: List<ChannelInfo> = emptyList(),
@@ -121,6 +124,16 @@ class SettingsViewModel(
                 try {
                     repository.cachedSystemSettings().collect { system ->
                         _state.update { it.copy(systemSettings = system) }
+                    }
+                } catch (_: Exception) { }
+            }
+            // 「默认模型 / 轻量模型」下拉框的候选。与对话页同源（cachedModels），
+            // 拿不到就保持空列表 —— 下拉框会显示「暂无模型」，而不是让用户对着一个
+            // 只能盲敲裸 id 的输入框。
+            launch {
+                try {
+                    repository.cachedModels().collect { models ->
+                        _state.update { it.copy(models = models) }
                     }
                 } catch (_: Exception) { }
             }
