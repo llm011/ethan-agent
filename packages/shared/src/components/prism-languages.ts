@@ -1,4 +1,8 @@
-import { PrismLight } from "react-syntax-highlighter";
+// 从**子路径**导入，不要走包根入口（`from "react-syntax-highlighter"`）：
+// 根入口的 barrel 同时 re-export 了 `Prism`（全量 ~300 种语言），那样瘦身就得指望
+// 打包器把 `refractor/all` 摇掉——webpack 能摇，但不保证所有消费端（比如 desktop 的
+// vite/rollup、vitest）行为一致。直接引子路径后「只有白名单进包」是结构上成立的。
+import PrismLight from "react-syntax-highlighter/dist/esm/prism-light";
 
 // 代码高亮的语言白名单 —— 全仓库**只在这里**注册一次。
 //
@@ -37,40 +41,53 @@ import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
 import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
 import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
 
-/** 注册的白名单语言（含常见别名，如 ```sh / ```py / ```yml / ```html）。 */
-export const PRISM_LANGUAGES: Record<string, unknown> = {
+/**
+ * 注册的白名单语言。
+ *
+ * key 只作可读性用途：真正决定注册名的是 grammar 自带的 `displayName` ——
+ * `PrismLight.registerLanguage(name, lang)` 会把 name 参数**丢掉**
+ * （实现就是 `refractor.register(lang)`，只认 `lang.displayName` 和 `lang.aliases`）。
+ * 所以想加别名不能在这里加键，见下面的 `PRISM_ALIASES`。
+ */
+export const PRISM_LANGUAGES: Record<string, { displayName: string }> = {
   bash,
-  sh: bash,
-  shell: bash,
   c,
   cpp,
-  "c++": cpp,
   css,
   diff,
   go,
-  golang: go,
   java,
   javascript,
-  js: javascript,
   json,
   jsx,
   kotlin,
-  kt: kotlin,
   markdown,
-  md: markdown,
   markup,
-  html: markup,
-  xml: markup,
   python,
-  py: python,
   rust,
-  rs: rust,
   sql,
   tsx,
   typescript,
-  ts: typescript,
   yaml,
-  yml: yaml,
+};
+
+/**
+ * 需要**显式**注册的别名。
+ *
+ * 为什么只有两条：注册主语言时，grammar 自带的 `aliases` 已经跟着一起注册了 ——
+ * `bash`→`sh`/`shell`、`javascript`→`js`、`kotlin`→`kt`、`markdown`→`md`、
+ * `markup`→`html`/`xml`、`python`→`py`、`typescript`→`ts`、`yaml`→`yml`，
+ * 这些不用管。而 ```golang / ```rs 这两个写法很常见，grammar 里却没有，
+ * 只能靠 `alias()` 补上。
+ *
+ * 漏了的后果是**静默**降级：fence 的语言是 `markdown.tsx` 里用
+ * `/language-(\w+)/` 原样抠出来的，`golang` / `rs` 找不到就退化成纯文本
+ * （不报错、行号和复制按钮都还在，只有高亮没了），肉眼和 review 都看不出来。
+ * 别删。
+ */
+const PRISM_ALIASES: Record<string, string[]> = {
+  go: ["golang"],
+  rust: ["rs"],
 };
 
 let registered = false;
@@ -84,10 +101,12 @@ let registered = false;
 export function registerPrismLanguages() {
   if (!registered) {
     registered = true;
-    for (const [name, lang] of Object.entries(PRISM_LANGUAGES)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      PrismLight.registerLanguage(name, lang as any);
+    for (const lang of Object.values(PRISM_LANGUAGES)) {
+      // 第一个参数会被 refractor 丢掉，传 displayName 只是为了让读的人不误解。
+      PrismLight.registerLanguage(lang.displayName, lang);
     }
+    // 必须在上面的 register 之后：alias 只是把语言表里的引用再挂一份。
+    PrismLight.alias(PRISM_ALIASES);
   }
   return PrismLight;
 }
