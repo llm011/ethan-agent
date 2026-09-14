@@ -53,7 +53,7 @@ import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/ch
 import { AskUserCard, type AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 import { WaitForUserCard, type WaitForUserRequest } from "@ethan/shared/chat/wait-for-user-card";
 import { placeholderTitle, mapDetailMessages, historicUsageOf, isFirstQuerySignificant, pendingFileToImagePayload, revokePendingBlobUrls } from "@/components/chat/chat-helpers";
-import { consumeStream, type ConsumeStreamActions } from "@/components/chat/use-chat-stream";
+import { consumeStream } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
 import { usePreview } from "@/components/preview-panel/preview-context";
@@ -108,11 +108,17 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     displayedSessionRef.current = routeSessionId;
   }
 
-  /** 生成「该会话是否仍是当前显示会话」的判定函数，供 consumeStream 丢弃过期写入。 */
+  /**
+   * 生成「该会话是否仍是当前显示会话」的判定函数，供 consumeStream 丢弃过期写入。
+   *
+   * 注意：流的 sessionId 目前**总是非空**（handleSend 先 createSession 拿 id 再启动流，
+   * 续跑 / 恢复也都带 id），所以下面的 null 分支只是防御 —— 「新会话还没有 id」那一帧
+   * 靠 handleSend 里 `displayedSessionRef.current = sessionId` 的显式指派兜住，
+   * 那句是隐性的硬依赖，别删。
+   */
   const sessionActiveChecker = useCallback((sessionId: string | null) => () => {
     const cur = displayedSessionRef.current;
     if (sessionId) return cur === sessionId;
-    // 流跑在「新会话」上（尚无 id）：只要用户没有切到某个具体会话，就算仍活跃。
     return !cur;
   }, []);
 
@@ -432,14 +438,6 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const justFinishedRef = useRef<string | null>(null);
-
-  // 构建 consumeStream 所需的 actions 对象
-  const getStreamActions = (): ConsumeStreamActions => ({
-    setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-    setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
-    activeSession,
-    isSessionActive: sessionActiveChecker(activeSession),
-  });
 
   // Load session when route param changes
   useEffect(() => {

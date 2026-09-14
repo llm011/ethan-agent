@@ -181,3 +181,80 @@ describe("consumeStream 会话守卫（串台回归）", () => {
     expect(msgs.map((m) => m.content ?? "").join("")).toContain("正常内容");
   });
 });
+
+/**
+ * 同一类串台的其它出口：标题 / 用量 / 补充信息同为「按会话展示」的状态。
+ * 只守卫消息列表是不够的 —— 旧流 done 事件里的标题、token 用量会写到当前显示的会话上，
+ * injected_* 会把上一个会话的待处理信息插进当前会话的待处理区。
+ */
+describe("consumeStream 会话守卫（标题 / 用量 / 补充信息）", () => {
+  /** 先让流吐一个 chunk，切走会话（isSessionActive 转 false），再吐 tail 里的事件。 */
+  async function runSwitchAway(tail: StreamChunk[]): Promise<ConsumeStreamActions> {
+    const actions = mockActions();
+    let active = true;
+    actions.isSessionActive = () => active;
+
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    async function* gated(): AsyncGenerator<StreamChunk> {
+      yield { content: "A-第一段" };
+      await gate;
+      for (const c of tail) yield c;
+    }
+
+    const p = consumeStream(gated(), [], actions);
+    await new Promise((r) => setTimeout(r, 0));
+    active = false; // 用户切到会话 B
+    release();
+    await p;
+    return actions;
+  }
+
+  it("切走后，done 里的标题 / 用量不再写到当前会话", async () => {
+    const actions = await runSwitchAway([
+      { done: true, usage: { input: 100, output: 50, cache: 0 }, title: "A 的标题" },
+    ]);
+
+    expect(actions.setSessionTitle).not.toHaveBeenCalled();
+    expect(actions.setSessionUsage).not.toHaveBeenCalled();
+  });
+
+  it("切走后，补充信息的增删不再动当前会话的待处理区", async () => {
+    const actions = await runSwitchAway([
+      { injected_added: { id: "i1", content: "A 的补充信息" } },
+      { injected_removed: "i2" },
+    ]);
+
+    expect(actions.setPendingInjected).not.toHaveBeenCalled();
+  });
+
+  it("切走后，标题仍要通知侧边栏（事件按会话 id 定位，不能一起丢掉）", async () => {
+    const seen: Array<{ sessionId?: string; title?: string }> = [];
+    const onTitle = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener("session:title-updated", onTitle);
+    try {
+      await runSwitchAway([{ done: true, usage: { input: 1, output: 1, cache: 0 }, title: "A 的标题" }]);
+    } finally {
+      window.removeEventListener("session:title-updated", onTitle);
+    }
+
+    expect(seen).toContainEqual({ sessionId: "test-session", title: "A 的标题" });
+  });
+
+  it("会话仍活跃时，标题 / 用量 / 补充信息照常写入（守卫不误伤）", async () => {
+    const actions = mockActions();
+
+    await consumeStream(
+      chunksToStream([
+        { injected_added: { id: "i1", content: "补充信息" } },
+        { done: true, usage: { input: 1, output: 2, cache: 0 }, title: "标题" },
+      ]),
+      [],
+      actions,
+    );
+
+    expect(actions.setSessionTitle).toHaveBeenCalledWith("标题");
+    expect(actions.setSessionUsage).toHaveBeenCalled();
+    expect(actions.setPendingInjected).toHaveBeenCalled();
+  });
+});
