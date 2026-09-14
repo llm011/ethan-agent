@@ -640,8 +640,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (!prompt) return;
     const timer = setTimeout(() => {
       try { sessionStorage.removeItem("ethan:pending-prompt"); } catch {}
-      // 清掉 hash 里的 query（replaceState 不触发 hashchange，不会引发额外导航）
-      if (hashQuery) window.history.replaceState(null, "", hashQuery);
+      // 清掉 hash 里的 query。用 router 导航而不是 window.history.replaceState：
+      // 后者只改地址栏、不更新 router，会让 router 的 location.search 停在 ?q=...
+      // 而真实 URL 已经没了（同类失步问题，见上面创建会话处）。replace:true 不产生
+      // 额外历史项，行为和原 replaceState 等价 —— 但 router 状态同步。
+      // 这里路径不变、只是去掉 query，所以不会触发会话重载。
+      if (hashQuery) navigate(hashQuery, { replace: true });
       handleSendRef.current(prompt);
     }, 50);
     return () => clearTimeout(timer);
@@ -840,7 +844,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       await handleCommand(trimmed, {
         setMessages, setActiveSession, setSessionTitle,
         setSessionUsage, setPendingFiles, setQuote, setStreaming,
-        selectedModel, mode, activeSession,
+        selectedModel, mode, activeSession, navigate,
       });
       return;
     }
@@ -871,7 +875,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             renameSession(s.id, pTitle).catch(() => { /* 失败静默忽略，后端稍后会补 */ });
           }
           justFinishedRef.current = s.id;
-          window.history.replaceState(null, "", `/chat/${s.id}/`);
+          // 用 router 导航（replace 语义）而不是 window.history.replaceState：
+          // HashRouter 的 history 是内部维护的，replaceState 直接改 URL 会让 Router
+          // 的 location 与真实 URL 失步 —— 之后点「+」navigate 到它以为自己已在的位置，
+          // 就成了空操作（「点 + 没反应」的根因）。replace:true 不产生额外历史项，
+          // 行为与原来的 replaceState 等价，但 Router 状态同步。
+          // justFinishedRef 已置为 s.id：line ~425 的 effect 会据此跳过这次重载，
+          // 不会因为 initialSessionId 变化而重复拉会话。
+          navigate(`/chat/${s.id}`, { replace: true });
         } catch (e) {
           setMessages(prev => [...prev, {
             role: "assistant",

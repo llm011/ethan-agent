@@ -36,6 +36,26 @@ Ethan 提供多种交互方式，适应不同场景：
 | 启动 | 浏览器输入 URL | 双击应用图标 |
 | 自动启动 | 需配置 launchd | 系统登录项 |
 
+### 路由
+
+桌面端用 `react-router-dom` 的 `HashRouter`（Tauri WebView 里没有服务端路由），路由表在
+`desktop/src/App.tsx`，与 Web 的路径一一对应（`/chat`、`/chat/:sessionId`、`/memory`、
+`/knowledge`、`/schedule`、`/skills`、`/sessions`、`/settings`、`/channels`、`/logs`、`/docs`）。
+
+| 路径 | 功能 |
+|------|------|
+| `/chat` | 新建对话（默认落地页） |
+| `/chat/new` | 「开一个新会话」的虚拟路由，把字面量 `"new"` 映射成空会话（`initialSessionId=undefined`），对齐 Web 的 `chat/[id]` 里 `id !== "new"` 的写法 |
+| `/chat/:sessionId` | 指定会话的对话界面 |
+
+⚠️ **不要用 `window.history.replaceState` 改 URL**。`HashRouter` 的 history 是内部维护的，
+`replaceState` 只改浏览器地址栏、不触发 router 更新，会让 router 内部 location 与真实 URL
+失步。典型症状：在新会话首次发送时懒创建 session 后 `replaceState` 改 URL，之后点「+」执行
+`navigate("/chat")`，router 认为自己已经在 `/chat` → 导航成为空操作，界面无响应。
+需要「替换当前历史项」的语义时用 `navigate(path, { replace: true })`（等价于 replaceState，
+但 router 状态同步）。同理，**开新会话必须导航到 `/chat/new` 而不是 `/chat`**——只有前者在
+「已经在一个会话里」时仍是一次真实跳转。
+
 ### 构建产物
 
 | 平台 | 文件 | 说明 |

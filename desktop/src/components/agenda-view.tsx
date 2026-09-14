@@ -26,6 +26,7 @@ import { Input } from "@ethan/shared/ui/input";
 import { Textarea } from "@ethan/shared/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@ethan/shared/ui/select";
 import { addHandler, removeHandler } from "@/lib/desktop-ws";
+import { HeaderFillet } from "@/components/header-fillet";
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -569,10 +570,10 @@ export function AgendaView() {
   const startBreakdownChat = (ev: AgendaEvent) => {
     try {
       sessionStorage.setItem(PENDING_PROMPT_KEY, buildBreakdownPrompt(ev));
-      navigate("/chat");
+      navigate("/chat/new");
     } catch {
       // sessionStorage 不可用（极端情况）时降级为 URL 参数
-      navigate(`/chat?q=${encodeURIComponent(buildBreakdownPrompt(ev))}`);
+      navigate(`/chat/new?q=${encodeURIComponent(buildBreakdownPrompt(ev))}`);
     }
   };
 
@@ -614,7 +615,8 @@ export function AgendaView() {
         </DialogContent>
       </Dialog>
 
-      <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
+      <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 justify-between shrink-0">
+        <HeaderFillet />
         <h1 className="font-semibold text-lg">日程 (Agenda)</h1>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setDialogState({ open: true, editing: null })}>

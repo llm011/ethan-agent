@@ -4,6 +4,7 @@ import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List,
 import { Clock, Database, CalendarDays } from "lucide-react";
 import { Ellipsis, CircleCheck } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import { activeSessionIdFromPathname } from "@ethan/shared/lib/routes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -113,8 +114,9 @@ export function Sidebar() {
     return 0;
   });
 
-  // Derive active session id from pathname: /chat/[id]
-  const activeSessionId = pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
+  // Derive active session id from pathname: /chat/[id]（规则见 shared/lib/routes.ts，
+  // 会排除虚拟路由 /chat/new，避免把 "new" 当成会话 id 去 markSessionRead）
+  const activeSessionId = activeSessionIdFromPathname(pathname);
 
   // 会话加载完成后清除 loading 指示
   useEffect(() => {
@@ -285,7 +287,9 @@ export function Sidebar() {
   }, [sessionSearch]);
 
   const handleNewSession = () => {
-    navigate("/chat");
+    // 走 /chat/new 虚拟路由（而不是 "/chat"）：必须是和当前 location 不同的路径，
+    // 否则「已经在一个会话里再点 +」时 navigate 到同一处会变成空操作。
+    navigate("/chat/new");
   };
 
   const handleSelectSession = (id: string) => {
