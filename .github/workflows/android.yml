@@ -208,16 +208,20 @@ jobs:
       # 镜像到 Cloudflare R2（cdn.lyb.pub）。客户端的三源降级里这是第一顺位 ——
       # GitHub 的 release-assets 域名在国内可达性差，那正是下载失败率高的根因。
       #
-      # continue-on-error：镜像挂了**不能拖死发版**（GitHub Release 成功即算发布成功，
-      # 客户端会自动降级到自建服务端/GitHub 源）。但也正因为如此，失败必须显式喊出来，
-      # 否则会静静地少一个源而没人知道。
+      # ⚠️ 这里**故意不加** `continue-on-error`（以前加过，是个 bug）。
       #
-      # ⚠️ 所以脚本**必须非 0 退出**（下面两个失败分支都是 `exit 1`）：`exit 0` 会把
-      # 上传失败伪装成成功，`continue-on-error` 永远不触发，job 一路绿 —— 承诺的
-      # 「失败显式喊出来」就落空了。让 job 标红才是这个开关该起的作用。
+      # 之前的注释以为「脚本非 0 退出 + continue-on-error」能把失败显式喊出来 ——
+      # 实际相反：`continue-on-error: true` 会把这一步标成 **success**（只附一条
+      # annotation），**不会让 job 变红**。于是 v0.5.270 那次明明报的是
+      # `Error: 缺少环境变量: CDN_ENDPOINT, ...`、脚本 exit 1，整个 job 却是绿的，
+      # 没人发现 CDN 上一个对象都没有。
+      #
+      # 顺序上也不需要这个开关：本步骤在 "Attach release APK" **之后**，GitHub Release
+      # 那时已经发出去了，所以镜像失败再怎么标红也不会「拖死发版」—— 发布本身已经成功。
+      # 它该起的作用只是**让别人看见少了一个源**，那就必须让 job 真的红。宁可红一次被
+      # 人查到，也不要绿着少一个源。
       - name: Upload APK to R2 CDN
         if: startsWith(github.ref, 'refs/tags/v')
-        continue-on-error: true
         env:
           CDN_ENDPOINT: ${{ secrets.CDN_ENDPOINT }}
           CDN_ACCESS_KEY: ${{ secrets.CDN_ACCESS_KEY }}
@@ -227,14 +231,33 @@ jobs:
           CDN_REGION: ${{ secrets.CDN_REGION }}
         run: |
           set -x
+          # 先确认凭据齐了：缺 secret 时脚本会报错，但报得比较靠后；这里前置检查
+          # 能让日志第一行就指出是「没配 secret」而不是「文件不存在」之类的误判。
+          MISSING=""
+          for v in CDN_ENDPOINT CDN_ACCESS_KEY CDN_SECRET_KEY CDN_BUCKET CDN_PUBLIC_URL; do
+            if [ -z "${!v}" ]; then MISSING="$MISSING $v"; fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::R2 镜像缺少 secrets:$MISSING（在 repo Settings → Secrets 里补上）"
+            exit 1
+          fi
           SCRIPT=ethan/defaults/skills/upload-cdn/scripts/upload_cdn.py
           PREFIX="ethan/releases/android/${APK_TAG}"
           python3 "$SCRIPT" "$APK_PATH" "$PREFIX/app-release.apk" || {
-            echo "::warning::R2 镜像上传失败（APK）。客户端会自动降级到自建服务端/GitHub 源，但 CDN 这个最快的源本轮不可用。"
+            echo "::error::R2 镜像上传失败（APK）。客户端会自动降级到自建服务端/GitHub 源，但 CDN 这个最快的源本轮不可用。"
             exit 1
           }
           python3 "$SCRIPT" "${APK_PATH}.sha256" "$PREFIX/app-release.apk.sha256" || {
-            echo "::warning::R2 镜像上传失败（sha256 侧车）。缺了它客户端仍能下载，只是退化成只校验长度。"
+            echo "::error::R2 镜像上传失败（sha256 侧车）。缺了它客户端仍能下载，只是退化成只校验长度。"
             exit 1
           }
-          echo "::notice::已镜像到 R2: ${CDN_PUBLIC_URL:-https://cdn.lyb.pub}/${PREFIX}/app-release.apk"
+          # 收尾自检：确认对象真的能通过公开域名取到（上传成功 ≠ CDN 上可访问）。
+          for f in app-release.apk app-release.apk.sha256; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+              "${CDN_PUBLIC_URL:-https://cdn.lyb.pub}/$PREFIX/$f")
+            if [ "$CODE" != "200" ]; then
+              echo "::error::R2 对象无法通过公开域名访问：$f 返回 HTTP $CODE"
+              exit 1
+            fi
+          done
+          echo "::notice::已镜像到 R2 并通过可达性自检: ${CDN_PUBLIC_URL:-https://cdn.lyb.pub}/${PREFIX}/app-release.apk"
