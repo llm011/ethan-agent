@@ -17,6 +17,7 @@ import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Button } from "@ethan/shared/ui/button";
 import { Badge } from "@ethan/shared/ui/badge";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import { HeaderFillet } from "@/components/header-fillet";
 import {
   MEMORY_PAGE_SIZE,
   hasMoreAfter,
@@ -394,6 +395,7 @@ export function MemoryView() {
       />
 
       <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 gap-3 shrink-0">
+        <HeaderFillet />
         <div className="flex-1 overflow-x-auto">
           <div className="flex gap-4 min-w-max pr-2">
             {TABS.map(tab => (

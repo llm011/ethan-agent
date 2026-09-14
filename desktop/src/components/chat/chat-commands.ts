@@ -20,6 +20,8 @@ export interface HandleCommandActions {
   selectedModel: string;
   mode: string;
   activeSession: string | null;
+  /** 路由跳转（react-router 的 navigate）。/new 用它把 URL 切到新会话。 */
+  navigate: (to: string, opts?: { replace?: boolean }) => void;
 }
 
 // 处理 /command 命令。返回 true 表示已拦截处理，调用方无需继续。
@@ -30,7 +32,7 @@ export async function handleCommand(
   const {
     setMessages, setActiveSession, setSessionTitle,
     setSessionUsage, setPendingFiles, setQuote, setStreaming,
-    selectedModel, mode, activeSession,
+    selectedModel, mode, activeSession, navigate,
   } = actions;
 
   const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
@@ -47,7 +49,10 @@ export async function handleCommand(
     setSessionUsage({ input: 0, output: 0, cache: 0 });
     setPendingFiles([]);
     setQuote(null);
-    window.history.replaceState(null, "", `/chat/${s.id}/`);
+    // 用 router 导航而不是 window.history.replaceState —— 后者会绕过 HashRouter，
+    // 让 router 内部 location 与真实 URL 失步（历史 bug：之后点「+」的
+    // navigate("/chat/new") 会因失步而失效）。replace 语义与原 replaceState 等价。
+    navigate(`/chat/${s.id}`, { replace: true });
     return true;
   }
   if (cmd === "help") {

@@ -13,6 +13,7 @@ import { Button } from "@ethan/shared/ui/button";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { Loader2, RefreshCw, Square, MessageSquare, ChevronDown, ChevronRight, CheckCircle2, XCircle, CircleSlash, Loader } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import { HeaderFillet } from "@/components/header-fillet";
 
 const STATUS_META: Record<BackgroundTask["status"], { label: string; variant: "default" | "secondary" | "destructive"; icon: React.ReactNode }> = {
   running: { label: "运行中", variant: "default", icon: <Loader className="h-3 w-3 animate-spin" /> },
@@ -90,7 +91,8 @@ export function BackgroundTasksView() {
         onConfirm={doStop}
         onCancel={() => setConfirmState({ open: false, id: "", title: "" })}
       />
-      <header className="h-12 border-b border-border flex items-center px-4 justify-between shrink-0">
+      <header className="relative h-12 border-b border-border bg-sidebar flex items-center px-4 justify-between shrink-0">
+        <HeaderFillet />
         <h1 className="font-semibold text-lg">后台任务 (Background Tasks)</h1>
         <Button variant="ghost" size="icon" onClick={loadData} disabled={loading}>
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />

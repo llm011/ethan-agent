@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@ethan/shared/ui/sheet";
 import { MessageList } from "./chat/message-list";
 import { mapDetailMessages } from "./chat/chat-helpers";
+import { HeaderFillet } from "@/components/header-fillet";
 import type { Message } from "@ethan/shared/chat/types";
 
 
@@ -212,7 +213,8 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         onConfirm={doDelete}
         onCancel={() => setConfirmState({ open: false, id: "" })}
       />
-      <div className="p-4 border-b border-border flex items-center justify-between gap-3 shrink-0 flex-wrap">
+      <div className="relative p-4 border-b border-border bg-sidebar flex items-center justify-between gap-3 shrink-0 flex-wrap">
+        <HeaderFillet />
         <h1 className="text-lg font-semibold shrink-0">全部历史对话 <span className="text-sm font-normal text-muted-foreground ml-1">({total})</span></h1>
         <div className="flex items-center gap-2 flex-wrap">
           <Button

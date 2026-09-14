@@ -285,7 +285,9 @@ export function Sidebar() {
   }, [sessionSearch]);
 
   const handleNewSession = () => {
-    navigate("/chat");
+    // 走 /chat/new 虚拟路由（而不是 "/chat"）：必须是和当前 location 不同的路径，
+    // 否则「已经在一个会话里再点 +」时 navigate 到同一处会变成空操作。
+    navigate("/chat/new");
   };
 
   const handleSelectSession = (id: string) => {

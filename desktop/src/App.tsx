@@ -23,10 +23,17 @@ import { DocsView } from "@/components/docs-view";
 import PptPreviewPage from "@/pages/PptPreviewPage";
 import CountdownPage from "@/pages/CountdownPage";
 
-/** Chat 路由：从 URL 提取 sessionId 传给 ChatView */
+/** Chat 路由：从 URL 提取 sessionId 传给 ChatView。
+ *
+ * `/chat/new` 是「开一个新会话」的虚拟路由（对齐 Web 的
+ * `web/app/(protected)/chat/[id]/client.tsx`）：把字面量 "new" 映射成 undefined，
+ * 让 ChatView 走「空会话」分支。它必须是一个**真实的、和当前路由不同的**路径 ——
+ * 否则「已经在一个会话里再点 + 」时，navigate 到同一个 location 会变成空操作
+ * （历史上桌面端正是因为这个 + replaceState 失步，导致点 + 没反应）。
+ */
 function ChatRoute() {
   const { sessionId } = useParams<{ sessionId?: string }>();
-  return <ChatView initialSessionId={sessionId} />;
+  return <ChatView initialSessionId={sessionId === "new" ? undefined : sessionId} />;
 }
 
 
@@ -72,6 +79,7 @@ function RoutesTree() {
       <Route path="/" element={<Navigate to="/chat" replace />} />
       <Route element={<LayoutShell />}>
         <Route path="/chat" element={<ChatRoute />} />
+        <Route path="/chat/new" element={<ChatRoute />} />
         <Route path="/chat/:sessionId" element={<ChatRoute />} />
         <Route path="/sessions" element={<SessionsRoute />} />
         <Route path="/memory" element={<MemoryView />} />

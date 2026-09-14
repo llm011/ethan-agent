@@ -840,7 +840,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       await handleCommand(trimmed, {
         setMessages, setActiveSession, setSessionTitle,
         setSessionUsage, setPendingFiles, setQuote, setStreaming,
-        selectedModel, mode, activeSession,
+        selectedModel, mode, activeSession, navigate,
       });
       return;
     }
@@ -871,7 +871,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             renameSession(s.id, pTitle).catch(() => { /* 失败静默忽略，后端稍后会补 */ });
           }
           justFinishedRef.current = s.id;
-          window.history.replaceState(null, "", `/chat/${s.id}/`);
+          // 用 router 导航（replace 语义）而不是 window.history.replaceState：
+          // HashRouter 的 history 是内部维护的，replaceState 直接改 URL 会让 Router
+          // 的 location 与真实 URL 失步 —— 之后点「+」navigate 到它以为自己已在的位置，
+          // 就成了空操作（「点 + 没反应」的根因）。replace:true 不产生额外历史项，
+          // 行为与原来的 replaceState 等价，但 Router 状态同步。
+          // justFinishedRef 已置为 s.id：line ~425 的 effect 会据此跳过这次重载，
+          // 不会因为 initialSessionId 变化而重复拉会话。
+          navigate(`/chat/${s.id}`, { replace: true });
         } catch (e) {
           setMessages(prev => [...prev, {
             role: "assistant",
