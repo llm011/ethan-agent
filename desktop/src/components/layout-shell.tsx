@@ -70,8 +70,10 @@ export function LayoutShell() {
           </button>
         </div>
 
-        {/* Main content */}
-        <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        {/* Main content
+            注意：不要加 overflow-hidden —— HeaderFillet 需要向左溢出 1px 覆盖 sidebar 的右边缘；
+            垂直/水平溢出由外层 h-screen overflow-hidden 兜底 */}
+        <main className="flex-1 flex flex-col min-w-0 relative">
           {!sidebarOpen && (
             <button
               onClick={() => setSidebarOpen(true)}

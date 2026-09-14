@@ -640,8 +640,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (!prompt) return;
     const timer = setTimeout(() => {
       try { sessionStorage.removeItem("ethan:pending-prompt"); } catch {}
-      // 清掉 hash 里的 query（replaceState 不触发 hashchange，不会引发额外导航）
-      if (hashQuery) window.history.replaceState(null, "", hashQuery);
+      // 清掉 hash 里的 query。用 router 导航而不是 window.history.replaceState：
+      // 后者只改地址栏、不更新 router，会让 router 的 location.search 停在 ?q=...
+      // 而真实 URL 已经没了（同类失步问题，见上面创建会话处）。replace:true 不产生
+      // 额外历史项，行为和原 replaceState 等价 —— 但 router 状态同步。
+      // 这里路径不变、只是去掉 query，所以不会触发会话重载。
+      if (hashQuery) navigate(hashQuery, { replace: true });
       handleSendRef.current(prompt);
     }, 50);
     return () => clearTimeout(timer);
