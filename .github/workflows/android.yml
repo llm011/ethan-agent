@@ -88,7 +88,20 @@ jobs:
 
   build:
     needs: check-changes
-    if: needs.check-changes.outputs.android-changed == 'true'
+    # 发版 tag 必须出包，**无条件**。
+    #
+    # 原来的条件是只看 `android-changed`，而 tag 触发时它是拿「上一个 tag → 当前 tag」
+    # 比 app/android/ 的 diff。但发版流程是「改 pyproject.toml 版本号 + 打 tag」，
+    # 根本不碰 app/android/ → changed=false → 整个 build job 被 skip → Release 上一个
+    # APK 都没有。这不是边缘情况，是发版的**常态**：259✓ 260✗ 261✓ 262✗ 263✗ 264✓
+    # 265✓ 266✓(碰巧有 android 改动) 267✗ 268✗ —— APK 时有时无就是这么来的。
+    #
+    # 连带伤害比「少个附件」更大：build 被 skip 后 sha256、R2 镜像、自建 server 的
+    # 302 目标全都不会更新，客户端的三源降级一起失效（CDN 上永远是旧包）。
+    #
+    # android-changed 门禁只对 main push 有意义（省 CI），那里本来就走 changed=true，
+    # 所以保留它不影响发版。tag 触发一律构建。
+    if: startsWith(github.ref, 'refs/tags/v') || needs.check-changes.outputs.android-changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write  # tag 触发时需要写 Release
@@ -173,7 +186,11 @@ jobs:
         run: |
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
           sha256sum "$APK" | awk '{print $1}' > "$APK.sha256"
-          echo "APK_PATH=$APK" >> $GITHUB_ENV
+          # 存绝对路径：下面 "Upload APK to R2 CDN" 要跑在仓库根目录（脚本路径是
+          # 仓库根相对的），拿不到这里的 working-directory。之前这里存的是相对路径
+          # `app/build/outputs/apk/release/app-release.apk`，到了那一步从仓库根解析
+          # → 文件不存在 → 上传失败。存绝对路径两边都能用。
+          echo "APK_PATH=${GITHUB_WORKSPACE}/app/android/$APK" >> $GITHUB_ENV
           echo "APK_TAG=${GITHUB_REF_NAME}" >> $GITHUB_ENV
           echo "Computed sha256 for $APK: $(cat "$APK.sha256")"
 
