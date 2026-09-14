@@ -49,6 +49,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "Publishing version: $VERSION"
           sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          # 顶层版本号改了，lockfile 里 ethan-agent 的版本也要跟着走，
+          # 否则 uv.lock 会长期落后于 pyproject.toml（历史上漂移过好几次）。
+          uv lock
 
       - name: Build
         run: uv build --wheel

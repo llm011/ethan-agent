@@ -105,9 +105,16 @@ When the user says "发版" or "release":
    - User says "中版本" / minor: increment minor → `X.Y+1.0`
    - User says "大版本" / major: increment major → `X+1.0.0`
 3. Update `pyproject.toml` with the new version.
-4. Create and push the tag — this triggers the GitHub Action which builds and publishes to PyPI:
+4. **Regenerate `uv.lock`** so the lockfile's `ethan-agent` version follows `pyproject.toml`:
    ```bash
-   git add pyproject.toml
+   uv lock
+   ```
+   This is easy to forget — a bump that only touches `pyproject.toml` leaves `uv.lock`
+   a version behind, and the drift accumulates silently across releases. Always
+   `git add uv.lock` in the next step, and confirm `uv lock --check` passes.
+5. Create and push the tag — this triggers the GitHub Action which builds and publishes to PyPI:
+   ```bash
+   git add pyproject.toml uv.lock
    git commit -m "chore: bump version to vX.Y.Z"
    git tag vX.Y.Z
    git push origin main
