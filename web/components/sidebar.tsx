@@ -41,6 +41,7 @@ import {
   type ModeEntry,
 } from "@/lib/api";
 import { hasUnread, withReadMark } from "@ethan/shared/lib/unread";
+import { activeSessionIdFromPathname } from "@ethan/shared/lib/routes";
 import { UnreadDot } from "@ethan/shared/components/unread-dot";
 
 export function Sidebar() {
@@ -134,8 +135,9 @@ export function Sidebar() {
     setLastSeenSchedule(Number(localStorage.getItem("ethan_last_seen_schedule") || "0"));
   }, []);
 
-  // Derive active session id from pathname: /chat/[id]
-  const activeSessionId = pathname.match(/^\/chat\/(.+)$/)?.[1] ?? null;
+  // Derive active session id from pathname: /chat/[id]（规则见 shared/lib/routes.ts，
+  // 会排除虚拟路由 /chat/new，避免把 "new" 当成会话 id 去 markSessionRead）
+  const activeSessionId = activeSessionIdFromPathname(pathname);
 
   // Derive active view from pathname
   const activeView = pathname === "/" || pathname.startsWith("/chat")

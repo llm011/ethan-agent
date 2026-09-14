@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMemoryRouter, RouterProvider, useParams } from "react-router-dom";
 import { render, screen, act, waitFor } from "@testing-library/react";
 import { handleCommand } from "@/components/chat/chat-commands";
+import { activeSessionIdFromPathname } from "@ethan/shared/lib/routes";
 
 // createSession 打后端，这里替换成固定返回值。
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -131,5 +132,35 @@ describe("路由 /chat/new", () => {
     // 当前 location 不同的真实路径，导航一定生效，且映射成空会话。
     await waitFor(() => expect(router.state.location.pathname).toBe("/chat/new"));
     expect(mapParams(router.state.matches.at(-1)?.params.sessionId as string)).toBeUndefined();
+  });
+});
+
+/**
+ * Sidebar 从 pathname 派生「当前活跃会话 id」的规则（实现在 shared/lib/routes.ts，
+ * 两端 Sidebar 共用；这里直接测真实现，而不是复制一份逻辑）。
+ *
+ * `/chat/new` 是虚拟路由，不是真会话。若不排除，派生出的 `"new"` 会被当成会话 id
+ * 往下传：对不存在的会话发 `POST /sessions/new/read`（每次开新会话白打一个 404），
+ * 且侧边栏没有任何会话会命中高亮。
+ */
+describe("activeSessionIdFromPathname", () => {
+  it("普通会话路径派生真实 id", () => {
+    expect(activeSessionIdFromPathname("/chat/abc-123")).toBe("abc-123");
+  });
+
+  it("/chat 与 /chat/new 都派生 null（无活跃会话），不会把 \"new\" 当会话 id", () => {
+    expect(activeSessionIdFromPathname("/chat")).toBeNull();
+    expect(activeSessionIdFromPathname("/chat/new")).toBeNull();
+  });
+
+  it("其它页面不误判为会话", () => {
+    expect(activeSessionIdFromPathname("/memory")).toBeNull();
+    expect(activeSessionIdFromPathname("/sessions")).toBeNull();
+  });
+
+  it("空 / 未定义 pathname 安全返回 null", () => {
+    expect(activeSessionIdFromPathname("")).toBeNull();
+    expect(activeSessionIdFromPathname(null)).toBeNull();
+    expect(activeSessionIdFromPathname(undefined)).toBeNull();
   });
 });
