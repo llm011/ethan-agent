@@ -150,6 +150,38 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const streamAbortRef = useRef<AbortController | null>(null);
 
+  // 当前**正在显示**的会话 id（实时）。
+  //
+  // 两个来源，取「最新」的一个：
+  //  - 路由（initialSessionId）：用户点了侧边栏/深链切换会话时，这是权威值；
+  //  - 发送时显式指派（见 handleSend 里的 displayedSessionRef.current = sessionId）：
+  //    新建会话时 sessionId 先于路由生效，若不显式指派，流启动的瞬间 ref 还停在旧值，
+  //    会把这次发送自己的 chunk 也丢掉。
+  //
+  // 用它来判断「这条流还属不属于当前显示的会话」——中途切会话后，旧流的在途 chunk 必须
+  // 丢弃，否则会把上一个会话的内容写进当前会话（串台 bug）。
+  //
+  // 不能用 activeSession state：它是「会话数据已加载完」才置位的，加载期间是 null/旧值；
+  // 而串台恰恰发生在切换的瞬间（新会话还在加载、旧流还在吐 chunk）。
+  const displayedSessionRef = useRef<string | null>(initialSessionId ?? null);
+  // 路由**变化**时同步（render 阶段直接赋值，保证任何时刻读到的都是本次渲染的值）。
+  // 只在路由值真的变了的时候覆盖，避免把「发送时显式指派的新会话 id」冲掉
+  // ——新建会话时 sessionId 先于路由生效，那一帧路由还是旧值/undefined。
+  const lastRouteSessionRef = useRef<string | null>(initialSessionId ?? null);
+  const routeSessionId = initialSessionId ?? null;
+  if (lastRouteSessionRef.current !== routeSessionId) {
+    lastRouteSessionRef.current = routeSessionId;
+    displayedSessionRef.current = routeSessionId;
+  }
+
+  /** 生成「该会话是否仍是当前显示会话」的判定函数，供 consumeStream 丢弃过期写入。 */
+  const sessionActiveChecker = useCallback((sessionId: string | null) => () => {
+    const cur = displayedSessionRef.current;
+    if (sessionId) return cur === sessionId;
+    // 流跑在「新会话」上（尚无 id）：只要用户没有切到某个具体会话，就算仍活跃。
+    return !cur;
+  }, []);
+
   // 输入框状态机：按 session 缓存 draft 和排队消息
   const inputStore = useInputStore();
   // 输入框附件（贴图等）也由 inputStore 管理：切走会话时随快照保存，切回时恢复
@@ -407,6 +439,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
         setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
         activeSession,
+        isSessionActive: sessionActiveChecker(activeSession),
       }, false, ac.signal);
     } catch {
       _setStreaming(false);
@@ -556,6 +589,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
               setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected,
               activeSession: initialSessionId,
+              isSessionActive: sessionActiveChecker(initialSessionId),
             }, false, resumeAc.signal);
           } else {
             setStreaming(false);
@@ -953,10 +987,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       images: m.images ? await Promise.all(m.images.map(pendingFileToImagePayload)) : undefined,
     })));
 
+    // 显式把「当前显示的会话」指派为本次发送的会话：新建会话时 sessionId 先于路由生效，
+    // 不指派的话流启动瞬间 ref 仍停在旧值，这个流自己的 chunk 会被守卫误丢。
+    displayedSessionRef.current = sessionId;
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview, autoConsent }),
       newMessages,
-      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected, activeSession: sessionId },
+      {
+        setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
+        setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected,
+        activeSession: sessionId,
+        isSessionActive: sessionActiveChecker(sessionId),
+      },
       true,
       ac.signal,
     );

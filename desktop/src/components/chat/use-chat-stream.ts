@@ -26,6 +26,37 @@ export interface ConsumeStreamActions {
   setStreaming: (v: boolean) => void;
   setPendingInjected: React.Dispatch<React.SetStateAction<{ id: string; content: string }[]>>;
   activeSession: string | null;
+  /**
+   * 该流所属的会话是否仍是当前**正在显示**的会话。
+   *
+   * 必须是「实时」判断（调用方用 ref 读取，而不是把布尔值算好了传进来）——
+   * 它要能反映**此时此刻**用户看的是哪个会话，而不是流开始时是哪个。原因见下面
+   * `writeMessages` 的注释：中途切会话时，旧流的在途 chunk 与新会话的加载是交错的。
+   */
+  isSessionActive: () => boolean;
+}
+
+/**
+ * 给所有「写消息列表」的操作套一层会话守卫。
+ *
+ * 为什么需要它（真实 bug）：用户在会话 A 里发 query，回复还在流式输出时切到会话 B，
+ * A 的流片段会写进 B 的消息列表 —— 因为：
+ *  1. `for await` 循环每收到一个 chunk 就 `setMessages`，全程没有任何「这条流还属于
+ *     当前会话吗」的判断；
+ *  2. 切会话时的 `abort()` 是**异步**生效的（`reader.read()` 要到下一个 tick 才 reject），
+ *     已经 yield 出来、正在被消费的 chunk 仍会走完这一轮写入；
+ *  3. 与此同时新会话已经在 `setMessages([])` + 拉自己的历史。三者交错，旧内容就落到新会话里。
+ *
+ * 修法不是「早点 abort」（那只是缩小窗口，仍有竞态），而是**每次写入前重新确认身份**：
+ * 只要流所属会话已不是当前显示的会话，就整体丢弃这次写入。
+ */
+function writeMessages(
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
+  isSessionActive: () => boolean,
+  next: React.SetStateAction<Message[]>,
+): void {
+  if (!isSessionActive()) return;
+  setMessages(next);
 }
 
 // 把本地刚发出的 user 消息补回后端返回的消息列表，避免后端漏存时用户那条
@@ -70,8 +101,12 @@ export async function consumeStream(
   const {
     setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
     setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected,
-    activeSession,
+    activeSession, isSessionActive,
   } = actions;
+
+  // 本函数内所有「写消息列表」都必须走它，保证中途切会话后旧流不再污染新会话。
+  const writeMsgs = (next: React.SetStateAction<Message[]>) =>
+    writeMessages(setMessages, isSessionActive, next);
 
   let failed = false;
   let hadBackgroundPolling = false;
@@ -94,7 +129,7 @@ export async function consumeStream(
   // 占位 assistant 气泡：先生成一个临时 id，让气泡从第一帧起就有稳定 React key
   // （分页后列表会整体前插，用下标当 key 会错位）。后端落库后提升成真实 id。
   const placeholderId = makeTempId();
-  setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel, id: placeholderId }]);
+  writeMsgs([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel, id: placeholderId }]);
 
   let _rafId: number | null = null;
   const buildMsg = (extra?: Partial<Message>): Message => ({
@@ -110,7 +145,7 @@ export async function consumeStream(
   });
   const flushAssistant = (extra?: Partial<Message>) => {
     const msg = buildMsg(extra);
-    setMessages(prev => {
+    writeMsgs(prev => {
       if (!prev.length) return [...prev, msg];
       const next = [...prev];
       if (next[next.length - 1]?.role === "assistant") {
@@ -142,7 +177,7 @@ export async function consumeStream(
         finalModel = chunk.model;
         const onlyModel = Object.keys(chunk).every(k => k === "model");
         if (onlyModel) {
-          setMessages(prev =>
+          writeMsgs(prev =>
             prev.length && prev[prev.length - 1]?.role === "assistant"
               ? prev.map((m, i) => (i === prev.length - 1 ? { ...m, model: finalModel } : m))
               : prev,
@@ -201,7 +236,7 @@ export async function consumeStream(
       }
       if (chunk.new_message) {
         setBgPolling(null);
-        setMessages(prev => [...prev, {
+        writeMsgs(prev => [...prev, {
           role: "assistant",
           content: chunk.content || "",
           created_at: Date.now() / 1000,
@@ -437,7 +472,7 @@ export async function consumeStream(
               // 工具事件：更新 tool steps（与主循环相同逻辑）
               if (chunk.id && chunk.tool) {
                 const toolId = chunk.id;
-                setMessages(prev => {
+                writeMsgs(prev => {
                   const msgs = [...prev];
                   const last = msgs[msgs.length - 1];
                   if (last?.role === "assistant" && last.toolSteps) {
@@ -493,7 +528,7 @@ export async function consumeStream(
             // 关键：不能整表替换 —— 用户上滚翻出来的更早几页不在这一页里，
             // 直接 setMessages(这一页) 会让它们凭空消失。
             const mergedMsgs = mergeMissingUserMessages(baseMessages, freshMsgs);
-            setMessages(prev => replaceTailKeepOlder(prev, mergedMsgs));
+            writeMsgs(prev => replaceTailKeepOlder(prev, mergedMsgs));
             setBgPolling(null);
             setConsentRequest(null);
             setCleanupConfirm(null);
@@ -522,7 +557,7 @@ export async function consumeStream(
   }
 
   cancelScheduledFlush();
-  setMessages(prev => {
+  writeMsgs(prev => {
     const msgs = [...prev];
     const last = msgs[msgs.length - 1];
     if (last && last.role === "assistant") {
