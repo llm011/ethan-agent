@@ -27,6 +27,39 @@ export interface ConsumeStreamActions {
   setStreaming: (v: boolean) => void;
   setPendingInjected: React.Dispatch<React.SetStateAction<{ id: string; content: string }[]>>;
   activeSession: string | null;
+  /**
+   * 该流所属的会话是否仍是当前**正在显示**的会话。
+   *
+   * 必须是「实时」判断（调用方用 ref 读取当前会话，而不是把值捕获进闭包），
+   * 否则流开始时是 true、切走后仍是 true，守卫就失效了。
+   */
+  isSessionActive: () => boolean;
+}
+
+/**
+ * 给所有「**按会话展示**的状态写入」套一层会话守卫。
+ *
+ * 为什么需要它（真实 bug）：用户在会话 A 里发 query，回复还在流式输出时切到会话 B，
+ * A 的流片段会写进 B 的消息列表 —— 因为：
+ *  1. `for await` 循环每收到一个 chunk 就 `setMessages`，全程没有任何「这条流还属于
+ *     当前会话吗」的判断；
+ *  2. 切会话时的 `abort()` 是**异步**生效的（`reader.read()` 要到下一个 tick 才 reject），
+ *     已经 yield 出来、正在被消费的 chunk 仍会走完这一轮写入；
+ *  3. 与此同时新会话已经在 `setMessages([])` + 拉自己的历史。三者交错，旧内容就落到新会话里。
+ *
+ * 修法不是「早点 abort」（那只是缩小窗口，仍有竞态），而是**每次写入前重新确认身份**：
+ * 只要流所属会话已不是当前显示的会话，就整体丢弃这次写入。
+ *
+ * 适用范围是「按会话展示」的全部状态，不只消息列表：标题、token 用量、待处理补充信息
+ * 同样是当前会话的展示态，旧流一样会把 A 的写进 B（A 的标题盖掉 B 的、用量加到 B 头上）。
+ * 反过来，全局态（streaming / stopping / 授权弹窗）和按会话 id 定位的侧边栏事件不受守卫约束。
+ *
+ * 丢弃是安全的：切走时新会话会重新拉历史，切回时原会话也会从 DB 重新加载，
+ * 后端落库的内容不会丢。
+ */
+function guardedWrite(isSessionActive: () => boolean, write: () => void): void {
+  if (!isSessionActive()) return;
+  write();
 }
 
 // 把本地刚发出的 user 消息补回后端返回的消息列表，避免后端漏存时用户那条
@@ -71,8 +104,13 @@ export async function consumeStream(
   const {
     setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
     setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected,
-    activeSession,
+    activeSession, isSessionActive,
   } = actions;
+
+  // 本函数内所有「按会话展示」的写入都必须过守卫：消息列表 / 标题 / 用量 / 补充信息。
+  // 中途切会话后旧流的在途 chunk 要整体丢弃，否则会污染新会话（见 guardedWrite 注释）。
+  const writeActive = (write: () => void) => guardedWrite(isSessionActive, write);
+  const writeMsgs = (next: React.SetStateAction<Message[]>) => writeActive(() => setMessages(next));
 
   let failed = false;
   let assistantContent = "";
@@ -94,7 +132,7 @@ export async function consumeStream(
   // 占位 assistant 气泡：先生成一个临时 id，让气泡从第一帧起就有稳定 React key
   // （分页后列表会整体前插，用下标当 key 会错位）。后端落库后 promoteMessageId 提升成真实 id。
   const placeholderId = makeTempId();
-  setMessages([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel, id: placeholderId }]);
+  writeMsgs([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel, id: placeholderId }]);
 
   let _rafId: number | null = null;
   const buildMsg = (extra?: Partial<Message>): Message => ({
@@ -110,7 +148,7 @@ export async function consumeStream(
   });
   const flushAssistant = (extra?: Partial<Message>) => {
     const msg = buildMsg(extra);
-    setMessages(prev => {
+    writeMsgs(prev => {
       if (!prev.length) return [...prev, msg];
       const next = [...prev];
       if (next[next.length - 1]?.role === "assistant") {
@@ -142,7 +180,7 @@ export async function consumeStream(
         finalModel = chunk.model;
         const onlyModel = Object.keys(chunk).every(k => k === "model");
         if (onlyModel) {
-          setMessages(prev =>
+          writeMsgs(prev =>
             prev.length && prev[prev.length - 1]?.role === "assistant"
               ? prev.map((m, i) => (i === prev.length - 1 ? { ...m, model: finalModel } : m))
               : prev,
@@ -200,7 +238,7 @@ export async function consumeStream(
       }
       if (chunk.new_message) {
         setBgPolling(null);
-        setMessages(prev => [...prev, {
+        writeMsgs(prev => [...prev, {
           role: "assistant",
           content: chunk.content || "",
           created_at: Date.now() / 1000,
@@ -210,19 +248,19 @@ export async function consumeStream(
       if (chunk.injected_added) {
         // 新补充一条待处理信息（含断线重连回放）：按 id 去重
         const item = chunk.injected_added;
-        setPendingInjected(prev => (prev.some(p => p.id === item.id) ? prev : [...prev, item]));
+        writeActive(() => setPendingInjected(prev => (prev.some(p => p.id === item.id) ? prev : [...prev, item])));
         continue;
       }
       if (chunk.injected_removed) {
         // 用户在待处理区删除了一条（处理前）
-        setPendingInjected(prev => prev.filter(p => p.id !== chunk.injected_removed));
+        writeActive(() => setPendingInjected(prev => prev.filter(p => p.id !== chunk.injected_removed)));
         continue;
       }
       if (chunk.injected && !chunk.tool) {
         // 被模型消费：从待处理区移除（drain 一次性取走全部，按内容匹配；
         // 注意 tool start 事件也带 injected 字段，需排除）
         const consumed = new Set(chunk.injected);
-        setPendingInjected(prev => prev.filter(p => !consumed.has(p.content)));
+        writeActive(() => setPendingInjected(prev => prev.filter(p => !consumed.has(p.content))));
         continue;
       }
       if (chunk.heartbeat) {
@@ -329,14 +367,15 @@ export async function consumeStream(
         if (chunk.message_id != null) messageId = chunk.message_id;
         if (chunk.model) finalModel = chunk.model;
         if (chunk.title) {
-          setSessionTitle(chunk.title);
+          // 只更新「当前会话」的标题栏；侧边栏那条事件按会话 id 定位，切走后照样要发
+          writeActive(() => setSessionTitle(chunk.title!));
           window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId: activeSession, title: chunk.title } }));
         }
-        setSessionUsage(prev => ({
+        writeActive(() => setSessionUsage(prev => ({
           input: prev.input + finalUsage!.input,
           output: prev.output + finalUsage!.output,
           cache: prev.cache + finalUsage!.cache,
-        }));
+        })));
       }
       if (chunk.done) {
         setBgPolling(null);
@@ -355,13 +394,15 @@ export async function consumeStream(
     }
   } catch (err) {
     if ((err as { name?: string })?.name === "AbortError") {
-      // 切换会话/发新消息 abort 旧流：清理残留的交互卡片状态，避免新会话误显示
+      // 切换会话/发新消息 abort 旧流：清理残留的交互卡片状态，避免新会话误显示。
+      // 授权/清理弹窗是全局态，直接清；待处理补充信息是按会话展示的，走守卫 ——
+      // 切会话时新会话自己会从后端加载它那份，这里不该把新会话的擦掉。
       cancelScheduledFlush();
       setConsentRequest(null);
       setCleanupConfirm(null);
       setAskUserRequest(null);
       setWaitForUserRequest(null);
-      setPendingInjected([]);
+      writeActive(() => setPendingInjected([]));
       return;
     }
     const errMsg = err instanceof Error ? err.message : "";
@@ -423,7 +464,7 @@ export async function consumeStream(
             if (chunk.content) assistantContent += chunk.content;
             if (chunk.id && chunk.tool) {
               const toolId = chunk.id;
-              setMessages(prev => {
+              writeMsgs(prev => {
                 const msgs = [...prev];
                 const last = msgs[msgs.length - 1];
                 if (last?.role === "assistant" && last.toolSteps) {
@@ -456,7 +497,7 @@ export async function consumeStream(
           setCleanupConfirm(null);
           setAskUserRequest(null);
           setWaitForUserRequest(null);
-          setPendingInjected([]);
+          writeActive(() => setPendingInjected([]));
           setStopping(false);
           setStreaming(false);
           failed = false;
@@ -481,13 +522,13 @@ export async function consumeStream(
             // - prev 里早于这一页的部分保留在最前面；prependOlderMessages 按 id 去重，
             //   与这一页重叠的那段会用 freshMsgs 的版本
             const mergedMsgs = mergeMissingUserMessages(baseMessages, freshMsgs);
-            setMessages(prev => replaceTailKeepOlder(prev, mergedMsgs));
+            writeMsgs(prev => replaceTailKeepOlder(prev, mergedMsgs));
             setBgPolling(null);
             setConsentRequest(null);
             setCleanupConfirm(null);
             setAskUserRequest(null);
             setWaitForUserRequest(null);
-            setPendingInjected([]);
+            writeActive(() => setPendingInjected([]));
             setStopping(false);
             setStreaming(false);
             return;
@@ -511,7 +552,7 @@ export async function consumeStream(
   }
 
   cancelScheduledFlush();
-  setMessages(prev => {
+  writeMsgs(prev => {
     const msgs = [...prev];
     const last = msgs[msgs.length - 1];
     if (last && last.role === "assistant") {
@@ -565,5 +606,5 @@ export async function consumeStream(
   setAskUserRequest(null);
   setWaitForUserRequest(null);
   // run 结束：待处理补充信息区清空（后端同样在 run 收尾清空 DB 镜像）
-  setPendingInjected([]);
+  writeActive(() => setPendingInjected([]));
 }
