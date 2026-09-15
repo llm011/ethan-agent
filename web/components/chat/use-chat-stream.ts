@@ -403,6 +403,11 @@ export async function consumeStream(
       setAskUserRequest(null);
       setWaitForUserRequest(null);
       writeActive(() => setPendingInjected([]));
+      // 被 abort（切会话/新发送抢占）同样要收尾 streaming：早前这里是裸 return，
+      // 跳过了函数末尾的 setStreaming(false)，streamingRef 会永久留在 true，
+      // 之后每次 handleSend 都在守卫处静默返回，表现为「发了消息没反应」。
+      setStopping(false);
+      setStreaming(false);
       return;
     }
     const errMsg = err instanceof Error ? err.message : "";
@@ -541,6 +546,9 @@ export async function consumeStream(
           setCleanupConfirm(null);
           setAskUserRequest(null);
           setWaitForUserRequest(null);
+          // 同上：abort 也要收尾，别把 streaming 留在 true。
+          setStopping(false);
+          setStreaming(false);
           return;
         }
         failed = true;
