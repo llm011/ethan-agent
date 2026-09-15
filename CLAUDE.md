@@ -118,6 +118,12 @@ When the user says "发版" or "release":
    This is easy to forget — a bump that only touches `pyproject.toml` leaves `uv.lock`
    a version behind, and the drift accumulates silently across releases. Always
    `git add uv.lock` in the next step, and confirm `uv lock --check` passes.
+
+   > **Most bumps are not done by hand.** `auto-bump-version.yml` bumps the patch on every
+   > merge to main, and it runs `uv lock` + `git add uv.lock` itself (fixed after the lock
+   > sat 3 versions behind: pyproject 0.5.278 / lock 0.5.275). The manual steps below are
+   > for an explicit "发版" with a chosen version (minor/major). If you bump by hand,
+   > you must still sync `uv.lock` yourself — nothing else will.
 5. Create and push the tag — this triggers the GitHub Action which builds and publishes to PyPI:
    ```bash
    git add pyproject.toml uv.lock

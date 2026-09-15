@@ -1,8 +1,9 @@
 name: Auto bump version on merge to main
 
-# pyproject.toml 是唯一版本号来源。本 workflow 只 bump pyproject.toml，
-# desktop (tauri.conf.json / package.json / Cargo.toml) 和 Android (build.gradle.kts)
-# 在各自构建 CI 中从 pyproject.toml 动态读取版本号，不再依赖 sed 同步。
+# pyproject.toml 是唯一版本号来源。本 workflow bump pyproject.toml，并同步 uv.lock
+# 里镜像的 ethan-agent 版本（见下面 uv lock 那步——只改 pyproject.toml 会让锁文件
+# 长期落后）。desktop (tauri.conf.json / package.json / Cargo.toml) 和 Android
+# (build.gradle.kts) 在各自构建 CI 中从 pyproject.toml 动态读取版本号，不再依赖 sed 同步。
 #
 # 前置条件：在仓库 Settings → Secrets 里添加名为 PAT 的 Personal Access Token
 # （需要 contents: write 权限）。用 PAT 推送的 tag 才能触发 publish-pypi.yml，
@@ -43,13 +44,22 @@ jobs:
           sed -i "s/^version = \"$OLD\"/version = \"$NEW\"/" pyproject.toml
           echo "version=$NEW" >> $GITHUB_OUTPUT
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync uv.lock to the new version
+        # uv.lock 里 ethan-agent 的版本号是 pyproject.toml 的镜像，只 bump 前者会让
+        # 锁文件在 main 上永久落后（历史上漂过好几版：pyproject 0.5.278 / lock 0.5.275）。
+        # 必须在 bump 之后、commit 之前跑，且产物要一起提交上去。
+        run: uv lock
+
       - name: Commit and push tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # 显式用 PAT 配置 remote URL，避免 push 时找不到凭证
           git remote set-url origin "https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}.git"
-          git add pyproject.toml
+          git add pyproject.toml uv.lock
           git commit -m "chore: bump version to v${{ steps.bump.outputs.version }}"
           git tag "v${{ steps.bump.outputs.version }}"
           git push origin main
