@@ -80,6 +80,7 @@ class AgentSettingsPatch(BaseModel):
     heartbeat_interval_minutes: int | None = None
     heartbeat_model: str | None = None
     schedule_model: str | None = None
+    model_sync: bool | None = None
     proxy: str | None = None
     max_tokens: int | None = None
     max_tool_iterations: int | None = None
@@ -98,6 +99,7 @@ async def get_agent_settings():
         "heartbeat_interval_minutes": config.defaults.heartbeat.interval_minutes,
         "heartbeat_model": config.defaults.heartbeat.model,
         "schedule_model": config.defaults.schedule_model,
+        "model_sync": config.defaults.model_sync,
         "proxy": config.network.proxy or "",
         "max_tokens": config.defaults.max_tokens,
         "max_tool_iterations": config.defaults.max_tool_iterations,
@@ -125,6 +127,13 @@ async def update_agent_settings(req: AgentSettingsPatch):
         config.defaults.heartbeat.model = req.heartbeat_model
     if req.schedule_model is not None:
         config.defaults.schedule_model = req.schedule_model
+    if req.model_sync is not None:
+        config.defaults.model_sync = req.model_sync
+        if req.model_sync:
+            # 打开「跟随默认模型」→ 清空独立值（留空即跟随 defaults.model）。
+            # 关闭时不回填，字段留空仍等于跟随，非空则用自身值。
+            config.defaults.schedule_model = ""
+            config.defaults.heartbeat.model = ""
     if req.proxy is not None:
         config.network.proxy = req.proxy or None
     if req.max_tokens is not None:

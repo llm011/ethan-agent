@@ -85,9 +85,12 @@ defaults:
     enabled: true
     interval_minutes: 10   # 每 10 分钟执行一次
     profile_consolidate_hour: 3  # 画像压缩在凌晨 3 点后触发
+    model: ""              # 心跳任务模型；留空则跟随 defaults.model
 ```
 
 也可在 Web UI 的「设置」页面修改。
+
+**心跳任务模型**：默认跟随 `defaults.model`（`heartbeat.model` 留空即跟随）。设置页的「定时/心跳任务跟随默认模型」开关打开时（默认），心跳任务模型与定时任务模型都直接使用默认模型，切换默认模型会一起生效；关闭该开关后二者可分别指定，留空仍等于跟随默认模型。
 
 ---
 

@@ -15,6 +15,8 @@ export interface AgentSettings {
   heartbeat_interval_minutes: number;
   heartbeat_model: string;
   schedule_model: string;
+  /** true（默认）时定时/心跳任务跟随默认模型；false 时各自独立配置 */
+  model_sync: boolean;
   proxy: string;
   max_tokens: number;
   max_tool_iterations: number;

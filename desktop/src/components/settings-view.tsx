@@ -163,6 +163,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
     heartbeat_interval_minutes: 10,
     heartbeat_model: "",
     schedule_model: "",
+    model_sync: true,
     proxy: "",
     max_tokens: 4096,
     max_tool_iterations: 100,
@@ -198,6 +199,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
           ...agentData,
           heartbeat_enabled: agentData.heartbeat_enabled ?? true,
           heartbeat_interval_minutes: agentData.heartbeat_interval_minutes ?? 10,
+          model_sync: agentData.model_sync ?? true,
         });
         setSysForm(sysData);
         setProviderForm(providerData);
@@ -816,6 +818,33 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                     </div>
 
                     <div className="grid gap-2">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={agentForm.model_sync ?? true}
+                          onChange={(e) => setAgentForm({ ...agentForm, model_sync: e.target.checked })}
+                          className="w-4 h-4"
+                        />
+                        定时/心跳任务跟随默认模型
+                      </label>
+                      <p className="text-xs text-muted-foreground">打开时二者都用默认模型，切换默认模型会一起生效；关闭后可分别指定，留空仍等于跟随默认模型。</p>
+                    </div>
+
+                    <div className={`grid gap-2 ${agentForm.model_sync ? "opacity-50" : ""}`}>
+                      <label className="text-sm font-medium">心跳任务模型</label>
+                      <ModelSelect
+                        models={modelList}
+                        value={agentForm.heartbeat_model ?? ""}
+                        onValueChange={(val) => setAgentForm({ ...agentForm, heartbeat_model: val || "" })}
+                        valueMode="id"
+                        allowEmpty
+                        disabled={agentForm.model_sync ?? true}
+                        emptyLabel="留空（跟随默认模型）"
+                        placeholder="留空则跟随默认模型"
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
                       <label className="text-sm font-medium">心跳间隔（分钟）</label>
                       <div className="flex items-center gap-3">
                         <input
@@ -839,20 +868,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                       <p className="text-xs text-muted-foreground">系统级定时维护：facts 去重整理 + 执行 heartbeat.md 中的任务</p>
                     </div>
 
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">心跳任务模型</label>
-                      <ModelSelect
-                        models={modelList}
-                        value={agentForm.heartbeat_model ?? ""}
-                        onValueChange={(val) => setAgentForm({ ...agentForm, heartbeat_model: val || "" })}
-                        valueMode="id"
-                        allowEmpty
-                        emptyLabel="留空（跟随默认模型）"
-                        placeholder="留空则跟随默认模型"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
+                    <div className={`grid gap-2 ${agentForm.model_sync ? "opacity-50" : ""}`}>
                       <label className="text-sm font-medium">定时任务模型</label>
                       <ModelSelect
                         models={modelList}
@@ -860,6 +876,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                         onValueChange={(val) => setAgentForm({ ...agentForm, schedule_model: val || "" })}
                         valueMode="id"
                         allowEmpty
+                        disabled={agentForm.model_sync ?? true}
                         emptyLabel="留空（跟随默认模型）"
                         placeholder="留空则跟随默认模型"
                       />

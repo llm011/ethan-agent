@@ -220,6 +220,9 @@ class DefaultsConfig(BaseModel):
     # 定时任务 session 轮转阈值：当天执行次数超此值则新建对话，避免高频任务会话无限膨胀
     schedule_session_rotate_threshold: int = 24
     schedule_model: str = ""  # 定时任务使用的模型；空则跟随 defaults.model
+    # 定时/心跳任务是否跟随默认模型：true（默认）时设置页隐藏独立模型选择器，
+    # 切默认模型二者一起变；false 时二者各自独立配置（留空仍等于跟随默认）。
+    model_sync: bool = True
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 

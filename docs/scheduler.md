@@ -115,6 +115,12 @@ if chat_id:
 
 ---
 
+## 任务使用的模型
+
+定时任务默认使用主模型（`defaults.model`）：`defaults.schedule_model` 留空即跟随默认模型。设置页的「定时/心跳任务跟随默认模型」开关（`defaults.model_sync`，默认打开）控制这一行为——打开时定时任务与心跳任务都直接用默认模型，切换默认模型会一起生效；关闭后可分别指定 `schedule_model` / `heartbeat.model`，各自留空仍等于跟随默认模型。
+
+---
+
 ## 持久化
 
 使用 SQLAlchemy + SQLite（`~/.ethan/scheduler.db`）。APScheduler 的 `SQLAlchemyJobStore` 序列化 Job 到数据库，`ethan serve` 启动时自动恢复所有 pending jobs，无需用户手动重建。

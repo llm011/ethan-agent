@@ -31,6 +31,8 @@ EDITABLE_FIELDS: list[ConfigField] = [
                 desc="单次回复的最大 token 数", min_val=1),
     ConfigField("defaults.max_tool_iterations", "工具迭代上限", "int",
                 desc="单次回复的最大工具调用轮次。stuck detection 在真正死循环前强制收尾", min_val=1),
+    ConfigField("defaults.model_sync", "定时/心跳任务跟随默认模型", "bool",
+                desc="true（默认）时切默认模型会同步作用于定时任务与心跳任务；false 时二者各自独立配置"),
     ConfigField("defaults.heartbeat.enabled", "心跳", "bool",
                 desc="是否启用定时心跳（Agent 周期性自检/整理）"),
     ConfigField("defaults.heartbeat.interval_minutes", "心跳间隔（分钟）", "int",
