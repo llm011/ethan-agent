@@ -466,6 +466,12 @@ def _annotate_sessions(result: dict | None) -> dict:
     return result
 
 
+# active_tab 查询结果短缓存:list/status 每次都对每个客户端发一次 tabs.userList,
+# agent 连续几轮调用时不必每次都真实过网。仅用于展示,5s 内的轻微陈旧可接受。
+_ACTIVE_TAB_TTL = 5.0
+_active_tab_cache: dict[str, tuple[float, dict | None]] = {}
+
+
 async def _describe_clients() -> list[dict]:
     """给客户端列表补上「可分辨」信息——随机名分不清哪台是哪台是多浏览器误操作的根源。
 
@@ -480,20 +486,26 @@ async def _describe_clients() -> list[dict]:
     owned = get_session_map().owned_by_client(get_session_id())
 
     async def _active_tab(client_name: str) -> dict | None:
+        cached = _active_tab_cache.get(client_name)
+        now = time.monotonic()
+        if cached and now - cached[0] < _ACTIVE_TAB_TTL:
+            return cached[1]
         try:
             res = await hub.call(METHODS["tab_user_list"], {},
                                  client_name=client_name, timeout=3)
         except Exception:
-            return None
+            return cached[1] if cached else None
         tabs = res.get("tabs") if isinstance(res, dict) else None
-        if not isinstance(tabs, list):
-            return None
-        for t in tabs:
-            if isinstance(t, dict) and t.get("active"):
-                url = t.get("url") or ""
-                return {"title": t.get("title") or "",
-                        "host": urlparse(url).netloc if url else ""}
-        return None
+        tab: dict | None = None
+        if isinstance(tabs, list):
+            for t in tabs:
+                if isinstance(t, dict) and t.get("active"):
+                    url = t.get("url") or ""
+                    tab = {"title": t.get("title") or "",
+                           "host": urlparse(url).netloc if url else ""}
+                    break
+        _active_tab_cache[client_name] = (now, tab)
+        return tab
 
     clients = sorted(hub.list_clients(), key=lambda c: c["name"])
     tab_results = await asyncio.gather(*[_active_tab(c["name"]) for c in clients])

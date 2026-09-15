@@ -263,15 +263,18 @@
    * 进入都换新 id,服务端拼不到历史,用户看到的就是「连续对话不带前文」。
    */
   async function reuseChatSession(url: string): Promise<void> {
+    // key 归一:去掉 hash(锚点跳转不该拆出新对话);query 保留——翻页/文档站
+    // ?id= 换的确实是不同内容,合并反而会串味。
+    const key = (url || '').split('#')[0];
     try {
       const { readingChatSessions } = await chrome.storage.local.get('readingChatSessions');
       const map = readingChatSessions || {};
-      const hit = map[url];
+      const hit = map[key];
       if (hit && hit.sid) {
         chatSessionId = hit.sid;
         hit.ts = Date.now();
       } else {
-        map[url] = { sid: chatSessionId, ts: Date.now() };
+        map[key] = { sid: chatSessionId, ts: Date.now() };
       }
       // LRU:超过 50 条丢最旧的
       const entries = Object.entries(map).sort((a, b) => ((b[1] && b[1].ts) || 0) - ((a[1] && a[1].ts) || 0));
