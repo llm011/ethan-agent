@@ -173,6 +173,7 @@ CLI 内部维护 `WorkingMemory` 实例：
 - 流式回复使用 SSE（`/chat` 端点 `stream: true`）
 - 工具调用过程通过 SSE 事件分块推送，前端实时渲染调用详情
 - 生成与连接解耦：一次生成是一个后台 `ChatRun`（`ethan/core/run_manager.py`），SSE 响应只是订阅者。刷新页面断开连接不会中断生成——producer 照常跑完并入库。前端加载会话时若 `active_run` 为真，调 `GET /chat/{id}/stream` 重连，回放缓冲 + 继续实时
+- 空闲会话自动刷新：一条会话已跑完、但别处（定时任务 / 另一个窗口 / CLI / 渠道）又追加了一轮时，本窗口没有 SSE 流、也不会有人手动切会话，内容本会一直停在旧样子。为此前端 `useLiveSessions`（`{web,desktop}/…/chat/use-live-sessions.ts`，两端同源）每 3s 拉一次 `/poll`，比对 `sessions[].updated_at` 相对上一轮是否前进（`collectChangedSessions`），前进则广播 `idle-refresh`，`ChatView` 若当前会话在其中就拉一页尾部核对。判据只用 `updated_at`——`/poll` 的 `active_sessions` 在 producer 落库瞬间就翻掉，实测只有毫秒级窗口为真，3s 轮询抓不到。为此后端 `RunManager.create()` 在**每轮开始**也 `touch` 一次 `updated_at`（原先只有结束时推），否则「刚开始」与「已结束」对客户端是同一个观测，长的一轮跑完前界面不知道有事在发生
 
 ### 打开会话的性能（不要往回退）
 

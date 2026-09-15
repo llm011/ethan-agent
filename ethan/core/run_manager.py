@@ -293,7 +293,54 @@ class RunManager:
         run = ChatRun(session_id=session_id, user_id=user_id, consent=consent)
         self._runs[session_id] = run
         run.watchdog_task = asyncio.create_task(_run_watchdog(run, self))
+        # 一轮刚开始时就把会话行的 updated_at 推到现在。
+        #
+        # 为什么需要：前端「这条会话在别处被追加了一轮」的观测信号只有 updated_at
+        # （/poll 的 active_sessions 帮不上忙 —— 那个标志位很快就会被 producer 翻掉，
+        # 实测只在毫秒级窗口里为真，轮询根本抓不到）。而 updated_at 在这一轮里
+        # 本来只会在**结束时**被 touch 一次，于是「刚开始」和「已结束」对客户端是同
+        # 一个观测：都要等这一轮真的跑完才看得到。长的一轮（工具调用、深度检索）
+        # 动辄几十秒，这段时间里界面完全不知道有事在发生；更糟的是如果这一轮是
+        # 「跑完了会话、别处又追加一轮」里的那次追加，用户会一直盯着旧内容 ——
+        # 正是这次要修的现象。
+        #
+        # 带 mark_read=True 是刻意的：本轮开始与结束各推一次 updated_at，末次带
+        # mark_read 才把未读水位一起推平。若这里不带，本轮存在期间
+        # updated_at > last_read_at 会成立，侧边栏立刻冒一个「未读」红点，
+        # 而它本轮结束就被抹掉 —— 表现为无端闪一下。
+        self._touch_session_soon(session_id, mark_read=True)
         return run
+
+    def _touch_session_soon(self, session_id: str, mark_read: bool = False) -> None:
+        """把会话行的 updated_at 推到现在（不阻塞调用方）。
+
+        单独起一个 task 而不是 await：调用方是 RunManager.create()，它在 asyncio
+        单线程里被同步调用（HTTP 处理函数里 await agent 之前），这里 await 会把它
+        变成协程并拖慢建 run；而这一步只是给前端一个「开始变了」的信号，晚几十毫秒
+        无所谓。
+
+        不静默吞失败：updated_at 就是前端唯一的观测信号，DB 被别的 writer 锁住是
+        常见情形（会话一多，落库与轮询会互相撞），退避重试几次，仍失败才记日志 ——
+        这一轮的收尾 touch 还会再推一次，不会让这一轮彻底从列表顺序上消失。
+        """
+        if not session_id:
+            return
+
+        async def _touch() -> None:
+            from ethan.memory.session import get_session_store, retry_on_db_locked
+
+            try:
+                store = await get_session_store()
+                await retry_on_db_locked(store.touch, session_id, mark_read=mark_read)
+            except Exception:
+                logger.warning("推进会话 updated_at 失败 session=%s", session_id, exc_info=True)
+
+        try:
+            asyncio.create_task(_touch())
+        except RuntimeError:
+            # 没有运行中的事件循环（同步上下文里建 run）：不值得为一次时间戳推进
+            # 拉起循环，这一轮自己的收尾 touch 一样会让前端看到变化。
+            pass
 
     def schedule_removal(self, session_id: str) -> None:
         """生成结束后，宽限期到点把 run 从注册表移除。"""
