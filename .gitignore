@@ -101,6 +101,7 @@ ethan/skills/router_models/
 app/android/.gradle/
 app/android/**/build/
 app/android/local.properties
+app/android/.kotlin/
 app/android/.idea/
 app/android/*.iml
 app/android/captures/

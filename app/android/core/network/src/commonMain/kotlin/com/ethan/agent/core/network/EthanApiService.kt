@@ -168,11 +168,29 @@ class EthanApiService(
 
     // ── Sessions ────────────────────────────────────────────────────────────
 
-    suspend fun getSessions(limit: Int = 50, offset: Int = 0, query: String? = null): SessionsResponse =
+    suspend fun getSessions(
+        limit: Int = 50,
+        offset: Int = 0,
+        query: String? = null,
+        source: String? = null,
+        mode: String? = null,
+        hideHeartbeat: Boolean = false,
+        hideScheduled: Boolean = false,
+        hideBackground: Boolean = false,
+        titlePrefixes: String? = null,
+        hasImages: Boolean = false,
+    ): SessionsResponse =
         client.get(url("sessions")) {
             parameter("limit", limit)
             parameter("offset", offset)
             parameter("q", query)
+            parameter("source", source)
+            parameter("mode", mode)
+            parameter("hide_heartbeat", hideHeartbeat)
+            parameter("hide_scheduled", hideScheduled)
+            parameter("hide_background", hideBackground)
+            parameter("title_prefixes", titlePrefixes)
+            parameter("has_images", hasImages)
         }.body()
 
     suspend fun createSession(model: String? = null, mode: String? = null): CreateSessionResponse =

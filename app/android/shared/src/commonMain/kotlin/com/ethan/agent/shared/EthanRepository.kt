@@ -188,8 +188,22 @@ class EthanRepository(
         return api.getModes().modes
     }
 
-    suspend fun getSessions(limit: Int = 50, offset: Int = 0, query: String? = null): List<SessionInfo> {
-        return api.getSessions(limit, offset, query).sessions
+    suspend fun getSessions(
+        limit: Int = 50,
+        offset: Int = 0,
+        query: String? = null,
+        source: String? = null,
+        mode: String? = null,
+        hideHeartbeat: Boolean = false,
+        hideScheduled: Boolean = false,
+        hideBackground: Boolean = false,
+        titlePrefixes: String? = null,
+        hasImages: Boolean = false,
+    ): List<SessionInfo> {
+        return api.getSessions(
+            limit, offset, query, source, mode,
+            hideHeartbeat, hideScheduled, hideBackground, titlePrefixes, hasImages,
+        ).sessions
     }
 
     suspend fun poll(): List<SessionInfo> {
@@ -200,10 +214,17 @@ class EthanRepository(
     // 每个 cachedXxx() 先 emit 本地缓存（如有），再请求网络 emit 最新数据并写缓存。
     // 网络失败时，如果有缓存数据，调用方已经拿到了缓存；如果没有缓存，异常会传播给调用方。
 
-    fun cachedSessions(limit: Int = 50, offset: Int = 0, query: String? = null): Flow<List<SessionInfo>> = flow {
+    fun cachedSessions(
+        limit: Int = 50,
+        offset: Int = 0,
+        query: String? = null,
+        hideHeartbeat: Boolean = false,
+        hideScheduled: Boolean = false,
+        hideBackground: Boolean = false,
+    ): Flow<List<SessionInfo>> = flow {
         val cacheKey = "sessions_list"
         localCache.read(cacheKey, ListSerializer(SessionInfo.serializer()))?.let { emit(it) }
-        val fresh = getSessions(limit, offset, query)
+        val fresh = getSessions(limit, offset, query, hideHeartbeat = hideHeartbeat, hideScheduled = hideScheduled, hideBackground = hideBackground)
         localCache.write(cacheKey, fresh, ListSerializer(SessionInfo.serializer()))
         emit(fresh)
     }.flowOn(ioDispatcher)

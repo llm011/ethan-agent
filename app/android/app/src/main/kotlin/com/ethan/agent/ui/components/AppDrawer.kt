@@ -71,6 +71,25 @@ private val drawerToolItems = listOf(
     DrawerToolItem(Screen.Settings, "设置 Settings"),
 )
 
+/**
+ * 定时/心跳会话判定：「source 或 标题前缀」双条件。
+ *
+ * 后端定时会话的 source 是 "schedule"（schedule.py 的 create_with_id），心跳是
+ * "heartbeat"；但老数据/其他入口可能只带 [定时]/[心跳] 标题前缀 —— web 端
+ * （schedule-view / Sidebar）的权威判据就是前缀，这里保持同一口径。
+ * 之前抽屉里写的是 `source != "scheduled"` —— 拼错了（后端没有这个值），
+ * 过滤永远不命中，定时/心跳会话全漏进了「最新对话」（用户反馈 #7）。
+ */
+private fun isScheduledSession(s: SessionInfo): Boolean =
+    s.source == "schedule" || s.title.startsWith("[定时]")
+
+private fun isHeartbeatSession(s: SessionInfo): Boolean =
+    s.source == "heartbeat" || s.title.startsWith("[心跳]")
+
+/** 后台任务会话：入口在任务中心，不进「最新对话」（web 侧边栏恒传 hide_background=true） */
+private fun isBackgroundSession(s: SessionInfo): Boolean =
+    s.title.startsWith("[后台]") || s.title.startsWith("✅ [后台]")
+
 @Composable
 fun AppDrawerContent(
     sessions: List<SessionInfo>,
@@ -86,13 +105,15 @@ fun AppDrawerContent(
         sessions.filter { it.pinnedAt > 0 }.sortedByDescending { it.pinnedAt }
     }
     val recentSessions = remember(sessions) {
-        sessions.filter { it.source != "scheduled" && it.source != "heartbeat" && it.pinnedAt == 0L }.take(5)
+        sessions.filter {
+            !isScheduledSession(it) && !isHeartbeatSession(it) && !isBackgroundSession(it) && it.pinnedAt == 0L
+        }.take(5)
     }
     val scheduledSessions = remember(sessions) {
-        sessions.filter { it.source == "scheduled" }.take(5)
+        sessions.filter(::isScheduledSession).take(5)
     }
     val heartbeatSessions = remember(sessions) {
-        sessions.filter { it.source == "heartbeat" }.take(5)
+        sessions.filter(::isHeartbeatSession).take(5)
     }
 
     // 计算每组未读数

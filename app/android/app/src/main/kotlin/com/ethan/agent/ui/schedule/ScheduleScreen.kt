@@ -1,9 +1,11 @@
 package com.ethan.agent.ui.schedule
 
+import com.ethan.agent.core.model.SessionInfo
 import com.ethan.agent.shared.viewmodel.ScheduleUiState
 import com.ethan.agent.shared.viewmodel.ScheduleTab
 import com.ethan.agent.shared.viewmodel.TimelineItem
 import com.ethan.agent.shared.viewmodel.CreateScheduleForm
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -33,6 +35,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PauseCircleOutline
 import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material.icons.filled.Refresh
@@ -177,6 +181,8 @@ fun ScheduleScreen(
             when (state.tab) {
                 ScheduleTab.Jobs -> JobsContent(
                     jobs = state.jobs,
+                    scheduledSessions = state.scheduledSessions,
+                    heartbeatSessions = state.heartbeatSessions,
                     layout = layout,
                     range = range,
                     onLayoutSelect = { layout = it },
@@ -325,6 +331,8 @@ private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier = this.cli
 @Composable
 private fun JobsContent(
     jobs: List<ScheduleJob>,
+    scheduledSessions: List<SessionInfo>,
+    heartbeatSessions: List<SessionInfo>,
     layout: JobLayout,
     range: JobRange,
     onLayoutSelect: (JobLayout) -> Unit,
@@ -357,6 +365,14 @@ private fun JobsContent(
     }
 
     Column(Modifier.fillMaxSize()) {
+        // 任务页的对话列表（对齐 web schedule-view 右栏）：定时/心跳会话各一组，
+        // 默认都折叠，展开后点击条目跳到对应会话。
+        ScheduleSessionsSection(
+            scheduledSessions = scheduledSessions,
+            heartbeatSessions = heartbeatSessions,
+            onOpenSession = onOpenSession,
+        )
+
         // 筛选区分两行（与 Web 一致：场景 Tab 一行，今天/全部 + 视图切换一行）：
         //
         // 之前尝试三项挤一行，在 360dp 上「工作 17」和「今天|全部」之间只剩几 dp，
@@ -431,6 +447,86 @@ private fun JobsContent(
 
 /** `今天/明天` 的上界日期键；用于「今天」范围过滤。 */
 private fun todayPlusDays(days: Long): String = ScheduleFormat.todayPlusDaysKey(days)
+
+/**
+ * 任务页的对话列表（对齐 web schedule-view 右侧栏的两个折叠组）：
+ * 「定时任务对话 (N)」/「心跳对话 (N)」，默认都折叠，点条目进会话。
+ * 展开态放组件本地（web 也是组件内 state），不进 ViewModel。
+ */
+@Composable
+private fun ScheduleSessionsSection(
+    scheduledSessions: List<SessionInfo>,
+    heartbeatSessions: List<SessionInfo>,
+    onOpenSession: (String) -> Unit,
+) {
+    if (scheduledSessions.isEmpty() && heartbeatSessions.isEmpty()) return
+
+    Column(Modifier.fillMaxWidth()) {
+        ScheduleSessionGroup(
+            title = "定时任务对话",
+            sessions = scheduledSessions,
+            onOpenSession = onOpenSession,
+        )
+        ScheduleSessionGroup(
+            title = "心跳对话",
+            sessions = heartbeatSessions,
+            onOpenSession = onOpenSession,
+        )
+    }
+}
+
+@Composable
+private fun ScheduleSessionGroup(
+    title: String,
+    sessions: List<SessionInfo>,
+    onOpenSession: (String) -> Unit,
+) {
+    if (sessions.isEmpty()) return
+    var expanded by remember { mutableStateOf(false) }
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                ) { expanded = !expanded }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "$title (${sessions.size})",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "收起" else "展开",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column {
+                sessions.forEach { session ->
+                    Text(
+                        text = session.title.removePrefix("[定时]").removePrefix("[心跳]").ifBlank { "未命名对话" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenSession(session.id) }
+                            .padding(horizontal = 28.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun SceneTab(

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ethan.agent.core.model.ScheduleCreateRequest
 import com.ethan.agent.core.model.ScheduleJob
+import com.ethan.agent.core.model.SessionInfo
 import com.ethan.agent.shared.EthanRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +48,9 @@ data class ScheduleUiState(
     val tab: ScheduleTab = ScheduleTab.Jobs,
     val jobs: List<ScheduleJob> = emptyList(),
     val timelines: List<TimelineItem> = emptyList(),
+    // 任务页的对话列表（对齐 web schedule-view 右侧栏）：定时/心跳会话各一组
+    val scheduledSessions: List<SessionInfo> = emptyList(),
+    val heartbeatSessions: List<SessionInfo> = emptyList(),
     val triggeringIds: Set<String> = emptySet(),
     val showCreateSheet: Boolean = false,
     val createForm: CreateScheduleForm = CreateScheduleForm(),
@@ -73,6 +77,28 @@ class ScheduleViewModel(
                 _state.update { it.copy(jobs = jobs, isLoading = false) }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            }
+        }
+        loadSessions()
+    }
+
+    /**
+     * 任务页的对话列表（对齐 web schedule-view：拉最近 100 条会话，按
+     * [定时]/[心跳] 前缀（或 source）分组。列表失败不影响任务主列表，
+     * 静默忽略即可。
+     */
+    private fun loadSessions() {
+        viewModelScope.launch {
+            try {
+                val sessions = repository.getSessions(limit = 100)
+                _state.update {
+                    it.copy(
+                        scheduledSessions = sessions.filter(::isScheduledSession),
+                        heartbeatSessions = sessions.filter(::isHeartbeatSession),
+                    )
+                }
+            } catch (_: Exception) {
+                // 会话列表拿不到就维持现状，不打断任务页
             }
         }
     }
