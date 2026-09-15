@@ -155,6 +155,11 @@ _PR_URL_RE = re.compile(
 #
 # 只认「模板里真实出现过的占位符名」+ 尖括号包裹的中文占位符，不用宽泛的 `<[^>]+>`：
 # 后者会把 `支持 <T> 泛型`、`std::vector<int>` 这类合法技术标题一并误杀。
+#
+# 已知取舍：这是**枚举式**的，用户在 naming.md 里自定义的占位符名不在列表里就漏过去。
+# 反过来「凡带尖括号即判可疑」误杀面太大（技术标题里 <T>、<div> 很常见），
+# 且护栏只是兜底——主修复是让模板的值由代码填（_rule_title / _pr_title_from_text），
+# 模型本就不需要看到占位符示例。
 _PLACEHOLDER_RE = re.compile(
     r"<\s*(?:owner|repo|branch|pr|mr|n|number|编号|分支名|分支|仓库|数字)\s*>"
     r"|(?<![\w/])(?:owner|org)/repo(?![\w/])",
@@ -300,10 +305,30 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
     )
 
     def _clean(text: str) -> str:
-        def _sub(m: "_re.Match[str]") -> str:
-            return m.group(0) if m.group("pr") else "[链接]"
+        # 逐个 URL 判断保留还是脱敏，同时给「非 URL 的正文」单独计长：链接本身不占
+        # 100 字预算。这样第 100 字符正好落在 PR 链接中间时，链接仍被完整保留，不会
+        # 被切半截。（旧写法 text[:100] 是先切残再匹配，半截 URL 匹配不上 _PR_URL_RE，
+        # 于是被当普通外链脱敏，又回到模型拿不到 owner/repo 的老问题。）
+        out: list[str] = []
+        used = 0
+        last = 0
 
-        return _scrub_re.sub(_sub, text[:100]).strip()
+        def _head(seg: str) -> str:
+            """非 URL 正文按剩余预算截断。"""
+            nonlocal used
+            room = max(0, 100 - used)
+            kept = seg[:room]
+            used += len(kept)
+            return kept
+
+        for m in _scrub_re.finditer(text):
+            out.append(_head(text[last:m.start()]))
+            if used >= 100:
+                break
+            out.append(m.group(0) if m.group("pr") else "[链接]")
+            last = m.end()
+        out.append(_head(text[last:]))
+        return "".join(out).strip()
 
     turns = [(m.role, _clean(m.content)) for m in messages if m.role in ("user", "assistant") and m.content][:6]
     if not turns:

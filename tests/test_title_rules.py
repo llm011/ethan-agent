@@ -257,3 +257,44 @@ def test_clean_keeps_pr_url_scrubs_other_links(monkeypatch):
     assert "https://github.com/foo/bar/pull/7" in captured["prompt"]
     assert "https://example.com/doc" not in captured["prompt"]
     assert "[链接]" in captured["prompt"]
+
+
+def test_clean_keeps_pr_url_straddling_length_cap(monkeypatch):
+    """第 100 字符正好落在 PR 链接中间时，链接仍要完整保留。
+
+    回归：旧写法先 text[:100] 再匹配，半截 URL 匹配不到 _PR_URL_RE 被当普通外链
+    脱敏，模型又拿不到 owner/repo。
+    """
+    from ethan.memory import session as S
+
+    captured: dict[str, str] = {}
+
+    class _CapturingProvider(_FakeProvider):
+        async def chat(self, messages, system=None, disable_thinking=False):
+            captured["prompt"] = messages[0].content
+            return await super().chat(messages, system=system, disable_thinking=disable_thinking)
+
+    provider = _CapturingProvider(["正常标题"])
+    _patch_title_provider(monkeypatch, provider)
+    msgs = [Message(role="user", content="y" * 70 + " https://github.com/a/b/pull/100")]
+    asyncio.run(S._generate_smart_title(msgs))
+    assert "https://github.com/a/b/pull/100" in captured["prompt"]
+
+
+def test_clean_caps_plain_text_without_urls(monkeypatch):
+    """没有 URL 的纯文本仍受 100 字预算约束，不能整段灌给模型。"""
+    from ethan.memory import session as S
+
+    captured: dict[str, str] = {}
+
+    class _CapturingProvider(_FakeProvider):
+        async def chat(self, messages, system=None, disable_thinking=False):
+            captured["prompt"] = messages[0].content
+            return await super().chat(messages, system=system, disable_thinking=disable_thinking)
+
+    provider = _CapturingProvider(["正常标题"])
+    _patch_title_provider(monkeypatch, provider)
+    msgs = [Message(role="user", content="x" * 500)]
+    asyncio.run(S._generate_smart_title(msgs))
+    assert "x" * 100 in captured["prompt"]
+    assert "x" * 101 not in captured["prompt"]
