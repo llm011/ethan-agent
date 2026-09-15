@@ -257,4 +257,28 @@ describe("consumeStream 会话守卫（标题 / 用量 / 补充信息）", () =>
     expect(actions.setSessionUsage).toHaveBeenCalled();
     expect(actions.setPendingInjected).toHaveBeenCalled();
   });
+  // ── AbortError 收尾 ──
+  // 回归：早前 AbortError 分支直接 `return { failed: false }`，跳过了函数末尾的
+  // setStreaming(false)。调用方若只用裸 setStreaming（不更新配套的 ref），
+  // streamingRef 就会永久停在 true，之后每次 handleSend 都在守卫处静默返回，
+  // 表现为「消息发出去毫无反应」。这里锁死：abort 必须把 streaming 收尾。
+  it("被 abort 时也要把 streaming 收尾（否则调用方 ref 卡 true，后续发送被静默吞掉）", async () => {
+    const abortErr = new DOMException("Aborted", "AbortError");
+    const actions = mockActions();
+    // 已经收到过内容再被 abort：模拟「发送中途切会话」抢占流
+    const result = await consumeStream(contentThenThrow("partial", abortErr as unknown as Error), [], actions);
+
+    expect(result).toEqual({ failed: false });
+    expect(actions.setStreaming).toHaveBeenCalledWith(false);
+    expect(actions.setStopping).toHaveBeenCalledWith(false);
+  });
+
+  it("流一开始就 abort（还没吐任何 chunk）同样要收尾 streaming", async () => {
+    const abortErr = new DOMException("Aborted", "AbortError");
+    const actions = mockActions();
+    const result = await consumeStream(throwingStream(abortErr as unknown as Error), [], actions);
+
+    expect(result).toEqual({ failed: false });
+    expect(actions.setStreaming).toHaveBeenCalledWith(false);
+  });
 });

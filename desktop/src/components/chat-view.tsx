@@ -76,7 +76,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // 否则会出现"A 会话的旧消息被塞进 B 会话"的串台。
   const olderReqSessionRef = useRef<string | null>(null);
   const streamingRef = useRef(false);
+  // 兜底：ref 与 state 正常时始终同向，一旦不同向说明有路径只改了其中一个
+  // （历史上 handleSend 主路径用的就是裸 setStreaming，ref 停在旧值），
+  // 谁更新就认谁，避免 ref 卡在 true 后 handleSend 永远静默返回。
   const _setStreaming = (v: boolean) => { streamingRef.current = v; setStreaming(v); };
+  streamingRef.current = streaming !== streamingRef.current && !streaming
+    ? false
+    : streamingRef.current;
   // 后台任务条：展示本进程内运行中/刚完成的后台任务（其会话不在侧边栏列表里）
   const [bgTasks, setBgTasks] = useState<BackgroundTask[]>([]);
   const [bgPolling, setBgPolling] = useState<string | null>(null);
@@ -489,7 +495,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setLoadingSession(false);
       // 重置 transient 状态：否则旧会话残留的 streaming=true 会让 handleSend
       // 的 `if (streaming) return;` 直接拦截，导致新会话无法创建（刷新才恢复）
-      setStreaming(false);
+      _setStreaming(false);
       setStopping(false);
       setBgPolling(null);
       setConsentRequest(null);
@@ -503,7 +509,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     inputStore.switchTo(initialSessionId, inputRef.current?.value);
 
     // 重置 transient 状态：防止旧会话的 streaming 残留阻塞新会话操作
-    setStreaming(false);
+    _setStreaming(false);
     setStopping(false);
     setBgPolling(null);
     setConsentRequest(null);
@@ -582,7 +588,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setSessionUsage(historicUsage);
 
         if (detail.active_run) {
-          setStreaming(true);
+          _setStreaming(true);
           const resumeAc = new AbortController();
           streamAbortRef.current = resumeAc;
           const stream = await streamResume(initialSessionId, resumeAc.signal).catch(() => null);
@@ -593,12 +599,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               : loaded;
             await consumeStream(stream, base, {
               setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-              setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected,
+              setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
               activeSession: initialSessionId,
               isSessionActive: sessionActiveChecker(initialSessionId),
             }, false, resumeAc.signal);
           } else {
-            setStreaming(false);
+            _setStreaming(false);
             const fresh = await fetchSession(initialSessionId).catch(() => null);
             if (cancelled) return;
             if (fresh) {
@@ -875,7 +881,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleSend = async (text: string) => {
     if (!text.trim() && pendingFiles.length === 0) return;
     // 用 ref 读取最新值，避免 state 批处理延迟导致新会话被旧 streaming=true 拦截
-    if (streamingRef.current) return;
+    if (streamingRef.current) {
+      // 正常路径下 ChatInput 已经在 streaming 时把消息塞进排队队列，走不到这里；
+      // 真走到这儿说明 streaming 状态有残留（历史上 ref 卡 true 时消息被静默吞掉，
+      // 用户只看到"发了没反应"）。兜底排队 + 留一条可见提示，不再无声丢弃。
+      inputStoreRef.current.addToQueue(text);
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: "⏳ 上一条还在生成中，这条已加入排队，等它结束后自动发送。",
+        created_at: Date.now() / 1000,
+      }]);
+      return;
+    }
 
     const trimmed = text.trim();
     const isBtw = trimmed.toLowerCase().startsWith("/btw ");
@@ -883,7 +900,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (trimmed.startsWith("/") && !isBtw && !isReview) {
       await handleCommand(trimmed, {
         setMessages, setActiveSession, setSessionTitle,
-        setSessionUsage, setPendingFiles, setQuote, setStreaming,
+        setSessionUsage, setPendingFiles, setQuote, setStreaming: _setStreaming,
         selectedModel, mode, activeSession, navigate,
       });
       return;
@@ -992,7 +1009,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const sentQuote = quote;
     setPendingFiles([]);
     setQuote(null);
-    setStreaming(true);
+    _setStreaming(true);
     streamAbortRef.current?.abort();
     const ac = new AbortController();
     streamAbortRef.current = ac;
@@ -1012,7 +1029,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       newMessages,
       {
         setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-        setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected,
+        setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
         activeSession: sessionId,
         isSessionActive: sessionActiveChecker(sessionId),
       },

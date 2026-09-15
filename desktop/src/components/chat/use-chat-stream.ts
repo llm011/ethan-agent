@@ -415,6 +415,12 @@ export async function consumeStream(
       setAskUserRequest(null);
       setWaitForUserRequest(null);
       writeActive(() => setPendingInjected([]));
+      // 被 abort（切会话/新发送抢占）也必须收尾 streaming：早前这里直接 return，
+      // 跳过末尾那次 setStreaming(false)，结果「只转 state 不转 ref」的调用方
+      // 会把 streamingRef 永久留在 true —— 之后每次 handleSend 都在
+      // `if (streamingRef.current) return;` 处静默返回，消息发出去毫无反应。
+      setStopping(false);
+      setStreaming(false);
       return { failed: false };
     }
     const errMsg = err instanceof Error ? err.message : "";
@@ -553,6 +559,9 @@ export async function consumeStream(
           setCleanupConfirm(null);
           setAskUserRequest(null);
           setWaitForUserRequest(null);
+          // 同上：abort 也要收尾，别把 streaming 留在 true。
+          setStopping(false);
+          setStreaming(false);
           return { failed: false };
         }
         failed = true;
