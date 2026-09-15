@@ -249,14 +249,20 @@ fun ChatScreen(
     } ?: 0
 
     // 末条消息比视口高时 animateScrollToItem 只能把它**顶对齐**，最新输出仍整段藏在
-    // 视口下方 —— 这正是「气泡没有跟随到底部固定」的另一半原因。改为先定位末项，
-    // 再按过冲量（末项底边超出视口底部的像素）补滚，任意高度的消息都能贴住底部。
+    // 视口下方 —— 这正是「气泡没有跟随到底部固定」的另一半原因。所以主体改用过冲量
+    // 补滚（末项底边超出视口底部的像素），任意高度的消息都能贴住底部；
+    // animateScrollToItem 只在末项根本不在屏上时兜底用一次 —— 若每次跟滚都先
+    // scrollToItem，视口会被强拉到末项顶部再滚回底部，流式期间就是一路抖动。
     suspend fun followToBottom() {
         val lastIndex = visibleMessages.lastIndex + if (hasMoreMessages) 1 else 0
-        listState.animateScrollToItem(lastIndex)
         val info = listState.layoutInfo
-        val last = info.visibleItemsInfo.lastOrNull() ?: return
-        val overshoot = last.offset + last.size - info.viewportEndOffset
+        val visible = info.visibleItemsInfo.lastOrNull()
+        if (visible == null || visible.index < lastIndex) {
+            listState.animateScrollToItem(lastIndex)
+        }
+        val fresh = listState.layoutInfo
+        val last = fresh.visibleItemsInfo.lastOrNull() ?: return
+        val overshoot = last.offset + last.size - fresh.viewportEndOffset
         if (overshoot > 0) listState.animateScrollBy(overshoot.toFloat())
     }
 
