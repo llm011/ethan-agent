@@ -69,9 +69,18 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// All source chips shown in filter bar
-private val ALL_SOURCE_CHIPS = listOf("web", "lark", "repl", "desktop", "wechat", "心跳", "定时")
-private val SOURCE_CHIP_MAP = mapOf("心跳" to "heartbeat", "定时" to "scheduled")
+// All source chips shown in filter bar。
+// 心跳/定时不算「来源」—— 它们是类别（web all-sessions-view 的 categoryFilter），
+// 用下面这排排他类别 chip 承接；之前混在来源里且把后端值拼成 "scheduled"
+// （实际是 "schedule"），筛选永远不生效。
+private val ALL_SOURCE_CHIPS = listOf("web", "lark", "repl", "desktop", "wechat")
+
+// 类别筛选（排他）：「全部对话」默认排除定时/心跳，与 web all-sessions-view 一致
+private val CATEGORY_CHIPS = listOf(
+    "全部对话" to "",
+    "定时任务对话" to "scheduled",
+    "心跳对话" to "heartbeat",
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,8 +98,7 @@ fun SessionsScreen(
     onSummary: (String) -> Unit,
     onDismissSummary: () -> Unit,
     onSetSourceFilter: (String) -> Unit = {},
-    onToggleHideHeartbeat: () -> Unit = {},
-    onToggleHideScheduled: () -> Unit = {},
+    onToggleCategory: (String) -> Unit = {},
     onToggleSource: (String) -> Unit = {},
     onSelectAllSources: () -> Unit = {},
     onTogglePin: (SessionInfo) -> Unit = {},
@@ -145,6 +153,38 @@ fun SessionsScreen(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
+                Column {
+                // 类别 chips（排他，对齐 web all-sessions-view）：全部对话 / 定时任务对话 / 心跳对话。
+                // 「全部对话」= 排除定时/心跳（它们有专属类别入口），不再是全部混在一起。
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 8.dp, end = 8.dp, top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    CATEGORY_CHIPS.forEach { (label, key) ->
+                        val categorySelected = state.categoryFilter == key
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = if (categorySelected) MaterialTheme.colorScheme.secondaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = if (categorySelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() },
+                            ) { onToggleCategory(key) },
+                        ) {
+                            Text(
+                                text = label,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (categorySelected) MaterialTheme.colorScheme.onSecondaryContainer
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -188,8 +228,7 @@ fun SessionsScreen(
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    ALL_SOURCE_CHIPS.forEach { label ->
-                        val sourceKey = SOURCE_CHIP_MAP[label] ?: label
+                    ALL_SOURCE_CHIPS.forEach { sourceKey ->
                         val selected = state.selectedSources.contains(sourceKey)
                         Surface(
                             shape = RoundedCornerShape(50),
@@ -202,7 +241,7 @@ fun SessionsScreen(
                             ) { onToggleSource(sourceKey) },
                         ) {
                             Text(
-                                text = label,
+                                text = sourceKey,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = if (selected) MaterialTheme.colorScheme.onPrimary
@@ -225,6 +264,7 @@ fun SessionsScreen(
                     )
                 }
             }
+            } // end Column（类别 + 来源两行）
             } // end filter bar Surface
 
             // Expandable inline search bar

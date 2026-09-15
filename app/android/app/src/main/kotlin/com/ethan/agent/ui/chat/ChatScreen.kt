@@ -8,6 +8,7 @@ import com.ethan.agent.shared.viewmodel.ConnectionState
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -130,6 +131,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalConfiguration
 
@@ -159,6 +164,11 @@ fun ChatScreen(
     onOpenDrawer: () -> Unit = {},
     onToggleAutoConsent: () -> Unit = {},
     onSignFile: suspend (String) -> FileSignature? = { null },
+    // 运行中「补充信息」：立即注入当前 run（区别于流式中发送 = 排队）
+    onInject: (String) -> Unit = {},
+    // 排队消息管理：× 移除 / 点击取回输入框编辑（对齐 Web 的 QueuedMessages）
+    onQueueRemove: (Long) -> Unit = {},
+    onQueueEdit: (Long) -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -170,6 +180,9 @@ fun ChatScreen(
     var showAutoConsentConfirm by remember { mutableStateOf(false) }
     // 阅读模式（双击气泡进入）：非空时全屏覆盖在聊天页之上
     var readingMessage by remember { mutableStateOf<UiMessage?>(null) }
+    // 全屏编辑模式（对齐 Web 的「展开为 Markdown 编辑器」）：长文本写作时输入框
+    // 只有 5 行上限，展开后占满全屏（Dialog usePlatformDefaultWidth=false）
+    var showFullEditor by remember { mutableStateOf(false) }
     // 渐进加载：初始只渲染最后 10 条，向上滚动加载更多
     val pageSize = 10
     var visibleCount by remember { mutableStateOf(pageSize) }
@@ -223,6 +236,33 @@ fun ChatScreen(
             if (isAtBottom || visibleMessages.size <= pageSize) {
                 listState.animateScrollToItem(visibleMessages.lastIndex + if (hasMoreMessages) 1 else 0)
             }
+        }
+    }
+
+    // 流式输出的跟随滚动：内容在最后一条消息**内部**增长（正文变长 / 工具步骤变多）时
+    // 条数不变，上面的 size-effect 不会触发 —— 表现为「得一直手动往下滑才能看到最新输出」
+    // （用户反馈 #5）。这里盯住最后一条消息的尾部特征，变化即跟滚。
+    // 只在用户本来就贴着底部（isAtBottom）时跟：主动上滑翻历史时不打扰，
+    // 跟滚到底后 snapshotFlow 会经 onScrollToBottom() 自动清掉未读计数。
+    val lastMessageTailKey = state.messages.lastOrNull()?.let { msg ->
+        msg.content.length * 16 + msg.toolSteps.size + msg.cards.size
+    } ?: 0
+
+    // 末条消息比视口高时 animateScrollToItem 只能把它**顶对齐**，最新输出仍整段藏在
+    // 视口下方 —— 这正是「气泡没有跟随到底部固定」的另一半原因。改为先定位末项，
+    // 再按过冲量（末项底边超出视口底部的像素）补滚，任意高度的消息都能贴住底部。
+    suspend fun followToBottom() {
+        val lastIndex = visibleMessages.lastIndex + if (hasMoreMessages) 1 else 0
+        listState.animateScrollToItem(lastIndex)
+        val info = listState.layoutInfo
+        val last = info.visibleItemsInfo.lastOrNull() ?: return
+        val overshoot = last.offset + last.size - info.viewportEndOffset
+        if (overshoot > 0) listState.animateScrollBy(overshoot.toFloat())
+    }
+
+    LaunchedEffect(lastMessageTailKey) {
+        if (visibleMessages.isNotEmpty() && isAtBottom) {
+            followToBottom()
         }
     }
 
@@ -590,6 +630,11 @@ fun ChatScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                // 底部留白：列表与输入栏是紧邻排列的，没有这个 padding 时最后一条消息
+                // 紧贴输入栏上边缘，流式输出时最新一行看起来像被输入区压住（用户反馈
+                // #6「内容区域太靠下，往上收一点」）。24dp ≈ 两行文字的呼吸感，
+                // 末条消息能滚到输入栏上方可见的位置。
+                contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (state.messages.isEmpty()) {
@@ -668,6 +713,137 @@ fun ChatScreen(
                     .padding(horizontal = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                // 排队消息 chips（对齐 Web 的 QueuedMessages，展示在输入框正上方）：
+                // 流式中点发送进队，本轮跑完自动按序发出。点击 = 取回输入框编辑，× = 移除。
+                // 拖拽排序 web 独有，手机上取回再发等效，暂不做。
+                if (state.queuedMessages.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 4.dp)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        state.queuedMessages.forEach { item ->
+                            AssistChip(
+                                onClick = { onQueueEdit(item.id) },
+                                label = {
+                                    Text(
+                                        item.text.ifBlank { "🖼 图片" }.replace("\n", " ").take(16),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                                trailingIcon = {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "移除排队消息",
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clickable { onQueueRemove(item.id) },
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                }
+
+                // 运行中「补充信息」（对齐 Web 的 InjectBox）：立即注入当前 run 的 inbox，
+                // 下一轮调模型前读取。注意区别于发送键 —— 流式中发送是排队（等本轮跑完），
+                // 想让 Agent 马上看到就走这里。
+                if (state.isStreaming || state.isResuming) {
+                    var injectOpen by remember { mutableStateOf(false) }
+                    var injectText by remember { mutableStateOf("") }
+                    var injectSubmitted by remember { mutableStateOf(false) }
+
+                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                        if (!injectOpen) {
+                            Text(
+                                "＋ 补充信息（立即注入）",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { injectOpen = true }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                            )
+                        } else {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                            ) {
+                                Column {
+                                    BasicTextField(
+                                        value = injectText,
+                                        onValueChange = { injectText = it },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        minLines = 2,
+                                        maxLines = 4,
+                                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        ),
+                                        decorationBox = { innerTextField ->
+                                            Box {
+                                                if (injectText.isEmpty()) {
+                                                    Text(
+                                                        "补充一些信息给运行中的任务…（Enter 处提交）",
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
+                                                }
+                                                innerTextField()
+                                            }
+                                        },
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(end = 6.dp, bottom = 4.dp),
+                                        horizontalArrangement = Arrangement.End,
+                                    ) {
+                                        TextButton(onClick = {
+                                            injectOpen = false
+                                            injectText = ""
+                                            injectSubmitted = false
+                                        }) { Text("收起", style = MaterialTheme.typography.labelMedium) }
+                                        TextButton(
+                                            enabled = injectText.isNotBlank(),
+                                            onClick = {
+                                                onInject(injectText.trim())
+                                                injectText = ""
+                                                injectSubmitted = true
+                                            },
+                                        ) { Text("注入", style = MaterialTheme.typography.labelMedium) }
+                                    }
+                                }
+                            }
+                            // 提交成功的即时反馈（失败走全局错误横幅：injectMessage 会 set error）
+                            LaunchedEffect(injectSubmitted) {
+                                if (injectSubmitted) {
+                                    kotlinx.coroutines.delay(2500)
+                                    injectSubmitted = false
+                                }
+                            }
+                            if (injectSubmitted) {
+                                Text(
+                                    "✓ 已注入，下一轮调用模型时读取",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                    modifier = Modifier.padding(start = 6.dp, top = 2.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // 待发送图片预览（对齐 Web：输入框上方缩略图 + 删除按钮）
                 if (state.pendingImages.isNotEmpty()) {
                     Row(
@@ -826,7 +1002,7 @@ fun ChatScreen(
                                     Box {
                                         if (state.inputText.isEmpty()) {
                                             Text(
-                                                if (state.isStreaming) "补充信息给 Agent…" else "输入消息，支持 Markdown…",
+                                                if (state.isStreaming) "排队发送：本轮结束后自动发出…" else "输入消息，支持 Markdown…",
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                                 style = MaterialTheme.typography.bodyMedium,
                                             )
@@ -835,6 +1011,19 @@ fun ChatScreen(
                                     }
                                 },
                             )
+                            // 展开为全屏编辑（对齐 Web 输入框右上角的展开按钮）：长文本时
+                            // 5 行上限太憋屈，全屏写完再发。
+                            IconButton(
+                                onClick = { showFullEditor = true },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Fullscreen,
+                                    contentDescription = "展开为全屏编辑",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                             Box(
                                 modifier = Modifier.padding(end = 2.dp),
                                 contentAlignment = Alignment.Center,
@@ -844,18 +1033,44 @@ fun ChatScreen(
                                         CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                                     }
                                     state.isStreaming || state.isResuming -> {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.errorContainer,
-                                            modifier = Modifier.size(36.dp),
-                                        ) {
-                                            IconButton(onClick = onStop) {
-                                                Icon(
-                                                    Icons.Default.Stop,
-                                                    contentDescription = "停止",
-                                                    tint = MaterialTheme.colorScheme.error,
-                                                    modifier = Modifier.size(18.dp),
-                                                )
+                                        // 生成中：停止 + 排队发送并排（对齐 web —— 流式里的发送
+                                        // 是入队，本轮跑完自动发下一条；只有停止键的话队列功能没入口）
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            // 队列发送：有内容才亮
+                                            val canQueue = state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = if (canQueue) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                modifier = Modifier.size(36.dp),
+                                            ) {
+                                                IconButton(
+                                                    onClick = onSend,
+                                                    enabled = canQueue && !state.modelAmbiguous,
+                                                ) {
+                                                    Icon(
+                                                        Icons.AutoMirrored.Filled.Send,
+                                                        contentDescription = "排队发送",
+                                                        tint = if (canQueue) MaterialTheme.colorScheme.onPrimary
+                                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(18.dp).offset(x = 1.dp),
+                                                    )
+                                                }
+                                            }
+                                            Spacer(Modifier.width(6.dp))
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = MaterialTheme.colorScheme.errorContainer,
+                                                modifier = Modifier.size(36.dp),
+                                            ) {
+                                                IconButton(onClick = onStop) {
+                                                    Icon(
+                                                        Icons.Default.Stop,
+                                                        contentDescription = "停止",
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(18.dp),
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -939,6 +1154,85 @@ fun ChatScreen(
 
     // 阅读模式：全屏覆盖在聊天页之上（不在 Scaffold 里，避免继承 padding/FAB）。
     // 这样退出时聊天页的滚动位置原封不动 —— 用户回到的就是离开时那一屏。
+    //
+    // 返回键必须先关阅读模式：阅读模式是覆盖层而非导航目的地，全 app 没有别的
+    // BackHandler，按返回键事件会直接落到 NavController 把 chat 路由 pop 掉 ——
+    // 表现为「只是退出了阅读模式，会话页也跟着一起退了」（用户反馈 #3）。
+    // enabled 挂在 readingMessage 上：没有覆盖层时不拦截，返回键照常退出会话。
+    BackHandler(enabled = readingMessage != null) {
+        readingMessage = null
+    }
+    // 全屏编辑模式：Dialog 占满全屏（usePlatformDefaultWidth=false），顶部 关闭/标题/发送，
+    // 正文多行输入吃满剩余空间。返回键由 Dialog 自身的 onDismissRequest 处理（收起而非退出会话）。
+    if (showFullEditor) {
+        Dialog(
+            onDismissRequest = { showFullEditor = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { showFullEditor = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "关闭全屏编辑")
+                    }
+                    Text(
+                        "编辑消息",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // 发送后关闭全屏；流式中发送会走排队路径（与主输入框同一 onSend）
+                    val canSendFull = (state.inputText.isNotBlank() || state.pendingImages.isNotEmpty()) &&
+                        !state.modelAmbiguous
+                    IconButton(
+                        onClick = {
+                            showFullEditor = false
+                            onSend()
+                        },
+                        enabled = canSendFull,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "发送",
+                            tint = if (canSendFull) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        )
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(bottom = 8.dp))
+                BasicTextField(
+                    value = state.inputText,
+                    onValueChange = onInputChange,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (state.inputText.isEmpty()) {
+                                Text(
+                                    "输入消息，支持 Markdown…",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
+                )
+            }
+        }
+    }
+
     readingMessage?.let { msg ->
         ReadingModeScreen(message = msg, onClose = { readingMessage = null })
     }

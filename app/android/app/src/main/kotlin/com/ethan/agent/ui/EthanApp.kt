@@ -205,6 +205,9 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onOpenDrawer = { scope.launch { drawerState.open() } },
                     onToggleAutoConsent = vm::toggleAutoConsent,
                     onSignFile = vm::signFile,
+                    onInject = vm::injectMessage,
+                    onQueueRemove = vm::queueRemove,
+                    onQueueEdit = vm::queueEdit,
                 )
             }
 
@@ -225,8 +228,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onSummary = vm::summarySession,
                     onDismissSummary = vm::dismissSummary,
                     onSetSourceFilter = vm::setSourceFilter,
-                    onToggleHideHeartbeat = vm::toggleHideHeartbeat,
-                    onToggleHideScheduled = vm::toggleHideScheduled,
+                    onToggleCategory = vm::toggleCategory,
                     onToggleSource = vm::toggleSource,
                     onSelectAllSources = vm::selectAllSources,
                     onTogglePin = vm::togglePin,

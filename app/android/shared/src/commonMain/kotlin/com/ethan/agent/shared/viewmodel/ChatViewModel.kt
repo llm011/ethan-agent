@@ -52,6 +52,16 @@ data class PendingImage(
     val filename: String,
 )
 
+/**
+ * 流式中发送时排队的消息（对齐 Web 的 queued messages）：本轮生成结束后按顺序
+ * 自动作为下一轮发出。images 复用 PendingImage，出队时原样走 sendMessage 的完整路径。
+ */
+data class QueuedMessage(
+    val id: Long,
+    val text: String,
+    val images: List<PendingImage> = emptyList(),
+)
+
 data class ChatUiState(
     val sessionId: String? = null,
     val title: String = "新对话",
@@ -63,6 +73,8 @@ data class ChatUiState(
     val selectedMode: String = "",
     val inputText: String = "",
     val pendingImages: List<PendingImage> = emptyList(),
+    /** 流式中排队的消息（见 QueuedMessage），输入框上方可见、可删可取回编辑 */
+    val queuedMessages: List<QueuedMessage> = emptyList(),
     val isLoading: Boolean = false,
     val isStreaming: Boolean = false,
     val isResuming: Boolean = false,
@@ -108,6 +120,8 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
     private var streamJob: Job? = null
+    /** 排队消息的自增 id（进程内唯一即可，队列随本轮生成结束而清空） */
+    private var queueIdCounter: Long = 0
     private var askUserCountdownJob: Job? = null
     private var waitForUserCountdownJob: Job? = null
 
@@ -392,7 +406,19 @@ class ChatViewModel(
         if (current.modelAmbiguous) return
 
         if (current.isStreaming && streamJob?.isActive == true) {
-            if (text.isNotEmpty()) injectMessage(text)
+            // 流式中点发送 = 排队（对齐 web）：挂到输入框上方的队列，本轮跑完自动发下一轮。
+            // 「补充信息」的即时注入不再占用发送键——它有气泡下方的独立入口（见 ChatScreen
+            // 的补充信息行），之前把流式发送全部导去 inject，用户想排队的意图被误伤。
+            queueIdCounter += 1
+            val item = QueuedMessage(id = queueIdCounter, text = text, images = images)
+            _state.update {
+                it.copy(
+                    queuedMessages = it.queuedMessages + item,
+                    inputText = "",
+                    pendingImages = emptyList(),
+                    quote = null,
+                )
+            }
             return
         }
 
@@ -482,14 +508,49 @@ class ChatViewModel(
                         _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
                     }
                 }
+                // 正常跑完（含重连后跑完）就放行队首；失败收场/用户停止（job 被取消，
+                // 走不到这里）都不 drain，队列原样保留给用户处理。
+                drainQueue()
             }
         }
     }
 
-    /** 运行中向 agent 注入补充信息；409 = 无活跃 run，自动降级普通发送 */
-    private fun injectMessage(text: String) {
+    /** 本轮生成正常结束后取出队首消息自动发出；失败收场时保留队列不动 */
+    private fun drainQueue() {
+        val state = _state.value
+        if (state.error != null) return
+        val next = state.queuedMessages.firstOrNull() ?: return
+        _state.update {
+            it.copy(
+                queuedMessages = it.queuedMessages - next,
+                inputText = next.text,
+                pendingImages = next.images,
+            )
+        }
+        sendMessage()
+    }
+
+    /** 移除排队中的消息（队列 chip 上的 ×） */
+    fun queueRemove(id: Long) {
+        _state.update { it.copy(queuedMessages = it.queuedMessages.filterNot { q -> q.id == id }) }
+    }
+
+    /** 取回排队中的消息到输入框编辑（队列 chip 长按/点击编辑） */
+    fun queueEdit(id: Long) {
+        val item = _state.value.queuedMessages.firstOrNull { it.id == id } ?: return
+        _state.update {
+            it.copy(
+                queuedMessages = it.queuedMessages - item,
+                inputText = item.text,
+                pendingImages = item.images,
+            )
+        }
+    }
+
+    /** 运行中向 agent 注入补充信息（聊天页「补充信息」入口）；409 = 无活跃 run，自动降级普通发送 */
+    fun injectMessage(text: String) {
         val sessionId = _state.value.sessionId ?: return
-        _state.update { it.copy(inputText = "") }
+        // 不动 inputText：注入框有独立输入区（对齐 web 的 InjectBox），主输入框的草稿不能被误清
         viewModelScope.launch {
             try {
                 repository.injectMessage(sessionId, text)
@@ -735,21 +796,36 @@ class ChatViewModel(
                     }
                     event.tool != null -> {
                         val tool = event.tool!!
+                        val stepState = event.state ?: "start"
+                        // 对齐 web（use-chat-stream.ts 的工具分支）：工具开始时把已累积的
+                        // 正文存为该步骤的 thought（工具时间线里展示「调用前的思考」）；
+                        // 工具结束时把正文清空——旧文本已进 thought，气泡正文只保留
+                        // 最近一段输出，而不是每轮工具之间的文本一直往后堆。
+                        val preToolThought = content.trim().takeIf { it.isNotEmpty() }
+                        // done/error 事件不回传 thought，而这里是整条重建 step（web 是对象
+                        // 展开保留旧字段），所以要从旧 step 把 start 时存的 thought 回填，
+                        // 否则一结束 thought 就丢了。
+                        val existingIdx = toolSteps.indexOfFirst { event.id != null && it.id == event.id }
+                        val existing = if (existingIdx >= 0) toolSteps[existingIdx] else null
                         val step = ToolStep(
                             tool = tool,
                             args = event.args ?: "",
-                            state = event.state ?: "start",
+                            state = stepState,
                             durationMs = event.durationMs,
                             genMs = event.genMs,
                             resultPreview = event.resultPreview,
                             resultDetail = event.resultDetail,
-                            thought = event.thought,
+                            thought = existing?.thought ?: event.thought ?: preToolThought,
                             intent = event.intent,
                             id = event.id,
                             subSteps = event.subSteps,
                         )
-                        val existing = toolSteps.indexOfFirst { it.id == step.id && step.id != null }
-                        if (existing >= 0) toolSteps[existing] = step else toolSteps.add(step)
+                        if (existingIdx >= 0) toolSteps[existingIdx] = step else toolSteps.add(step)
+                        // 工具结束：清空正文（与 web 的 assistantContent = "" 一致）。
+                        // 清空后 appendContent 的回放判定依旧自洽——重连回放按同样的
+                        // 事件序列重放，done 处同样清空，不会出现正文重复。
+                        val clearContent = stepState != "start"
+                        if (clearContent) content = ""
                         // 协议假设：服务端 cards 永远随 tool 事件下发（producers.py 把 cards
                         // 挂在 tool 事件上，不存在独立的 cards 事件），故只在此处收集
                         if (event.cards != null) {
@@ -758,6 +834,7 @@ class ChatViewModel(
                         _state.update { s ->
                             val msgs = s.messages.toMutableList()
                             if (assistantIndex < msgs.size) msgs[assistantIndex] = msgs[assistantIndex].copy(
+                                content = if (clearContent) "" else msgs[assistantIndex].content,
                                 toolSteps = toolSteps.toList(),
                                 cards = if (cardsCollected.isNotEmpty()) cardsCollected.toList() else msgs[assistantIndex].cards,
                             )

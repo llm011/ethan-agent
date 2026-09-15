@@ -14,6 +14,25 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/**
+ * 定时/心跳会话判定，与 web（all-sessions-view / schedule-view）同口径：
+ * 「source 或标题前缀」双条件。后端定时会话的 source 是 "schedule"（不是
+ * "scheduled"），心跳是 "heartbeat"；老数据可能只有 [定时]/[心跳] 前缀。
+ */
+fun isScheduledSession(s: SessionInfo): Boolean =
+    s.source == "schedule" || s.title.startsWith("[定时]")
+
+fun isHeartbeatSession(s: SessionInfo): Boolean =
+    s.source == "heartbeat" || s.title.startsWith("[心跳]")
+
+/**
+ * 后台任务会话（background_task 工具创建的独立会话）：标题带 [后台] 前缀，
+ * 完成后是 "✅ [后台]"（与服务端 hide_background 的排除列表一致）。
+ * 它们的入口在任务中心，不该混进常规会话列表。
+ */
+fun isBackgroundSession(s: SessionInfo): Boolean =
+    s.title.startsWith("[后台]") || s.title.startsWith("✅ [后台]")
+
 data class SessionsUiState(
     val sessions: List<SessionInfo> = emptyList(),
     val query: String = "",
@@ -24,16 +43,28 @@ data class SessionsUiState(
     val regeningIds: Set<String> = emptySet(),
     val summarySheet: SummaryResponse? = null,
     val sourceFilter: String = "All",
-    val hideHeartbeat: Boolean = false,
-    val hideScheduled: Boolean = false,
+    // 类别筛选（对齐 web all-sessions-view 的排他 categoryFilter）：
+    // "" = 全部对话（排除定时/心跳），"scheduled" = 定时任务对话，"heartbeat" = 心跳对话
+    val categoryFilter: String = "",
     // 空集合表示"全部"，避免 source 为 null 或非已知来源的 session 被永久隐藏
     val selectedSources: Set<String> = emptySet(),
     val unreadSessionIds: Set<String> = emptySet(),
 ) {
+    /** 按类别筛选：默认「全部对话」不显示定时/心跳/后台（对齐 web —— 它们有专属入口） */
+    private val categoryFiltered: List<SessionInfo>
+        get() = when (categoryFilter) {
+            "scheduled" -> sessions.filter(::isScheduledSession)
+            "heartbeat" -> sessions.filter(::isHeartbeatSession)
+            else -> sessions.filter { !isScheduledSession(it) && !isHeartbeatSession(it) && !isBackgroundSession(it) }
+        }
+
     /** 按来源筛选后的全集（空集合表示全部），置顶与普通列表共用，保证筛选行为一致 */
     private val sourceFiltered: List<SessionInfo>
-        get() = if (selectedSources.isEmpty()) sessions
-        else sessions.filter { s -> selectedSources.contains(s.source ?: "") }
+        get() {
+            val base = categoryFiltered
+            return if (selectedSources.isEmpty()) base
+            else base.filter { s -> selectedSources.contains(s.source ?: "") }
+        }
 
     /** 置顶分组：pinned_at > 0，按置顶时间倒序（同样套用来源筛选） */
     val pinnedSessions: List<SessionInfo>
@@ -70,13 +101,23 @@ class SessionsViewModel(
     }
 
     fun load() {
+        // 定时/心跳类别激活时 load 走类别专用加载：重命名/删除等操作完成后的刷新
+        // 也要留在当前类别视图里，否则默认列表（服务端已排除该类）一灌进来视图就空了
+        val cat = _state.value.categoryFilter
+        val query = _state.value.query
+        if (query.isBlank() && (cat == "scheduled" || cat == "heartbeat")) {
+            fetchCategory(cat)
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
-            val query = _state.value.query
             if (query.isBlank()) {
-                // 非搜索：用 cached flow，先秒出缓存再网络刷新
+                // 非搜索：用 cached flow，先秒出缓存再网络刷新。
+                // 服务端过滤对齐 web：默认视图就不含定时/心跳/后台会话（各有专属入口），
+                // 否则这三类会刷屏 —— 之前 50 条窗口里大半是定时任务，普通对话反而看不到。
+                // 客户端的 categoryFiltered 仍做一道兜底（缓存里的旧数据未过滤）。
                 try {
-                    repository.cachedSessions(limit = 50).collect { sessions ->
+                    repository.cachedSessions(limit = 50, hideHeartbeat = true, hideScheduled = true, hideBackground = true).collect { sessions ->
                         if (knownUpdatedAt.isEmpty()) {
                             sessions.forEach { s -> knownUpdatedAt[s.id] = s.updatedAt }
                         } else {
@@ -92,9 +133,15 @@ class SessionsViewModel(
                     }
                 }
             } else {
-                // 搜索：直接请求网络，不缓存
+                // 搜索：直接请求网络，不缓存。搜索与类别筛选 AND 合成（对齐 web）：
+                // 在定时/心跳类别下搜索，只搜该类会话
                 try {
-                    val sessions = repository.getSessions(limit = 50, query = query)
+                    val prefixes = when (_state.value.categoryFilter) {
+                        "scheduled" -> "[定时]"
+                        "heartbeat" -> "[心跳]"
+                        else -> null
+                    }
+                    val sessions = repository.getSessions(limit = 50, query = query, titlePrefixes = prefixes)
                     _state.update { it.copy(sessions = sessions, isLoading = false) }
                 } catch (e: Exception) {
                     _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
@@ -104,6 +151,9 @@ class SessionsViewModel(
     }
 
     private suspend fun refreshQuietly() {
+        // 类别筛选激活时暂停轮询（对齐 web）：定时/心跳类别是按前缀单独拉的列表，
+        // 轮询回灌的是未过滤的全量列表，会把类别视图冲掉
+        if (_state.value.categoryFilter.isNotEmpty()) return
         try {
             val sessions = repository.poll()
             if (_state.value.query.isBlank()) {
@@ -250,8 +300,31 @@ class SessionsViewModel(
 
     fun dismissSummary() { _state.update { it.copy(summarySheet = null) } }
     fun setSourceFilter(source: String) { _state.update { it.copy(sourceFilter = source) } }
-    fun toggleHideHeartbeat() { _state.update { it.copy(hideHeartbeat = !it.hideHeartbeat) } }
-    fun toggleHideScheduled() { _state.update { it.copy(hideScheduled = !it.hideScheduled) } }
+
+    /** 类别切换（排他，对齐 web：点已选中的类别取消，回到「全部对话」）。
+     *  定时/心跳类别走服务端 title_prefixes 单独拉取；回「全部对话」重新走默认 cached 加载。 */
+    fun toggleCategory(category: String) {
+        val next = if (_state.value.categoryFilter == category) "" else category
+        _state.update { it.copy(categoryFilter = next) }
+        when (next) {
+            "scheduled", "heartbeat" -> fetchCategory(next)
+            else -> load()
+        }
+    }
+
+    /** 按类别单独拉列表（对齐 web 的 title_prefixes 请求）：只取该前缀的会话 */
+    private fun fetchCategory(category: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                val prefixes = if (category == "scheduled") "[定时]" else "[心跳]"
+                val sessions = repository.getSessions(limit = 50, titlePrefixes = prefixes, hideBackground = true)
+                _state.update { it.copy(sessions = sessions, isLoading = false) }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+            }
+        }
+    }
     fun toggleSource(source: String) {
         _state.update { st ->
             val current = st.selectedSources
