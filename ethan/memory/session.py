@@ -1116,6 +1116,39 @@ class SessionStore:
         await self._db.commit()
         return True
 
+    async def delete_many(self, session_ids: list[str]) -> list[str]:
+        """批量删除会话，返回**实际删掉**的 id 列表（不存在的会被跳过）。
+
+        与 delete() 语义一致：清 intermediate 目录 + 删 messages + 删 sessions。
+        分两趟查删的原因是「实际删了哪些」要如实回报——前端才能把「列表过期、
+        有 N 个已不存在」和「真出错」区分开（同 /models/delete-batch 的做法）。
+        """
+        if not session_ids:
+            return []
+        from ethan.core.paths import user_intermediate_dir
+
+        # 去重但保留顺序，避免重复 id 造成 rowcount 虚高
+        uniq = list(dict.fromkeys(session_ids))
+
+        existing: list[str] = []
+        placeholders = ",".join("?" * len(uniq))
+        async with self._db.execute(
+            f"SELECT id FROM sessions WHERE id IN ({placeholders})", uniq
+        ) as cursor:
+            existing = [row[0] for row in await cursor.fetchall()]
+        if not existing:
+            return []
+
+        inter_dir = user_intermediate_dir()
+        for sid in existing:
+            shutil.rmtree(inter_dir / sid, ignore_errors=True)
+
+        ph = ",".join("?" * len(existing))
+        await self._db.execute(f"DELETE FROM messages WHERE session_id IN ({ph})", existing)
+        await self._db.execute(f"DELETE FROM sessions WHERE id IN ({ph})", existing)
+        await self._db.commit()
+        return existing
+
     async def replace_messages(self, session_id: str, messages: list[Message]) -> None:
         """用新消息集替换该 session 的全部消息（/compact 压缩历史用）。
 

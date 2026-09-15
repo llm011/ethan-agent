@@ -245,6 +245,37 @@ export async function deleteSession(id: string): Promise<void> {
   deleteSessionDetail(id).catch(() => {});
 }
 
+/** 批量删除会话。返回 (deleted, missing)：missing 是「列表已过期、服务端已不存在」的数量。 */
+export async function deleteSessionsBatch(
+  ids: string[]
+): Promise<{ deleted: number; missing: number }> {
+  const res = await fetch(`${API_URL}/sessions/delete-batch`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error("Batch delete failed");
+  const data = await res.json();
+  // 清掉这些会话的 IndexedDB 缓存（不管服务端是否真的删了，本地都该失效）
+  ids.forEach((id) => deleteSessionDetail(id).catch(() => {}));
+  return { deleted: data.deleted ?? 0, missing: data.missing ?? 0 };
+}
+
+/** 批量标记/取消「完成」（标题 ✅ 前缀约定）。 */
+export async function toggleDoneSessionsBatch(
+  ids: string[],
+  done: boolean
+): Promise<{ updated: number; missing: number; skipped: number }> {
+  const res = await fetch(`${API_URL}/sessions/toggle-done-batch`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, done }),
+  });
+  if (!res.ok) throw new Error("Batch toggle done failed");
+  const data = await res.json();
+  return { updated: data.updated ?? 0, missing: data.missing ?? 0, skipped: data.skipped ?? 0 };
+}
+
 export async function deleteMessage(sessionId: string, messageId: number): Promise<void> {
   const res = await fetch(`${API_URL}/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE", headers: headers() });
   if (!res.ok) throw new Error("Delete message failed");

@@ -37,6 +37,18 @@ class NetworkConfig(BaseModel):
     mcp_api_key: str = ""  # MCP Server 端点鉴权 key（豆包等外部 MCP 客户端连接时使用）
 
 
+class ServerConfig(BaseModel):
+    """ethan serve（HTTP API + Web UI）的监听地址。
+
+    优先级：显式命令行参数 > 本配置 > 内置默认（0.0.0.0:8900）。
+    注意 save_config 用 exclude_defaults=True，两个字段都等于默认值时不会写进
+    config.yaml——改过端口才会落盘。
+    """
+
+    host: str = "0.0.0.0"  # 监听地址；只想本机访问可设 127.0.0.1
+    port: int = 8900  # 监听端口
+
+
 class WeChatConfig(BaseModel):
     enabled: bool = False  # 设为 true 后 ethan serve 自动启动 iLink 长轮询
     # 登录凭证由 ethan wechat login（或首次启动时扫码）自动写入
@@ -283,6 +295,7 @@ class Config(BaseModel):
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     models: list[ModelEntry] = Field(default_factory=list)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     lark: LarkConfig = Field(default_factory=LarkConfig)
     wechat: WeChatConfig = Field(default_factory=WeChatConfig)
@@ -351,6 +364,10 @@ def _default_config() -> dict:
         ],
         "network": {
             "proxy": None,
+        },
+        "server": {
+            "host": "0.0.0.0",
+            "port": 8900,
         },
         "defaults": {
             "model": os.environ.get("AGENT_DEFAULT_MODEL", "claude-sonnet-4.6"),
@@ -697,6 +714,21 @@ def _apply_env_overrides(raw: dict) -> None:
     auth_env = os.environ.get("ETHAN_AUTH_TOKEN", "")
     if auth_env:
         raw.setdefault("network", {})["auth_token"] = auth_env
+
+    # ethan serve 监听地址：ETHAN_SERVER_HOST / ETHAN_SERVER_PORT 覆盖（与上面的
+    # ETHAN_PROXY / ETHAN_AUTH_TOKEN 同语义，env 赢过 config.yaml）。
+    # 不能做成"config 优先"：config.yaml 首次生成时就会写入默认的 0.0.0.0:8900，
+    # 那样 docker/脚本设了环境变量也永远不生效。
+    server_raw = raw.setdefault("server", {})
+    host_env = os.environ.get("ETHAN_SERVER_HOST", "")
+    if host_env:
+        server_raw["host"] = host_env
+    port_env = os.environ.get("ETHAN_SERVER_PORT", "")
+    if port_env:
+        try:
+            server_raw["port"] = int(port_env)
+        except ValueError:
+            pass  # 非法端口忽略，交给 pydantic 默认值
 
 
 # ── 单例 ────────────────────────────────────────────────────────

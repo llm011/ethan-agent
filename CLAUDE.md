@@ -34,11 +34,17 @@ git branch -d feature/<feature-name>
 
 **问题**：ethan 的 watchdog 机制通过 `/tmp/ethan/server.pid` 管理服务进程。多个 worktree 同时启动 `ethan serve` 会互相冲突——watchdog 会杀掉 PID 文件指向的进程，导致非主实例被误杀。
 
+**已落地的缓解措施**：
+- **`ethan serve` 启动前会检测重复实例**（`cli.py` 的 `_find_conflicting_servers()`）：判据是「**是否打开同一个 `sessions.db`**」（不是同端口——两个实例用不同端口照样互锁），命中就报错退出并列出冲突 PID，避免多个实例并发写导致 `database is locked`（历史上表现为「对话卡住没响应」，其实不是性能问题）。
+  - **`ETHAN_NO_WATCHDOG=1` 会跳过这个检测**——它的语义就是「我在开发/测试，别管我」。worktree 里跑测试时 `sessions.db` 和已 install 的常驻服务是同一个文件，不放行会把下面的开发流程整个堵死。
+  - 不想设环境变量时也可用 `ethan serve --force`（不推荐，真的会锁冲突）。
+- **监听地址可在 `config.yaml` 配**：`server.host` / `server.port`，优先级 **显式 `--port` > config > 默认 8900**，`ETHAN_SERVER_HOST`/`ETHAN_SERVER_PORT` 环境变量再覆盖前两者。watchdog 的端口扫描（`_kill_server` 的 `lsof -ti :<port>`）已参数化跟随实际端口，不再写死 8900 误杀。watchdog 会把监控端口写进 `/tmp/ethan/watchdog.port`，`ensure_watchdog_running` 复用前比对，端口不一致就换掉旧的（否则改端口后会复用到盯旧端口的 watchdog）。
+
 **规则**：
-1. **默认端口 8900 同一时间只能有一个实例**。watchdog 只监控 8900 端口，非 8900 端口的实例会被 watchdog 视为"server 死亡"并触发重启，可能杀掉其他实例。
+1. **默认端口 8900 同一时间只能有一个实例**。watchdog 只监控被拉起时传入的端口，非该端口的实例会被 watchdog 视为"server 死亡"并触发重启，可能杀掉其他实例。
 2. **开发测试时使用随机端口**（8901-8999 之间），但要意识到：
    - 启动的实例**不要写入 `/tmp/ethan/server.pid`**（否则会被 watchdog 杀）
-   - 实例可能被 watchdog 的端口扫描误杀（`_kill_server` 会扫描 8900 端口占用）
+   - 实例可能被 watchdog 的端口扫描误杀（`_kill_server` 会扫描它被指派的端口；若该端口恰好是你的测试端口则会误杀）
    - 优先用 `ethan -p "prompt" --yes` 单轮模式测试，不启动常驻服务
 3. **浏览器插件测试**：浏览器插件通过 `ws://localhost:<port>/ws/browser` 连接 ethan。测试前确认：
    - ethan 服务在监听目标端口
@@ -47,7 +53,7 @@ git branch -d feature/<feature-name>
    4. **启动命令示例**（worktree 开发测试）：
    ```bash
    # 随机端口 8901-8999，避开 8900（watchdog 占用）和已用端口
-   # ETHAN_NO_WATCHDOG=1 跳过 PID 写入和 watchdog，避免与其他实例冲突
+   # ETHAN_NO_WATCHDOG=1 跳过重复实例检测 + PID 写入 + watchdog，避免与其他实例冲突
    PORT=$((RANDOM % 99 + 8901))
    ETHAN_NO_WATCHDOG=1 .venv/bin/ethan serve --host 127.0.0.1 --port $PORT
    ```

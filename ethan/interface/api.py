@@ -91,6 +91,10 @@ import os as _os  # noqa: E402
 
 _WEB_DIST = Path(_os.environ.get("WEB_DIST_PATH") or (Path(__file__).parent.parent / "web_dist"))
 
+# run_server 绑定的实际地址，供 lifespan 里的 watchdog 拉起逻辑取用
+# （lifecycle 回调拿不到 run_server 的参数，只能通过模块级状态传递）。
+_SERVER_BIND: tuple[str, int] = ("0.0.0.0", 8900)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -148,7 +152,9 @@ async def lifespan(app: FastAPI):
     if os.environ.get("ETHAN_NO_WATCHDOG") != "1":
         from ethan.watchdog import ensure_watchdog_running, write_server_pid
         write_server_pid()
-        ensure_watchdog_running()
+        # 把实际端口传给 watchdog，否则它只会盯 8900——服务跑在非默认端口时
+        # 会被判"死亡"反复重启，且 _kill_server 的端口扫描会误杀别的实例。
+        ensure_watchdog_running(port=_SERVER_BIND[1])
     # 主动启动调度器，确保持久化的定时任务在服务重启后自动恢复运行。
     # 不能依赖懒加载（首次 GET /api/schedule 才 start），否则服务空跑时 job 永远不触发。
     # 保存主 event loop 引用，供定时任务回调中 run_coroutine_threadsafe 使用。
@@ -278,10 +284,29 @@ if _WEB_DIST.exists():
         return Response(status_code=404)
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8900):
+def run_server(host: str | None = None, port: int | None = None):
     import os
 
     import uvicorn
+
+    # 未显式指定时跟随 config.yaml 的 server.*，再回退内置默认。
+    # config 读不到（首次运行/config 损坏）也不该让服务起不来，故兜底默认值。
+    if host is None or port is None:
+        try:
+            from ethan.core.config import get_config
+
+            srv = get_config().server
+            host = host if host is not None else srv.host
+            port = port if port is not None else srv.port
+        except Exception:
+            pass
+    host = host or "0.0.0.0"
+    port = port or 8900
+
+    # lifespan 里的 watchdog 拉起逻辑拿不到这里的参数，通过模块级状态传递
+    global _SERVER_BIND
+    _SERVER_BIND = (host, port)
+
     # 暴露端口给同进程内的后台任务回调（background_task 用它拼 base url，而非写死 8900）
     os.environ["ETHAN_SERVER_PORT"] = str(port)
     uvicorn.run(app, host=host, port=port)

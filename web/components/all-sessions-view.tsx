@@ -3,10 +3,10 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { SessionInfo, fetchSessions, fetchSession, renameSession, deleteSession, cleanupTrivialSessions, fetchModes, pinSession, unpinSession, type ModeEntry } from "@/lib/api";
+import { SessionInfo, fetchSessions, fetchSession, renameSession, deleteSession, deleteSessionsBatch, toggleDoneSessionsBatch, cleanupTrivialSessions, fetchModes, pinSession, unpinSession, type ModeEntry } from "@/lib/api";
 import { hasUnread } from "@ethan/shared/lib/unread";
 import { UnreadDot } from "@ethan/shared/components/unread-dot";
-import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser, Pin, PinOff, CircleCheck } from "lucide-react";
+import { Loader2, Search, Calendar, MessageSquare, ChevronLeft, ChevronRight, Pencil, Trash2, Check, X, Eraser, Pin, PinOff, CircleCheck, ListChecks } from "lucide-react";
 import { Input } from "@ethan/shared/ui/input";
 import { Button } from "@ethan/shared/ui/button";
 import { Badge } from "@ethan/shared/ui/badge";
@@ -51,6 +51,12 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
   const [categoryFilter, setCategoryFilter] = useState<"" | "scheduled" | "heartbeat" | "images">("");
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupMsg, setCleanupMsg] = useState("");
+  // ── 批量操作（多选）状态 ──
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchMsg, setBatchMsg] = useState("");
+  const [batchConfirm, setBatchConfirm] = useState(false);
   const [previewSessionId, setPreviewSessionId] = useState<string | null>(null);
   const [previewMessages, setPreviewMessages] = useState<Message[]>([]);
   const [previewTitle, setPreviewTitle] = useState("");
@@ -95,10 +101,10 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     }
   }, [page, search, filterSource, filterMode, categoryFilter, loadSessions]);
 
-  // Poll for new sessions every 3s（搜索/筛选/非第一页时暂停，避免轮询结果覆盖当前视图）
+  // Poll for new sessions every 3s（搜索/筛选/非第一页/批量选择时暂停，避免轮询结果覆盖当前视图或清掉选中态）
   useEffect(() => {
     const interval = setInterval(async () => {
-      if (page !== 1) return;
+      if (page !== 1 || selectMode) return;
       if (search.trim() || filterSource || filterMode !== "__all__" || categoryFilter) return;
       try {
         const data = await fetchSessions(limit, 0, undefined, undefined, undefined, true, true, undefined, undefined, true);
@@ -111,7 +117,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     }, 3000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search, filterSource, filterMode, categoryFilter]);
+  }, [page, search, filterSource, filterMode, categoryFilter, selectMode]);
 
   const commitRename = async (id: string) => {
     const title = editingTitle.trim();
@@ -202,6 +208,71 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
     }
   };
 
+  // ── 批量操作（多选） ──────────────────────────────────────────────
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setBatchMsg("");
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allSelected = sessions.length > 0 && sessions.every(s => selectedIds.has(s.id));
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(sessions.map(s => s.id)));
+  };
+
+  const reloadAndRefresh = () => {
+    loadSessions(page, search.trim(), filterSource, filterMode, categoryFilter);
+    window.dispatchEvent(new CustomEvent("sessions:refresh"));
+  };
+
+  // 批量删除：单次确认；服务端返回真实删除数与「列表已过期」的 missing 数
+  const doBatchDelete = async () => {
+    setBatchConfirm(false);
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBatchBusy(true);
+    try {
+      const { deleted, missing } = await deleteSessionsBatch(ids);
+      setBatchMsg(missing > 0 ? `已删除 ${deleted} 个，另有 ${missing} 个已不存在` : `已删除 ${deleted} 个对话`);
+      setSelectedIds(new Set());
+      reloadAndRefresh();
+    } catch {
+      setBatchMsg("批量删除失败，请稍后重试");
+    } finally {
+      setBatchBusy(false);
+      setTimeout(() => setBatchMsg(""), 4000);
+    }
+  };
+
+  const doBatchToggleDone = async (done: boolean) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBatchBusy(true);
+    try {
+      const { updated, missing, skipped } = await toggleDoneSessionsBatch(ids, done);
+      const parts = [`已${done ? "标记完成" : "取消完成"} ${updated} 个`];
+      if (missing > 0) parts.push(`${missing} 个已不存在`);
+      if (skipped > 0) parts.push(`${skipped} 个系统会话已跳过`);
+      setBatchMsg(parts.join("，"));
+      setSelectedIds(new Set());
+      reloadAndRefresh();
+    } catch {
+      setBatchMsg("批量操作失败，请稍后重试");
+    } finally {
+      setBatchBusy(false);
+      setTimeout(() => setBatchMsg(""), 4000);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-background">
       <ConfirmDialog
@@ -212,10 +283,28 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         onConfirm={doDelete}
         onCancel={() => setConfirmState({ open: false, id: "" })}
       />
+      <ConfirmDialog
+        open={batchConfirm}
+        title={`删除 ${selectedIds.size} 个对话`}
+        description={`确定要删除选中的 ${selectedIds.size} 个对话吗？此操作无法撤销。`}
+        confirmLabel="删除"
+        onConfirm={doBatchDelete}
+        onCancel={() => setBatchConfirm(false)}
+      />
       <div className="relative p-4 border-b border-border bg-sidebar flex items-center justify-between gap-3 shrink-0 flex-wrap">
         <HeaderFillet />
         <h1 className="text-lg font-semibold shrink-0">全部历史对话 <span className="text-sm font-normal text-muted-foreground ml-1">({total})</span></h1>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant={selectMode ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs px-2.5"
+            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+            title="进入批量操作：勾选多个对话后统一删除 / 标记完成"
+          >
+            <ListChecks className="h-3.5 w-3.5 mr-1" />
+            {selectMode ? "退出批量" : "批量操作"}
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -307,6 +396,56 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
         </div>
       </div>
 
+      {/* 批量操作条：仅在多选模式出现 */}
+      {selectMode && (
+        <div className="flex items-center gap-2 flex-wrap px-4 py-2.5 border-b border-border bg-primary/5 shrink-0">
+          <span className="text-xs font-medium">已选 {selectedIds.size} 项</span>
+          <Button variant="outline" size="sm" className="h-7 text-xs px-2" onClick={toggleSelectAll}>
+            {allSelected ? "取消全选" : "全选本页"}
+          </Button>
+          <span className="w-px h-5 bg-border mx-0.5" />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs px-2"
+            disabled={batchBusy || selectedIds.size === 0}
+            onClick={() => doBatchToggleDone(true)}
+          >
+            <CircleCheck className="h-3.5 w-3.5 mr-1" />
+            标记完成
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs px-2"
+            disabled={batchBusy || selectedIds.size === 0}
+            onClick={() => doBatchToggleDone(false)}
+          >
+            取消完成
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="h-7 text-xs px-2"
+            disabled={batchBusy || selectedIds.size === 0}
+            onClick={() => setBatchConfirm(true)}
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1" />
+            删除
+          </Button>
+          {batchBusy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          {batchMsg && <span className="text-xs text-muted-foreground">{batchMsg}</span>}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs px-2 ml-auto text-muted-foreground"
+            onClick={exitSelectMode}
+          >
+            退出
+          </Button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-4">
         {loading && sessions.length === 0 ? (
           <div className="flex items-center justify-center h-full">
@@ -345,10 +484,25 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
               return (
                 <div
                   key={session.id}
-                  onClick={() => handlePreviewSession(session.id)}
-                  className="group relative p-4 rounded-2xl border border-border bg-card hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer flex flex-col min-h-[112px]"
+                  onClick={() => (selectMode ? toggleSelect(session.id) : handlePreviewSession(session.id))}
+                  className={`group relative p-4 rounded-2xl border bg-card transition-all duration-200 cursor-pointer flex flex-col min-h-[112px] ${
+                    selectMode && selectedIds.has(session.id)
+                      ? "border-primary ring-1 ring-primary/40 shadow-lg shadow-primary/5"
+                      : "border-border hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5"
+                  }`}
                 >
-                  {hasUnread(session) && (
+                  {/* 多选模式下左上角显示勾选框（原生 checkbox，与设置页风格一致） */}
+                  {selectMode && (
+                    <input
+                      type="checkbox"
+                      className="absolute top-3 right-3 h-4 w-4 accent-primary cursor-pointer z-10"
+                      checked={selectedIds.has(session.id)}
+                      onChange={() => toggleSelect(session.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label="选择对话"
+                    />
+                  )}
+                  {!selectMode && hasUnread(session) && (
                     <UnreadDot className="absolute top-3 right-3 ring-4 ring-card group-hover:opacity-0 transition-opacity" />
                   )}
                   <div className="flex items-start gap-2.5 mb-1">
@@ -379,7 +533,7 @@ export function AllSessionsView({ onSelectSession }: AllSessionsViewProps) {
                         }}
                       />
                     )}
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    <div className={`flex items-center gap-0.5 transition-opacity shrink-0 ${selectMode ? "hidden" : "opacity-0 group-hover:opacity-100"}`}>
                       <button
                         onClick={e => handleTogglePin(session.id, e)}
                         className="p-1.5 hover:text-primary hover:bg-primary/10 text-muted-foreground rounded-lg"

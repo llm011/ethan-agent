@@ -577,6 +577,10 @@ models:
 network:
   proxy: http://127.0.0.1:7890           # global proxy
 
+server:                                  # `ethan serve` (HTTP API + Web UI) listen address
+  host: 0.0.0.0                          # set 127.0.0.1 for local-only access
+  port: 8900                             # explicit `--port` still wins; restart serve after changing
+
 defaults:
   model: claude-sonnet-4-6
   agent_name: Ethan

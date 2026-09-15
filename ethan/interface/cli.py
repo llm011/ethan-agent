@@ -69,14 +69,145 @@ def _register_subcommands():
 serve_app = typer.Typer(help="管理 API 服务")
 app.add_typer(serve_app, name="serve")
 
+
+def _find_conflicting_servers() -> list[tuple[int, str]]:
+    """找出正在运行、且会写入同一个 sessions.db 的 serve 进程。
+
+    冲突的本质是抢同一个 SQLite 文件（单写者模型），不是抢端口——两个实例用不同
+    端口照样互锁。所以判据取「进程实际打开的 sessions.db 路径」与当前进程目标路径
+    是否一致，而不是端口是否相同。
+
+    返回 [(pid, db_path), ...]，不含当前进程自身。
+    """
+    import os
+    import subprocess
+    from pathlib import Path
+
+    try:
+        from ethan.core.paths import user_sessions_db_path
+
+        my_db = user_sessions_db_path().resolve()
+    except Exception:
+        return []
+
+    me = os.getpid()
+    try:
+        r = subprocess.run(
+            ["pgrep", "-f", "ethan.*serve"],
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return []
+
+    conflicts: list[tuple[int, str]] = []
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if not line.isdigit():
+            continue
+        pid = int(line)
+        if pid == me:
+            continue
+        # 用 lsof 读该进程实际打开的 sessions.db，比解析环境变量更可靠
+        try:
+            lr = subprocess.run(
+                ["lsof", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            continue
+        for lline in lr.stdout.splitlines():
+            if "sessions.db" not in lline:
+                continue
+            # lsof 最后一列是路径；-journal/-wal 附属文件要归一化回主库
+            path = lline.split()[-1]
+            for suffix in ("-journal", "-wal", "-shm"):
+                if path.endswith(suffix):
+                    path = path[: -len(suffix)]
+            try:
+                if Path(path).resolve() == my_db:
+                    conflicts.append((pid, str(my_db)))
+                    break
+            except Exception:
+                continue
+    return conflicts
+
+
+def _server_bind_defaults(explicit_host: Optional[str], explicit_port: Optional[int]) -> tuple[str, int]:
+    """解析 serve 实际监听地址：显式参数 > config.yaml server.* > 内置默认。
+
+    config 读不到时（首次运行 / config 损坏）静默回退默认值——绑定地址不该
+    因为配置问题导致服务起不来。
+    """
+    host, port = explicit_host, explicit_port
+    if host is None or port is None:
+        try:
+            from ethan.core.config import get_config
+
+            srv = get_config().server
+            if host is None:
+                host = srv.host
+            if port is None:
+                port = srv.port
+        except Exception:
+            pass
+    return host or "0.0.0.0", port or 8900
+
+
 @serve_app.callback(invoke_without_command=True)
 def serve_main(
     ctx: typer.Context,
-    host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
-    port: int = typer.Option(8900, "--port", help="Bind port"),
+    host: Optional[str] = typer.Option(
+        None, "--host", help="Bind host（默认取 config server.host，缺省 0.0.0.0）"
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Bind port（默认取 config server.port，缺省 8900）"
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="已有实例在运行同一数据目录时，仍强制启动（不推荐，会导致 SQLite 锁冲突）",
+    ),
 ) -> None:
     """Start the HTTP API server. Default runs in foreground."""
     if ctx.invoked_subcommand is None:
+        import os
+
+        host, port = _server_bind_defaults(host, port)
+        # ETHAN_NO_WATCHDOG=1 是开发/测试开关（CLAUDE.md 的多 worktree 规范），
+        # 语义就是「我知道自己在干什么，别接管我的进程」。worktree 里跑测试时
+        # sessions.db 与常驻服务是同一个文件，不放行会把日常开发流程堵死。
+        if not force and not os.environ.get("ETHAN_NO_WATCHDOG"):
+            conflicts = _find_conflicting_servers()
+            if conflicts:
+                from rich.console import Console
+
+                console = Console()
+                console.print(
+                    "[red]✗ 已有 ethan 实例正在使用同一数据目录，拒绝启动。[/red]"
+                )
+                console.print()
+                for pid, db in conflicts:
+                    console.print(f"  运行中的实例: [bold]pid={pid}[/bold]")
+                    console.print(f"  数据目录:     [dim]{db}[/dim]")
+                console.print()
+                console.print(
+                    "  多个实例同时写同一个 sessions.db 会导致 [bold]database is locked[/bold]，"
+                    "定时任务与写入静默失败。"
+                )
+                console.print()
+                console.print("  可选操作：")
+                console.print("    ethan serve stop          — 停掉已有实例")
+                console.print(
+                    "    使用不同数据目录              — 设 ETHAN_DATA_DIR 环境变量"
+                )
+                console.print(
+                    "    开发/测试                    — 设 ETHAN_NO_WATCHDOG=1（跳过本检测，"
+                    "不写 PID、不拉起 watchdog）"
+                )
+                console.print("    ethan serve --force        — 强制启动（不推荐，会锁冲突）")
+                raise typer.Exit(1)
         from ethan.interface.api import run_server
         run_server(host=host, port=port)
 
@@ -110,7 +241,7 @@ def serve_stop() -> None:
     console.print("[green]✓ ethan serve 已停止[/green]")
 
 
-def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
+def _launch_web(port: Optional[int] = None, url: Optional[str] = None) -> None:
     import os
     import socket
     import subprocess
@@ -126,6 +257,9 @@ def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
     if url:
         webbrowser.open(url)
         return
+
+    # 未显式指定端口时跟随 config server.port（与 serve 用同一套默认值解析）
+    _, port = _server_bind_defaults(None, port)
 
     def _port_open(p: int) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -194,7 +328,9 @@ app.add_typer(web_app, name="web")
 @web_app.callback(invoke_without_command=True)
 def web_main(
     ctx: typer.Context,
-    port: int = typer.Option(8900, "--port", help="Web UI port"),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Web UI port（默认取 config server.port，缺省 8900）"
+    ),
     url: Optional[str] = typer.Option(None, "--url", help="Direct URL to open"),
 ):
     """Launch the Web UI and open it in the browser."""
@@ -260,9 +396,9 @@ def chat(
     if ctx.invoked_subcommand is not None:
         return
 
-    # ── Auto-launch web UI on port 8900 ──────────────────────────────
+    # ── Auto-launch web UI（端口跟随 config server.port）──────────────
     if not prompt:
-        _launch_web(8900)
+        _launch_web()
     # ─────────────────────────────────────────────────────────────────
 
     import asyncio
