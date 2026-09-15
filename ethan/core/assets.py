@@ -143,6 +143,9 @@ def build_rgb565_thumbnail(src: Path, width: int) -> tuple[Path, int, int] | Non
 
 # 大多数 LLM provider 对图片单边尺寸限制 8000px（Anthropic/Kiro 等）
 _MAX_IMAGE_DIM = 8000
+# 附图给模型（vision）的经济尺寸：超过 ~1568px 后 Anthropic 按约 (w*h)/750 计
+# token，缩到 1568px 内信息密度最高，再大纯属浪费上下文。
+VISION_MAX_DIM = 1568
 
 
 def _downscale_bytes(raw: bytes, media_type: str = "image/png", max_dim: int = _MAX_IMAGE_DIM) -> tuple[bytes, bool, str]:
