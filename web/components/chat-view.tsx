@@ -56,6 +56,7 @@ import { placeholderTitle, mapDetailMessages, historicUsageOf, isFirstQuerySigni
 import { consumeStream } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
+import { IDLE_SESSION_REFRESH_EVENT, useLiveSessions } from "@/components/chat/use-live-sessions";
 import { usePreview } from "@/components/preview-panel/preview-context";
 import { PreviewPanel, getStoredPanelSize, storePanelSize } from "@/components/preview-panel/preview-panel";
 import { ResizeHandle } from "@/components/preview-panel/resize-handle";
@@ -84,6 +85,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const _setStreaming = (v: boolean) => { streamingRef.current = v; setStreaming(v); };
   const streamAbortRef = useRef<AbortController | null>(null);
 
+  // handleRefreshSession 的串行化链：指向「最近一次刷新的 promise」，见其定义处。
+  const refreshChainRef = useRef<Promise<void> | null>(null);
+
+  // 订阅「后台有会话变了」的信号（定时任务 / 别的窗口 / CLI / 渠道都可能改当前这条会话）。
+  // 挂在这里而不是挂在某个子组件上：刷新要同时更新消息、标题和标注，这些都是
+  // ChatView 自己的状态。事件消费见下面那个 useEffect。
+  useLiveSessions();
+
   // 当前**正在显示**的会话 id（实时）。
   //
   // 两个来源，取「最新」的一个：
@@ -98,6 +107,16 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // 不能用 activeSession state：它是「会话数据已加载完」才置位的，加载期间是 null/旧值；
   // 而串台恰恰发生在切换的瞬间（新会话还在加载、旧流还在吐 chunk）。
   const displayedSessionRef = useRef<string | null>(initialSessionId ?? null);
+  // 与 displayedSessionRef 同步写入的**镜像**，只为下面的事件监听器能用最新值 —— 监听器
+  // 只在挂载时注册一次，闭包里的 activeSession state 会永远停在首次渲染的那个会话上。
+  // 这里刻意用「同一处赋值、两个落点」而不是「监听器随 activeSession 重挂」：
+  // 和桌面端保持同一份实现，两端行为一致才好对照。新增 setActiveSession 的调用点时，
+  // 必须同时补这一行 —— 漏了就会让「后台更新自动刷新」悄悄只对部分会话生效。
+  const activeSessionRef = useRef<string | null>(initialSessionId ?? null);
+  const setActiveSessionBoth = useCallback((id: string | null) => {
+    activeSessionRef.current = id;
+    setActiveSession(id);
+  }, []);
   // 路由**变化**时同步（render 阶段直接赋值，保证任何时刻读到的都是本次渲染的值）。
   // 只在路由值真的变了的时候覆盖，避免把「发送时显式指派的新会话 id」冲掉
   // ——新建会话时 sessionId 先于路由生效，那一帧路由还是旧值/undefined。
@@ -106,6 +125,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   if (lastRouteSessionRef.current !== routeSessionId) {
     lastRouteSessionRef.current = routeSessionId;
     displayedSessionRef.current = routeSessionId;
+    activeSessionRef.current = routeSessionId;
   }
 
   /**
@@ -402,17 +422,59 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleRefreshSession = useCallback(async () => {
     const sid = activeSession;
     if (!sid || streaming || bgPolling) return;
-    // 只拉最近一页：这里是「后台会话执行中」的静默刷新，全量拉长会话要好几秒。
-    // 用 replaceTailKeepOlder 保留用户已上滚翻出来的更早历史，不能整表替换。
-    const detail = await fetchSessionPage(sid, { limit: MESSAGE_PAGE_SIZE }).catch(() => null);
-    if (!detail) return;
-    setSessionTitle(detail.title || "");
-    const loaded = mapDetailMessages(detail);
-    setMessages((prev) => replaceTailKeepOlder(prev, loaded));
-    fetchAnnotationsFor(loaded);
-    setSessionUsage(historicUsageOf(detail));
+    // 同一时刻只允许一次在途刷新：串行化用「上一次的 promise」而不是一个 boolean ——
+    // 订阅者（占位条的 5s 轮询 / 后台变化的 3s 轮询）随时可能在上一发还没回来时再触发，
+    // 用 boolean 的话第二发会被直接丢掉，而第二发往往才是真正需要的那次（新内容到了）。
+    const prev = refreshChainRef.current;
+    let release!: () => void;
+    refreshChainRef.current = new Promise<void>((r) => (release = r));
+    try {
+      if (prev) await prev;
+      // 只拉最近一页：这里是「后台会话执行中」的静默刷新，全量拉长会话要好几秒。
+      // 用 replaceTailKeepOlder 保留用户已上滚翻出来的更早历史，不能整表替换。
+      const detail = await fetchSessionPage(sid, { limit: MESSAGE_PAGE_SIZE }).catch(() => null);
+      if (!detail) return;
+      setSessionTitle(detail.title || "");
+      const loaded = mapDetailMessages(detail);
+      setMessages((prev) => replaceTailKeepOlder(prev, loaded));
+      fetchAnnotationsFor(loaded);
+      setSessionUsage(historicUsageOf(detail));
+    } finally {
+      release();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession, streaming, bgPolling]);
+
+  // 后台（定时任务、别的窗口、CLI、渠道）往当前会话追加内容后，把界面拉上来。
+  //
+  // 信号来自 useLiveSessions（消费 /poll 的 updated_at 与 active_sessions 变化），
+  // 这里只负责判断「变的是不是我正开着的这条」——事件里带的是会话 id 列表，
+  // 不是内容，所以刷新仍然走 handleRefreshSession 那条「拉一页尾部、保留更早历史」的路径。
+  //
+  // 三个刻意的小决定：
+  //
+  // 1. sessionIds 为空数组表示「列表本身的形状变了（有会话新增/消失），但没有任何一条
+  //    的时间戳前进」。新增一条会话不会改动当前这条的尾部，所以这种情况不刷新 ——
+  //    否则每开一个新会话，所有打开的窗口都要白拉一次。
+  // 2. 用 activeSessionRef 取当前会话，而不是闭包里的 activeSession state：这个监听器
+  //    只在挂载时注册一次，闭包里的 activeSession 会永远停在首次渲染的那个会话上，
+  //    切了会话就失效。刻意**不**为 activeSession 再补一个镜像 ref：那会变成「同一份
+  //    状态两处赋值」，正是这次一起修掉的 streamingRef 脱节 bug 的形态；宁可让
+  //    处理函数跟着 activeSession 重挂。
+  // 3. 事件里没有这条会话、但 active_sessions 里出现过它，也要刷：后台轮可能在两次轮询
+  //    之间跑完（一轮很短），列表切片里看不到它的 updated_at 变化，但 active 的翻转
+  //    照样会带上它的 id。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ids = (e as CustomEvent).detail?.sessionIds as string[] | undefined;
+      const sid = activeSessionRef.current;
+      if (!sid || !ids || ids.length === 0) return;
+      if (!ids.includes(sid)) return;
+      void handleRefreshSession();
+    };
+    window.addEventListener(IDLE_SESSION_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(IDLE_SESSION_REFRESH_EVENT, handler);
+  }, [handleRefreshSession]);
 
   const handleResume = useCallback(async (msg: Message) => {
     // 续跑要指定「从哪条消息之后继续」，必须是后端认得的真实 id
@@ -463,7 +525,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (!initialSessionId) {
       // 切换到新会话 — 保存当前输入并切换状态机
       inputStore.switchTo(null, inputRef.current?.value);
-      setActiveSession(null);
+      setActiveSessionBoth(null);
       setSessionTitle("");
       setMessages([]);
       setSessionUsage({ input: 0, output: 0, cache: 0 });
@@ -512,7 +574,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       if (streamingRef.current) return;
       const cachedMsgs = mapDetailMessages(cached);
       setLoadingSession(false);
-      setActiveSession(initialSessionId);
+      setActiveSessionBoth(initialSessionId);
       setSessionTitle(cached.title || "");
       setSessionSource(cached.source || "web");
       setSessionPinnedAt(cached.pinned_at || 0);
@@ -536,7 +598,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         }
         setLoadingSession(false);
         window.dispatchEvent(new CustomEvent("session:loaded", { detail: { sessionId: initialSessionId } }));
-        setActiveSession(initialSessionId);
+        setActiveSessionBoth(initialSessionId);
         setSessionTitle(detail.title || "");
         setSessionSource(detail.source || "web");
         setSessionPinnedAt(detail.pinned_at || 0);
@@ -589,7 +651,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         if (cancelled) return;
         setLoadingSession(false);
         window.dispatchEvent(new CustomEvent("session:loaded", { detail: { sessionId: initialSessionId } }));
-        setActiveSession(null);
+        setActiveSessionBoth(null);
         setSessionTitle("");
         setMessages([]);
       });
@@ -839,7 +901,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const isReview = trimmed === "/review" || trimmed.startsWith("/review ") || trimmed.startsWith("/review\t");
     if (trimmed.startsWith("/") && !isBtw && !isReview) {
       await handleCommand(trimmed, {
-        setMessages, setActiveSession, setSessionTitle,
+        setMessages, setActiveSession: setActiveSessionBoth, setSessionTitle,
         setSessionUsage, setPendingFiles, setQuote, setStreaming: _setStreaming,
         selectedModel, mode, activeSession,
       });
@@ -857,7 +919,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         sessionId = initialSessionId;
         // 标记 "这个会话别让稍后到达的 fetchSession.then 用旧数据覆盖流式消息"
         justFinishedRef.current = initialSessionId;
-        setActiveSession(initialSessionId);
+        setActiveSessionBoth(initialSessionId);
         // 复用分支会命中上面 fetchSession.then 的 justFinishedRef 短路（直接 return，
         // 跳过 setLoadingSession(false)），这里主动清掉 loading，避免界面卡在骨架屏
         setLoadingSession(false);
@@ -865,7 +927,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         try {
           const s = await createSession(selectedModel, mode);
           sessionId = s.id;
-          setActiveSession(s.id);
+          setActiveSessionBoth(s.id);
           const pTitle = placeholderTitle(text);
           setSessionTitle(pTitle);
           window.dispatchEvent(new CustomEvent("session:title-updated", { detail: { sessionId: s.id, title: pTitle } }));

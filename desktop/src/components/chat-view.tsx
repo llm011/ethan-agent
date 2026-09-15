@@ -35,6 +35,7 @@ import { fetchOnboardingStatus, type OnboardingStatus } from "@/lib/api-misc";
 import { fetchBackgroundTasks, type BackgroundTask } from "@/lib/api-misc";
 import { useCachedResource } from "@/lib/use-cached-resource";
 import { mergeSessionPageIntoCache, readSessionCache, writeSessionCache } from "@/lib/session-cache";
+import { IDLE_SESSION_REFRESH_EVENT, useLiveSessions } from "@/components/chat/use-live-sessions";
 import { ReadingMode } from "@/components/chat/reading-mode";
 import { ShareMode } from "@/components/chat/share-mode";
 import { MESSAGE_PAGE_SIZE, isPersistedId, prependOlderMessages, replaceTailKeepOlder } from "@ethan/shared/chat/history";
@@ -155,6 +156,14 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [shareDefaultKey, setShareDefaultKey] = useState<string | null>(null);
 
   const streamAbortRef = useRef<AbortController | null>(null);
+
+  // handleRefreshSession 的串行化链：指向「最近一次刷新的 promise」，见其定义处。
+  const refreshChainRef = useRef<Promise<void> | null>(null);
+
+  // 订阅「后台有会话变了」的信号（定时任务 / 别的窗口 / CLI / 渠道都可能改当前这条会话）。
+  // 挂在这里而不是挂在某个子组件上：刷新要同时更新消息、标题、用量和标注，这些都是
+  // ChatView 自己的状态。事件消费见下面那个 useEffect。
+  useLiveSessions();
 
   // 当前**正在显示**的会话 id（实时）。
   //
@@ -417,26 +426,68 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleRefreshSession = useCallback(async () => {
     const sid = activeSession;
     if (!sid || streaming || bgPolling) return;
-    // 只拉最近一页：这里是「后台会话执行中」的静默刷新，全量拉长会话要好几秒。
-    // 用 replaceTailKeepOlder 保留用户已上滚翻出来的更早历史，不能整表替换。
-    const detail = await fetchSessionPage(sid, { limit: MESSAGE_PAGE_SIZE }).catch(() => null);
-    if (!detail) return;
-    // 只合并进已有全量缓存，不覆盖（这一页只有最近 30 条）
-    mergeSessionPageIntoCache(sid, detail);
-    setSessionTitle(detail.title || "");
-    const loaded = mapDetailMessages(detail);
-    setMessages((prev) => replaceTailKeepOlder(prev, loaded));
-    fetchAnnotationsFor(loaded);
-    const historicUsage = detail.messages
-      .filter((m: any) => m.role === "assistant" && m.usage)
-      .reduce((acc: any, m: any) => ({
-        input: acc.input + (m.usage.input || 0),
-        output: acc.output + (m.usage.output || 0),
-        cache: acc.cache + (m.usage.cache || 0),
-      }), { input: 0, output: 0, cache: 0 });
-    setSessionUsage(historicUsage);
+    // 同一时刻只允许一次在途刷新：串行化用「上一次的 promise」而不是一个 boolean ——
+    // 订阅者（占位条的 5s 轮询 / 后台变化的 3s 轮询）随时可能在上一发还没回来时再触发，
+    // 用 boolean 的话第二发会被直接丢掉，而第二发往往才是真正需要的那次（新内容到了）。
+    const prev = refreshChainRef.current;
+    let release!: () => void;
+    refreshChainRef.current = new Promise<void>((r) => (release = r));
+    try {
+      if (prev) await prev;
+      // 只拉最近一页：这里是「后台会话执行中」的静默刷新，全量拉长会话要好几秒。
+      // 用 replaceTailKeepOlder 保留用户已上滚翻出来的更早历史，不能整表替换。
+      const detail = await fetchSessionPage(sid, { limit: MESSAGE_PAGE_SIZE }).catch(() => null);
+      if (!detail) return;
+      // 只合并进已有全量缓存，不覆盖（这一页只有最近 30 条）
+      mergeSessionPageIntoCache(sid, detail);
+      setSessionTitle(detail.title || "");
+      const loaded = mapDetailMessages(detail);
+      setMessages((prev) => replaceTailKeepOlder(prev, loaded));
+      fetchAnnotationsFor(loaded);
+      const historicUsage = detail.messages
+        .filter((m: any) => m.role === "assistant" && m.usage)
+        .reduce((acc: any, m: any) => ({
+          input: acc.input + (m.usage.input || 0),
+          output: acc.output + (m.usage.output || 0),
+          cache: acc.cache + (m.usage.cache || 0),
+        }), { input: 0, output: 0, cache: 0 });
+      setSessionUsage(historicUsage);
+    } finally {
+      release();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession, streaming, bgPolling]);
+
+  // 后台（定时任务、别的窗口、CLI、渠道）往当前会话追加内容后，把界面拉上来。
+  //
+  // 信号来自 useLiveSessions（消费 /poll 的 updated_at 与 active_sessions 变化），
+  // 这里只负责判断「变的是不是我正开着的这条」——事件里带的是会话 id 列表，
+  // 不是内容，所以刷新仍然走 handleRefreshSession 那条「拉一页尾部、保留更早历史」的路径。
+  //
+  // 三个刻意的小决定：
+  //
+  // 1. sessionIds 为空数组表示「列表本身的形状变了（有会话新增/消失），但没有任何一条
+  //    的时间戳前进」。新增一条会话不会改动当前这条的尾部，所以这种情况不刷新 ——
+  //    否则每开一个新会话，所有打开的窗口都要白拉一次。
+  // 3. 用 displayedSessionRef 取当前会话，而不是闭包里的 activeSession state：这个监听器
+  //    只为 handleRefreshSession 重挂，而 handleRefreshSession 挂着
+  //    eslint-disable exhaustive-deps，它的闭包同样可能停在旧会话上。
+  //    之所以能用 displayedSessionRef：切会话时它和 activeSession 是同一批赋值一起写的
+  //    （见上面 displaySession 那段的说明），语义上它就是「此刻正在显示的会话」，
+  //    而且比 state 更早、更可靠 —— state 要等会话数据加载完才置位，加载期间是 null。
+  //    刻意**不**为 activeSession 再补一个镜像 ref：那会变成「同一份状态两处赋值」，
+  //    正是这次一起修掉的 streamingRef 脱节 bug 的形态。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ids = (e as CustomEvent).detail?.sessionIds as string[] | undefined;
+      const sid = displayedSessionRef.current;
+      if (!sid || !ids || ids.length === 0) return;
+      if (!ids.includes(sid)) return;
+      void handleRefreshSession();
+    };
+    window.addEventListener(IDLE_SESSION_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(IDLE_SESSION_REFRESH_EVENT, handler);
+  }, [handleRefreshSession]);
 
   const handleResume = useCallback(async (msg: Message) => {
     // 续跑要指定「从哪条消息之后继续」，必须是后端认得的真实 id
