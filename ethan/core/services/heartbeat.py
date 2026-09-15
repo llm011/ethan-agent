@@ -296,7 +296,10 @@ async def _tick() -> None:
     if not os.environ.get("ETHAN_NO_WATCHDOG"):
         try:
             from ethan.watchdog import check_watchdog_health
-            check_watchdog_health()
+            # 用本进程实际监听端口（run_server 启动时写入），否则 watchdog 被
+            # 拉起后会盯错端口。非 serve 场景（CLI）没这个变量，回退默认。
+            _port = int(os.environ.get("ETHAN_SERVER_PORT", "8900") or "8900")
+            check_watchdog_health(port=_port)
         except Exception:
             logger.exception("[Heartbeat] Watchdog health check failed")
     # watchdog 存活后，其余任务并行执行：

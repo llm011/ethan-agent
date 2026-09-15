@@ -77,8 +77,12 @@ def write_server_pid() -> None:
     logger.info("[Watchdog] Server PID %d written to %s", os.getpid(), SERVER_PID_FILE)
 
 
-def ensure_watchdog_running() -> None:
-    """Server 侧确保 watchdog 进程在运行。不在就拉起。"""
+def ensure_watchdog_running(port: int = DEFAULT_PORT) -> None:
+    """Server 侧确保 watchdog 进程在运行。不在就拉起。
+
+    port 必须传 server 的实际监听端口：watchdog 靠 HTTP ping 该端口判活，
+    盯错端口会把健康的 server 误判为死亡并反复重启。
+    """
     existing_pid = _read_pid(WATCHDOG_PID_FILE)
     if existing_pid:
         logger.info("[Watchdog] Watchdog already running (pid=%d)", existing_pid)
@@ -90,22 +94,22 @@ def ensure_watchdog_running() -> None:
     python = str(venv_python) if venv_python.exists() else sys.executable
 
     proc = subprocess.Popen(
-        [python, "-m", "ethan.watchdog", "--daemon"],
+        [python, "-m", "ethan.watchdog", "--daemon", "--port", str(port)],
         cwd=str(project_root),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,  # 脱离父进程会话，父死不影响子
     )
-    logger.info("[Watchdog] Started watchdog (pid=%d)", proc.pid)
+    logger.info("[Watchdog] Started watchdog (pid=%d), monitoring port %d", proc.pid, port)
 
 
-def check_watchdog_health() -> None:
+def check_watchdog_health(port: int = DEFAULT_PORT) -> None:
     """Server 的 heartbeat 里调用：检查 watchdog 是否存活，不在就重新拉起。"""
     existing_pid = _read_pid(WATCHDOG_PID_FILE)
     if existing_pid:
         return
     logger.warning("[Watchdog] Watchdog process not found, restarting...")
-    ensure_watchdog_running()
+    ensure_watchdog_running(port=port)
 
 
 # ── Watchdog 侧：主循环 ──────────────────────────────────────────────
@@ -126,8 +130,12 @@ def _check_server_health(port: int) -> bool:
         return False
 
 
-def _kill_server() -> None:
-    """强杀 server 进程（通过 PID 文件或端口扫描）。"""
+def _kill_server(port: int = DEFAULT_PORT) -> None:
+    """强杀 server 进程（通过 PID 文件或端口扫描）。
+
+    端口扫描必须用实际监控端口：写死 8900 会在服务跑在非默认端口时，
+    误杀恰好占用 8900 的其它实例。
+    """
     pid = _read_pid(SERVER_PID_FILE)
     if pid:
         logger.warning("[Watchdog] Killing server (pid=%d)", pid)
@@ -141,7 +149,7 @@ def _kill_server() -> None:
     try:
         import subprocess as sp
         result = sp.run(
-            ["lsof", "-ti", f":{DEFAULT_PORT}"],
+            ["lsof", "-ti", f":{port}"],
             capture_output=True, text=True, timeout=3,
         )
         for line in result.stdout.strip().split("\n"):
@@ -157,8 +165,8 @@ def _kill_server() -> None:
     time.sleep(2)  # 等端口释放
 
 
-def _start_server() -> None:
-    """拉起 server 进程。"""
+def _start_server(port: int = DEFAULT_PORT) -> None:
+    """拉起 server 进程（监听 port）。"""
     project_root = Path(__file__).parent.parent
     venv_python = project_root / ".venv" / "bin" / "python3"
 
@@ -166,12 +174,12 @@ def _start_server() -> None:
         # 直接用 venv python 启动，不依赖 uv（避免 PATH 问题）
         cmd = [
             str(venv_python), "-c",
-            f"from ethan.interface.api import run_server; run_server(port={DEFAULT_PORT})",
+            f"from ethan.interface.api import run_server; run_server(port={port})",
         ]
     else:
         cmd = [
             "uv", "run", "python", "-c",
-            f"from ethan.interface.api import run_server; run_server(port={DEFAULT_PORT})",
+            f"from ethan.interface.api import run_server; run_server(port={port})",
         ]
 
     env = os.environ.copy()
@@ -200,7 +208,7 @@ def _start_server() -> None:
     # 等待 server 启动成功（最多 30 秒）
     for _ in range(30):
         time.sleep(1)
-        if _check_server_health(DEFAULT_PORT):
+        if _check_server_health(port):
             logger.info("[Watchdog] Server is up and healthy")
             return
     logger.error("[Watchdog] Server failed to start within 30s")
@@ -253,8 +261,8 @@ def watchdog_main(port: int = DEFAULT_PORT) -> None:
 
                 if consecutive_failures >= MAX_FAILURES:
                     logger.error("[Watchdog] Server unresponsive, restarting...")
-                    _kill_server()
-                    _start_server()
+                    _kill_server(port)
+                    _start_server(port)
                     consecutive_failures = 0
                     # 重启后等一个周期再检查
                     time.sleep(HEALTH_CHECK_INTERVAL)

@@ -74,4 +74,4 @@
 
 **consent 分级**：后台无交互 UI，无法逐次弹 consent，故线程内**分级处理**：低风险操作自动批准（用户主动发起后台任务即视为授权这类操作）；高危调用（`consent_always=True`，如 `rm -rf`）一律拒绝、记录，回灌时提示用户去前台确认后手动执行。避免长任务里模型「自作主张」删文件/花钱。高危判定复用工具自身的 `consent_always`，与前台一致。
 
-**端口不写死**：回调本机 server 的 base url 从 `ETHAN_SERVER_PORT` 环境变量读取（`run_server` 启动时设置），回退 8900，避免服务跑在非默认端口时后台任务连不上、静默失败。
+**端口不写死**：回调本机 server 的 base url 从 `ETHAN_SERVER_PORT` 环境变量读取（`run_server` 启动时设置），回退 8900，避免服务跑在非默认端口时后台任务连不上、静默失败。端口本身可由 `config.yaml` 的 `server.port` 配置，优先级为 **显式 `--port` > `config.yaml` > 默认 8900**（`ETHAN_SERVER_PORT` 环境变量再无条件覆盖前两者），链路详见 `docs/interface.md` 的「启动方式」。

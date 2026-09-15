@@ -563,6 +563,10 @@ models:
 network:
   proxy: http://127.0.0.1:7890           # 全局代理
 
+server:                                  # ethan serve（HTTP API + Web UI）的监听地址
+  host: 0.0.0.0                          # 只想本机访问可改成 127.0.0.1
+  port: 8900                             # 显式 --port 仍优先；改后需重启 serve 生效
+
 defaults:
   model: claude-sonnet-4-6
   agent_name: Ethan

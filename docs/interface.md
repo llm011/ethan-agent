@@ -413,9 +413,27 @@ SSE chunk 类型汇总：
 ### 启动方式
 
 ```bash
-ethan serve                    # 默认 0.0.0.0:8900
-ethan serve --port 9000        # 自定义端口
+ethan serve                    # 监听地址取自 config.yaml 的 server 段，未配置则 0.0.0.0:8900
+ethan serve --port 9000        # 显式参数优先于 config
+ethan serve --host 127.0.0.1   # 只允许本机访问
 ```
+
+监听地址的优先级是 **显式命令行参数 > `config.yaml` 的 `server` 段 > 内置默认**：
+
+```yaml
+# config.yaml
+server:
+  host: 127.0.0.1   # 只想本机访问就改这里
+  port: 8900
+```
+
+`ETHAN_SERVER_HOST` / `ETHAN_SERVER_PORT` 环境变量会**无条件覆盖** config.yaml
+（与 `ETHAN_PROXY` / `ETHAN_AUTH_TOKEN` 同语义），方便 docker/脚本临时指定。
+
+> 注意 `save_config` 用 `exclude_defaults=True` 序列化，`server.host`/`server.port`
+> 都等于默认值（`0.0.0.0` / `8900`）时不会写进 config.yaml——**改过端口才落盘**。
+> launchd 的 plist 刻意不带 `--port`，`serve` 启动时自己读 config，所以改完端口
+> 需要 `ethan server restart` 才生效。
 
 ---
 

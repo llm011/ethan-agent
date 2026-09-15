@@ -206,9 +206,16 @@ def _restart_serve(repo: Optional[Path]) -> None:
                 pass
             _wait_pid_gone(pid, timeout=2)
 
+    # 端口探测跟随 config server.port（新进程也不带 --port，会读同一份 config）
+    try:
+        from ethan.core.config import get_config
+        _port = get_config().server.port
+    except Exception:
+        _port = 8900
+
     # 等端口释放（旧进程退出后内核可能还短暂持有 TIME_WAIT，但 LISTEN 会立即消失）
     for _ in range(20):
-        if not _is_port_listening():
+        if not _is_port_listening(_port):
             break
         time.sleep(0.2)
 
@@ -225,12 +232,12 @@ def _restart_serve(repo: Optional[Path]) -> None:
 
     # 轮询端口确认新进程真的起来了（uvicorn 启动 + lifespan init 需要一两秒）
     for _ in range(30):  # 最多等 ~15s
-        if _is_port_listening():
+        if _is_port_listening(_port):
             console.print("[green]✓ ethan serve 已重启（后台运行）[/green]")
             return
         time.sleep(0.5)
     console.print(
-        "[red]⚠ ethan serve 已拉起但端口 8900 未就绪，可能启动失败。[/red]\n"
+        f"[red]⚠ ethan serve 已拉起但端口 {_port} 未就绪，可能启动失败。[/red]\n"
         "[dim]前台运行排查：ethan serve（看 stderr），或查 ~/.ethan/serve.log[/dim]"
     )
 

@@ -93,6 +93,14 @@ def install() -> None:
     console.print("[green]✓ 服务已安装并启动，下次开机将自动运行。[/green]")
     console.print(f"  可执行文件：{exe}")
     console.print(f"  日志目录：  {log_dir}/")
+    # 端口不写进 plist——serve 启动时读 config server.port，改端口只需 restart
+    try:
+        from ethan.core.config import get_config
+
+        srv = get_config().server
+        console.print(f"  监听地址：  {srv.host}:{srv.port}  [dim](config.yaml 的 server 段，改后 ethan server restart 生效)[/dim]")
+    except Exception:
+        pass
     console.print()
     console.print("  [dim]ethan server status[/dim]   — 查看运行状态")
     console.print("  [dim]ethan server restart[/dim]  — 重启服务")

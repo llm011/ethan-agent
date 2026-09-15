@@ -134,11 +134,36 @@ def _find_conflicting_servers() -> list[tuple[int, str]]:
     return conflicts
 
 
+def _server_bind_defaults(explicit_host: Optional[str], explicit_port: Optional[int]) -> tuple[str, int]:
+    """解析 serve 实际监听地址：显式参数 > config.yaml server.* > 内置默认。
+
+    config 读不到时（首次运行 / config 损坏）静默回退默认值——绑定地址不该
+    因为配置问题导致服务起不来。
+    """
+    host, port = explicit_host, explicit_port
+    if host is None or port is None:
+        try:
+            from ethan.core.config import get_config
+
+            srv = get_config().server
+            if host is None:
+                host = srv.host
+            if port is None:
+                port = srv.port
+        except Exception:
+            pass
+    return host or "0.0.0.0", port or 8900
+
+
 @serve_app.callback(invoke_without_command=True)
 def serve_main(
     ctx: typer.Context,
-    host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
-    port: int = typer.Option(8900, "--port", help="Bind port"),
+    host: Optional[str] = typer.Option(
+        None, "--host", help="Bind host（默认取 config server.host，缺省 0.0.0.0）"
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Bind port（默认取 config server.port，缺省 8900）"
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -147,6 +172,7 @@ def serve_main(
 ) -> None:
     """Start the HTTP API server. Default runs in foreground."""
     if ctx.invoked_subcommand is None:
+        host, port = _server_bind_defaults(host, port)
         conflicts = _find_conflicting_servers()
         if conflicts and not force:
             from rich.console import Console
@@ -205,7 +231,7 @@ def serve_stop() -> None:
     console.print("[green]✓ ethan serve 已停止[/green]")
 
 
-def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
+def _launch_web(port: Optional[int] = None, url: Optional[str] = None) -> None:
     import os
     import socket
     import subprocess
@@ -221,6 +247,9 @@ def _launch_web(port: int = 8900, url: Optional[str] = None) -> None:
     if url:
         webbrowser.open(url)
         return
+
+    # 未显式指定端口时跟随 config server.port（与 serve 用同一套默认值解析）
+    _, port = _server_bind_defaults(None, port)
 
     def _port_open(p: int) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -289,7 +318,9 @@ app.add_typer(web_app, name="web")
 @web_app.callback(invoke_without_command=True)
 def web_main(
     ctx: typer.Context,
-    port: int = typer.Option(8900, "--port", help="Web UI port"),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Web UI port（默认取 config server.port，缺省 8900）"
+    ),
     url: Optional[str] = typer.Option(None, "--url", help="Direct URL to open"),
 ):
     """Launch the Web UI and open it in the browser."""
@@ -355,9 +386,9 @@ def chat(
     if ctx.invoked_subcommand is not None:
         return
 
-    # ── Auto-launch web UI on port 8900 ──────────────────────────────
+    # ── Auto-launch web UI（端口跟随 config server.port）──────────────
     if not prompt:
-        _launch_web(8900)
+        _launch_web()
     # ─────────────────────────────────────────────────────────────────
 
     import asyncio

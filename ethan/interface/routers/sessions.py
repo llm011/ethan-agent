@@ -327,6 +327,84 @@ async def unpin_session(session_id: str, user_id: str = Depends(verify_token)):
 
 
 
+class BatchIdsRequest(BaseModel):
+    ids: list[str]
+
+
+class BatchDoneRequest(BaseModel):
+    ids: list[str]
+    done: bool = True  # True=标记完成（加 ✅），False=取消完成（去 ✅）
+
+
+@router.post("/sessions/delete-batch")
+async def delete_sessions_batch(req: BatchIdsRequest, user_id: str = Depends(verify_token)):
+    """批量删除会话。返回真实删除数 deleted 与「列表已过期」的 missing 数。
+
+    两者分开返回，前端才能提示"另有 N 个已不存在"，而不是把没删掉的静默吞掉
+    （同 /models/delete-batch 的处理方式）。
+    """
+    if not req.ids:
+        return {"ok": False, "error": "ids is empty", "deleted": 0, "missing": 0}
+    store = await get_session_store()
+    deleted_ids = await store.delete_many(req.ids)
+    # 与单条删除一致：清掉会话授权记忆，避免内存泄漏 + 同 id 复用时残留旧授权
+    from ethan.core.consent import clear_session_grants
+
+    for sid in deleted_ids:
+        clear_session_grants(sid)
+    return {
+        "ok": True,
+        "deleted": len(deleted_ids),
+        "missing": len(set(req.ids)) - len(deleted_ids),
+    }
+
+
+@router.post("/sessions/toggle-done-batch")
+async def toggle_done_sessions_batch(req: BatchDoneRequest, user_id: str = Depends(verify_token)):
+    """批量标记/取消「完成」。
+
+    「完成」在数据层没有独立字段，是标题加 ✅ 前缀的约定（与单条按钮一致）。
+    受保护前缀（[定时]/[后台]/[心跳]）不参与，避免破坏系统会话的识别。
+    """
+    from ethan.memory.session import _PROTECTED_PREFIXES
+
+    if not req.ids:
+        return {"ok": False, "error": "ids is empty", "updated": 0, "missing": 0, "skipped": 0}
+
+    store = await get_session_store()
+    uniq = list(dict.fromkeys(req.ids))
+    updated = 0
+    skipped = 0
+    missing = 0
+    for sid in uniq:
+        session = await store.load(sid)
+        if not session:
+            missing += 1
+            continue
+        title = (session.title or "").strip()
+        if title.startswith(_PROTECTED_PREFIXES):
+            skipped += 1
+            continue
+        has_done = title.startswith("✅")
+        if req.done == has_done:
+            updated += 1  # 已是目标状态，幂等算成功
+            continue
+        if req.done:
+            new_title = f"✅ {title}" if title else "✅ 新对话"
+        else:
+            # 只有 "✅" 时去掉前缀会变空串（后端 400），回退默认标题
+            new_title = title.replace("✅", "", 1).strip() or "新对话"
+        await store.update_title(sid, new_title)
+        updated += 1
+
+    return {
+        "ok": True,
+        "updated": updated,
+        "missing": missing,
+        "skipped": skipped,
+    }
+
+
 @router.post("/sessions/cleanup-trivial")
 async def cleanup_trivial_sessions(user_id: str = Depends(verify_token)):
     """批量删除只含试探性消息的会话（hi/hello/测试/你是谁等）。"""

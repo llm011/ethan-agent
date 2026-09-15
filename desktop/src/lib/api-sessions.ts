@@ -1,6 +1,7 @@
 /** Session 相关类型和 API。 */
 
 import { getApiUrl, getAuthToken, headers  } from "./api-base";
+import { deleteSessionCache } from "./session-cache";
 
 export interface SessionInfo {
   id: string;
@@ -193,6 +194,38 @@ export async function fetchSession(id: string): Promise<SessionDetail> {
 
 export async function deleteSession(id: string): Promise<void> {
   await fetch(`${getApiUrl()}/sessions/${id}`, { method: "DELETE", headers: headers() });
+  // 清本地会话缓存，避免离线/重开时已删会话仍可读出（与 web 的 IndexedDB 清理对齐）
+  deleteSessionCache(id);
+}
+
+/** 批量删除会话。返回 (deleted, missing)：missing 是「列表已过期、服务端已不存在」的数量。 */
+export async function deleteSessionsBatch(
+  ids: string[]
+): Promise<{ deleted: number; missing: number }> {
+  const res = await fetch(`${getApiUrl()}/sessions/delete-batch`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error("Batch delete failed");
+  const data = await res.json();
+  ids.forEach((id) => deleteSessionCache(id));
+  return { deleted: data.deleted ?? 0, missing: data.missing ?? 0 };
+}
+
+/** 批量标记/取消「完成」（标题 ✅ 前缀约定）。 */
+export async function toggleDoneSessionsBatch(
+  ids: string[],
+  done: boolean
+): Promise<{ updated: number; missing: number; skipped: number }> {
+  const res = await fetch(`${getApiUrl()}/sessions/toggle-done-batch`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, done }),
+  });
+  if (!res.ok) throw new Error("Batch toggle done failed");
+  const data = await res.json();
+  return { updated: data.updated ?? 0, missing: data.missing ?? 0, skipped: data.skipped ?? 0 };
 }
 
 export async function deleteMessage(sessionId: string, messageId: number): Promise<void> {
