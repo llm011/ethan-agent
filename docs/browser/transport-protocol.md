@@ -63,9 +63,9 @@ sequenceDiagram
 
 - **首帧必须是 `auth`**。服务端 `accept()` 之后第一条消息若不是合法 `auth` 帧、或 token 解析失败,直接 `close(4001)`。
 - **token 复用 ethan 的 web token 体系**:`get_user_store().resolve_web_token(token)`,与 Web/HTTP 接口同源,不另设凭据。token 在扩展弹窗中配置。
-- **`name`(可选)**:本端名称,多浏览器同时连接时用于区分;缺省时服务端自动分配随机名。
+- **`name`(可选)**:本端名称,多浏览器同时连接时用于区分;缺省时服务端从 `instanceId` 前 8 位派生稳定默认名(如 `browser-3f8a2b1c`)——同一浏览器无论重连多少次名字都不变,session 绑定的 client_name 不失效;`instanceId` 也缺省(旧版扩展)时退回自增序号 `browser-<序号>`。
 - **`instanceId`(可选)**:扩展首启时用 `crypto.randomUUID()` 生成并持久化,同一浏览器始终不变。Hub 据此区分「同名重连」(同一浏览器,顶掉旧连接)和「同名撞名」(两台不同浏览器,拒绝**新**连接并先发一帧 `auth_error` 说明原因);任一方没带 `instanceId` 时退回纯 last-wins(兼容旧版扩展)。
-- 鉴权通过后服务端回 `auth_ok` 并携带协议版本 `version`(`RPC_VERSION = 1`)与服务端确认的 `name`,扩展据此开始心跳。
+- **`auth_ok` 在 attach 成功后才发**。撞名被拒的连接只会收到 `auth_error` + `close(4001)`,不会先收到 `auth_ok`——客户端实现不要把收到 `auth_ok` 当作「连接必然可用」的前置信号,应以 `auth_ok` 为准。鉴权通过后服务端回 `auth_ok` 并携带协议版本 `version`(`RPC_VERSION = 1`)与服务端确认的 `name`,扩展据此开始心跳。
 
 ---
 

@@ -282,17 +282,19 @@
     } catch {}
   }
 
-  function enterReading(opts?: { presetMarkdown?: string; presetTitle?: string }) {
+  async function enterReading(opts?: { presetMarkdown?: string; presetTitle?: string }) {
     if (active) return;
     if (opts?.presetMarkdown) lastPresetOpts = opts;
     active = true;
     panelCollapsed = false;
     // 每次进入生成一个新对话 session；首轮问题会带上正文，后续轮由服务端按此拼历史。
     // 同一 URL 复用上次的 session(见 reuseChatSession):重进/刷新后追问上下文还在。
+    // await 完再往下走(开面板),用户不可能在复用生效前发出第一问;也避免上一次
+    // 进入还没写完 storage 就被这次的读改写覆盖。
     chatSessionId = 'read-' + genId();
     chatBusy = false;
     firstChatTurn = true;
-    void reuseChatSession(currentUrl);
+    await reuseChatSession(currentUrl);
     removeReenterButton();
     removeExpandTab();
 

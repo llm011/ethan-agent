@@ -17,7 +17,7 @@ import pytest
 
 from ethan.browser.hub import BrowserClientNameConflictError, BrowserError, BrowserHub
 from ethan.browser.session_map import SessionMap
-from ethan.browser.ws_route import _normalize_instance_id
+from ethan.browser.ws_route import _normalize_instance_id, _normalize_name
 from ethan.core.context import set_session_id
 from ethan.tools.builtin import browser as browser_mod
 from ethan.tools.builtin.browser import (
@@ -156,6 +156,35 @@ def test_normalize_instance_id():
     assert _normalize_instance_id("x" * 200) == "x" * 128
     for bad in (None, 123, "", "   "):
         assert _normalize_instance_id(bad) == ""
+
+
+def test_normalize_name_explicit_wins():
+    assert _normalize_name("我的浏览器", "3f8a2b1c-9d2e-4f5a") == "我的浏览器"
+    assert _normalize_name("  pad  ") == "pad"
+    assert _normalize_name("x" * 100) == "x" * 64
+
+
+def test_normalize_name_derives_stable_name_from_instance_id():
+    """缺省名从 instanceId 派生:同一浏览器 SW 回收重连(instanceId 不变)名字
+    也不变,session 绑的 client_name 不失效。"""
+    iid = "3f8a2b1c-9d2e-4f5a-b6c7-d8e9f0a1b2c3"
+    assert _normalize_name(None, iid) == "browser-3f8a2b1c"
+    assert _normalize_name(None, iid) == _normalize_name(None, iid)
+    # instanceId 里的连字符被清洗,只留字母数字
+    assert _normalize_name("", "ab-cd") == "browser-abcd"
+
+
+def test_normalize_name_falls_back_to_counter():
+    """instanceId 也缺省(旧版扩展)时退回自增序号。"""
+    import itertools
+
+    import ethan.browser.ws_route as ws_route
+
+    ws_route._name_gen = itertools.count(1)  # 计数器是模块级状态,重置保证确定性
+    assert _normalize_name(None, "") == "browser-1"
+    assert _normalize_name(None, None) == "browser-2"
+    # instanceId 清洗后为空(全是标点)同样退回序号
+    assert _normalize_name(None, "---") == "browser-3"
 
 
 # ── resolve_client:临时选中不持久化 ──────────────────────────────
@@ -408,3 +437,58 @@ def test_orphan_binding_is_rehomed_by_probe(monkeypatch):
         assert [c for _, c in hub.calls] == ["b"]
 
     asyncio.run(_run())
+
+
+# ── ws 握手时序:auth_ok 必须在 attach 成功之后 ────────────────────
+
+
+def test_ws_handshake_conflict_gets_auth_error_without_auth_ok(monkeypatch):
+    """撞名被拒的连接只收 auth_error + close,不收 auth_ok——否则照协议文档
+    实现的客户端会把「收到 auth_ok」当连接可用信号,时序对不上。"""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    import ethan.browser.ws_route as ws_route
+
+    app = FastAPI()
+    app.include_router(ws_route.router)
+    hub = BrowserHub()
+    monkeypatch.setattr(ws_route, "get_hub", lambda: hub)
+    monkeypatch.setattr(ws_route, "_authenticate", lambda token: "u1" if token == "good" else None)
+
+    client = TestClient(app)
+    with client.websocket_connect("/ws/browser") as first:
+        first.send_text(json.dumps({"type": "auth", "token": "good", "name": "dup", "instanceId": "A"}))
+        ok = first.receive_json()
+        assert ok["type"] == "auth_ok"
+        assert ok["name"] == "dup"
+
+        with client.websocket_connect("/ws/browser") as second:
+            second.send_text(json.dumps({"type": "auth", "token": "good", "name": "dup", "instanceId": "B"}))
+            err = second.receive_json()
+            assert err["type"] == "auth_error"
+            # 冲突分支到此为止:下一帧就是 close,不会再有 auth_ok
+            with pytest.raises(WebSocketDisconnect):
+                second.receive_json()
+
+
+def test_ws_handshake_derives_stable_default_name(monkeypatch):
+    """name 缺省时服务端从 instanceId 派生稳定名,auth_ok 里回的是确认后的名。"""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    import ethan.browser.ws_route as ws_route
+
+    app = FastAPI()
+    app.include_router(ws_route.router)
+    hub = BrowserHub()
+    monkeypatch.setattr(ws_route, "get_hub", lambda: hub)
+    monkeypatch.setattr(ws_route, "_authenticate", lambda token: "u1" if token == "good" else None)
+
+    client = TestClient(app)
+    iid = "3f8a2b1c-9d2e-4f5a-b6c7-d8e9f0a1b2c3"
+    with client.websocket_connect("/ws/browser") as ws:
+        ws.send_text(json.dumps({"type": "auth", "token": "good", "instanceId": iid}))
+        ok = ws.receive_json()
+        assert ok == {"type": "auth_ok", "version": ws_route.RPC_VERSION, "name": "browser-3f8a2b1c"}
