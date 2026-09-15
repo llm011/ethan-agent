@@ -80,7 +80,11 @@ Fast Path 保留：`soul + identity + 当前时间 + workspace 路径 + user_pro
 
 > `system/naming.md` **不进主 system prompt**：它只在生成会话标题时注入廉价模型的标题 prompt
 > （见 `ethan/memory/session.py` 的 `_build_title_system_prompt`），零常驻 token 成本。
-> `/review` + PR/MR 链接这类确定性场景走 `_rule_title` 直接短路（不调用模型）。
+> 消息里出现 PR/MR 链接（`github.com/…/pull/<n>`、`gitlab.com/…/-/merge_requests/<n>`）这类确定性
+> 场景走 `_rule_title` 直接短路（不调用模型）——链接在**任意位置**都算命中，不要求 `/review` 前缀；
+> 模板的 owner/repo/编号由代码从链接里填，模型不需要也不能自己去猜。
+> 同理，喂给标题模型前会把外链脱敏成 `[链接]`（避免 lite 模型以为要访问外链而拒答），
+> **但 PR/MR 链接例外、原样保留**，否则模型拿不到值就只能照抄 naming.md 里的示例占位符。
 
 ---
 

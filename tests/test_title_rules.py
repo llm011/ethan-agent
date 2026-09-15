@@ -35,15 +35,41 @@ def test_rule_title_url_embedded_in_text():
 
 
 def test_rule_title_no_url_returns_none():
-    """无链接（如 /review 分支名）交回模型按 naming.md 处理。"""
+    """无 PR/MR 链接（如 /review 分支名）交回模型按 naming.md 处理。"""
     assert _rule_title("/review feature/login") is None
     assert _rule_title("/review") is None
+    # 裸域名 / 非 PR 路径都不算命中
     assert _rule_title("普通提问 github.com") is None
+    assert _rule_title("看看 https://github.com/foo/bar") is None
 
 
-def test_rule_title_only_for_review_command():
-    """非 /review 命令即使带 PR 链接也不短路（避免误吞普通对话）。"""
-    assert _rule_title("看看 https://github.com/foo/bar/pull/7") is None
+def test_rule_title_url_anywhere_without_command_prefix():
+    """PR 链接出现在任意位置即命中，不要求 /review 前缀、不要求行首。
+
+    回归：用户实际输入「帮我 review 这个 PR <链接>」没走规则路径，落到 LLM 路径后
+    因 URL 被脱敏成 [链接] 而拿不到 owner/repo，模型照抄 naming.md 示例占位符，
+    再被 [:20] 截成 "#100 owner/repo code"。
+    """
+    got = _rule_title("帮我 review 这个 PR https://github.com/llm011/ethan-agent/pull/100")
+    assert got == "#100 llm011/ethan-agent code review"
+    # 无斜杠前缀
+    assert _rule_title("review https://github.com/foo/bar/pull/7") == "#7 foo/bar code review"
+    # 链接在句尾
+    assert _rule_title("看看 https://github.com/foo/bar/pull/7") == "#7 foo/bar code review"
+
+
+def test_rule_title_gitlab_url_mid_sentence():
+    """GitLab MR 链接出现在中文句子中间也命中，且编号用 ! 前缀。"""
+    got = _rule_title("https://gitlab.com/larksuite/cli/-/merge_requests/42 这个改得对吗")
+    assert got == "!42 larksuite/cli code review"
+
+
+def test_rule_title_not_truncated_to_20():
+    """规则标题不做 20 字截断（模板天然更长，硬切会切出残句）。"""
+    got = _rule_title("/review https://github.com/llm011/ethan-agent/pull/100")
+    assert got == "#100 llm011/ethan-agent code review"
+    assert len(got) > 20
+    assert got.endswith("code review")
 
 
 def test_is_placeholder_title():
@@ -136,3 +162,98 @@ def test_decide_title_respects_protected_prefix():
 
     msgs = [Message(role="user", content="/review https://github.com/a/b/pull/1")]
     assert asyncio.run(S.decide_title(msgs, current_title="[定时] 每日摘要")) is None
+
+
+# --- 占位符泄漏护栏 ---------------------------------------------------------
+
+
+class _FakeProvider:
+    """按固定脚本返回内容的假 provider（不碰网络）。"""
+
+    def __init__(self, outputs: list[str]):
+        self._outputs = list(outputs)
+        self.calls: list[str] = []
+
+    async def chat(self, messages, system=None, disable_thinking=False):
+        self.calls.append(system or "")
+
+        class _Resp:
+            content = self._outputs.pop(0) if self._outputs else ""
+
+        return _Resp()
+
+
+def _patch_title_provider(monkeypatch, provider):
+    """把 _generate_smart_title 内部的 create_provider / get_config 换成假的。"""
+    from ethan.providers import manager as manager_mod
+
+    class _Defaults:
+        model = "fake/model"
+        lite_model = ""  # 空 → get_lite_model 按主模型推断
+
+    class _Cfg:
+        defaults = _Defaults()
+
+    monkeypatch.setattr(manager_mod, "create_provider", lambda model: provider)
+    monkeypatch.setattr("ethan.core.config.get_config", lambda: _Cfg())
+
+
+def test_generate_title_rejects_leaked_placeholders(monkeypatch):
+    """模型照抄 naming.md 示例时要判为失败，不能把占位符当标题存下来。
+
+    回归：曾被 [:20] 截成 "#100 owner/repo code" 并成为真实会话标题。
+    """
+    from ethan.memory import session as S
+
+    provider = _FakeProvider(["#100 owner/repo code review"] * 3)
+    _patch_title_provider(monkeypatch, provider)
+    msgs = [Message(role="user", content="帮我 review 这个 PR https://github.com/a/b/pull/1")]
+    got = asyncio.run(S._generate_smart_title(msgs))
+    assert got is None  # 重试后仍泄漏 → 放弃，不覆盖占位标题
+
+
+def test_generate_title_rejects_angle_placeholder_but_accepts_retry(monkeypatch):
+    """第一次泄漏占位符 → 重试；第二次给出正常标题 → 采用。"""
+    from ethan.memory import session as S
+
+    provider = _FakeProvider(["#100 <owner>/<repo> code review", "侧边栏标题不更新"])
+    _patch_title_provider(monkeypatch, provider)
+    msgs = [Message(role="user", content="帮我看看这个 PR https://github.com/a/b/pull/1")]
+    got = asyncio.run(S._generate_smart_title(msgs))
+    assert got == "侧边栏标题不更新"
+
+
+def test_generate_title_accepts_legitimate_angle_brackets(monkeypatch):
+    """护栏不能误杀含尖括号的合法技术标题。"""
+    from ethan.memory import session as S
+
+    provider = _FakeProvider(["支持 <T> 泛型"])
+    _patch_title_provider(monkeypatch, provider)
+    msgs = [Message(role="user", content="帮我给这个类加上泛型支持 https://github.com/a/b/pull/1")]
+    got = asyncio.run(S._generate_smart_title(msgs))
+    assert got == "支持 <T> 泛型"
+
+
+def test_clean_keeps_pr_url_scrubs_other_links(monkeypatch):
+    """端到端确认：喂给模型的文本里 PR 链接原样保留，其余外链变 [链接]。"""
+    from ethan.memory import session as S
+
+    captured: dict[str, str] = {}
+
+    class _CapturingProvider(_FakeProvider):
+        async def chat(self, messages, system=None, disable_thinking=False):
+            captured["prompt"] = messages[0].content
+            return await super().chat(messages, system=system, disable_thinking=disable_thinking)
+
+    provider = _CapturingProvider(["正常标题"])
+    _patch_title_provider(monkeypatch, provider)
+    msgs = [
+        Message(
+            role="user",
+            content="帮我看看 https://github.com/foo/bar/pull/7 并参考 https://example.com/doc",
+        )
+    ]
+    asyncio.run(S._generate_smart_title(msgs))
+    assert "https://github.com/foo/bar/pull/7" in captured["prompt"]
+    assert "https://example.com/doc" not in captured["prompt"]
+    assert "[链接]" in captured["prompt"]
