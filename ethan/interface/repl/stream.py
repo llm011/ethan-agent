@@ -1,4 +1,5 @@
 """Single-turn streaming: run_once."""
+import re
 import time
 
 from rich.live import Live
@@ -24,7 +25,10 @@ async def run_once(agent: Agent, prompt: str) -> None:
     await store.create_with_id(session_id, model_id, source="cli")
 
     # 直接用命令行参数作初始标题（_auto_title 在后面 decide_title 时可能被智能标题覆盖）
-    init_title = prompt.strip().replace("\n", " ")[:40]
+    from ethan.memory.session import _TITLE_BRACKET_RE
+
+    init_title = _TITLE_BRACKET_RE.sub("", prompt.strip().replace("\n", " "))
+    init_title = re.sub(r"\s{2,}", " ", init_title).strip()[:40]
     if init_title:
         await store.update_title(session_id, init_title)
 

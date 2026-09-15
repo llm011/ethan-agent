@@ -58,3 +58,16 @@ def test_empty_and_whitespace():
 def test_combined_think_and_wrapping():
     """脏值组合：<think> + 包裹 markdown。"""
     assert _sanitize_title("<think>思考</think>**最终标题**") == "最终标题"
+
+
+def test_strip_cjk_bracket_marks():
+    """书名号/方头括号类装饰符号全部剔除，留纯文字（用户反馈：列表里《》只剩装饰）。"""
+    assert _sanitize_title("《三体》读后感") == "三体读后感"
+    assert _sanitize_title("【重要】部署文档更新") == "重要部署文档更新"
+    assert _sanitize_title("「配置中心」迁移方案") == "配置中心迁移方案"
+    assert _sanitize_title("读《三体》和《球状闪电》的感想") == "读三体和球状闪电的感想"
+    assert _sanitize_title("『嵌套』标题") == "嵌套标题"
+    # 圆括号有实义，不剔除
+    assert _sanitize_title("标题（草稿）") == "标题（草稿）"
+    # 剔除后不留连续空格
+    assert _sanitize_title("《a》 《b》 新功能") == "a b 新功能"
