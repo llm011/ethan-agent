@@ -42,9 +42,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.animation.animateContentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -282,13 +284,14 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreami
     val hasAnyError = effectiveSteps.any { it.state == "error" }
     val hasAnyCancelled = effectiveSteps.any { it.state == "cancelled" }
     val allDone = effectiveSteps.all { it.state != "running" && it.state != "start" }
-    // 用户要求：执行完成后工具列表自动折叠（气泡里一长串日志很占屏），
-    // 只留一行"执行完成 [N步] [耗时]"摘要，点击再展开。
-    // 执行中保持展开，让用户看到当前在跑哪一步。
-    // 折叠发生在「执行中 → 已完成」的跃变那一刻，之后用户手动展开的状态由 userToggled 固定，
-    // 不会被重组的 remember 初始值覆盖（Steps 会持续刷新，但 allDone 已稳定）。
-    var userToggled by remember { mutableStateOf<Boolean?>(null) }
-    val expanded = userToggled ?: !allDone
+
+    // 默认展开，**执行过程中不再自动折叠**。
+    //
+    // 早前是 `expanded = userToggled ?: !allDone`：多轮工具执行时 allDone 会随
+    // 「call1 done → 模型生成 → call2 start」反复翻转（true→false→true…），
+    // 用户没手动点过时整张卡片就跟着折叠/展开来回跳，整个屏幕都在闪。
+    // 现在只有用户点击摘要行才会改变 expanded —— 状态不再被流式事件驱动。
+    var expanded by remember { mutableStateOf(true) }
 
     // 整体带边框的日志卡片
     Surface(
@@ -302,7 +305,7 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreami
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { userToggled = !expanded },
+                    .clickable { expanded = !expanded },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -344,11 +347,21 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreami
                 }
             }
 
-            if (expanded) {
-                Spacer(Modifier.height(4.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    effectiveSteps.forEach { step ->
-                        ToolStepRow(step, indent = 0)
+            // animateContentSize：折叠/展开只跟约束走，不碰 LazyColumn 的滚动位置
+            // （与 ChatScreen 的长消息折叠同一做法）。折叠是用户手动触发的偶发操作，
+            // 不需要动画期间的高度突变感。
+            Column(modifier = Modifier.animateContentSize()) {
+                if (expanded) {
+                    Spacer(Modifier.height(4.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        // key 用 tool_call_id（唯一）：每个 SSE 事件都会用 .toList() 重建
+                        // 一个新 List，没有 key 时 slot 身份漂移会让 ToolStepRow 里
+                        // remember 的 subExpanded 被重置，展开中的子步骤会被弹回去。
+                        effectiveSteps.forEachIndexed { index, step ->
+                            key(step.id ?: "step-$index") {
+                                ToolStepRow(step, indent = 0)
+                            }
+                        }
                     }
                 }
             }
@@ -487,10 +500,34 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
             )
         }
 
+        // 结果预览（对齐 Web tool-timeline.tsx 与 iOS _ToolTimeline 的 result_preview）。
+        // 只在步骤跑完后显示：运行中后端给的就是空串（stream_collector 在 start 时
+        // 把 result_preview 置为 ""），此时硬渲染也没内容。补上这一行后，
+        // 「运行中一行 / 跑完突然一堆」的信息落差就没了——每一步结束即出结果。
+        // 与 Web 一致：只有 running 态不显示（`start` 是 Android 侧的前置态，等同 running）
+        step.resultPreview?.takeIf { it.isNotBlank() && !isRunning && step.state != "start" }?.let { preview ->
+            Text(
+                preview,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                softWrap = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = (indent * 12 + 16).dp),
+            )
+        }
+
         // 子步骤（递归渲染，缩进+前缀>）
         if (hasSubSteps && subExpanded) {
-            step.subSteps!!.forEach { sub ->
-                SubToolStepRow(sub, indent = indent + 1)
+            step.subSteps!!.forEachIndexed { subIndex, sub ->
+                // SubToolStep 没有 id 字段，用 tool + 序号做 key
+                key("${sub.tool}-$subIndex") {
+                    SubToolStepRow(sub, indent = indent + 1)
+                }
             }
         }
     }
@@ -560,13 +597,31 @@ private fun SubToolStepRow(sub: com.ethan.agent.core.model.SubToolStep, indent: 
     val subArgsLine = sub.args.lines().firstOrNull { it.isNotBlank() }
     if (!subArgsLine.isNullOrBlank()) {
         Text(
-            "action=$subArgsLine".takeIf { subArgsLine.startsWith("action=") } ?: subArgsLine,
+            subArgsLine,
             style = MaterialTheme.typography.bodySmall.copy(
                 fontFamily = FontFamily.Monospace,
             ),
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = (indent * 12 + 16).dp),
+        )
+    }
+
+    // 子步骤结果预览（与主步骤同一口径，对齐 Web tool-timeline.tsx:581-585）
+    val subRunning = sub.state == "running" || sub.state == "start"
+    sub.resultPreview?.takeIf { it.isNotBlank() && !subRunning }?.let { preview ->
+        Text(
+            preview,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            softWrap = true,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = (indent * 12 + 16).dp),
