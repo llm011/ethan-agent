@@ -256,15 +256,40 @@
 
   let lastPresetOpts: { presetMarkdown?: string; presetTitle?: string } | undefined;
 
+  /**
+   * 同一 URL 复用上次的阅读对话 session(存在 chrome.storage.local,'read-*' 只记
+   * url → session 映射,LRU 50 条)。会话内容由服务端按 session_id 持久化,所以
+   * 刷新页面 / 退出再进阅读模式后继续追问,上一轮的问答还在上下文里——否则每次
+   * 进入都换新 id,服务端拼不到历史,用户看到的就是「连续对话不带前文」。
+   */
+  async function reuseChatSession(url: string): Promise<void> {
+    try {
+      const { readingChatSessions } = await chrome.storage.local.get('readingChatSessions');
+      const map = readingChatSessions || {};
+      const hit = map[url];
+      if (hit && hit.sid) {
+        chatSessionId = hit.sid;
+        hit.ts = Date.now();
+      } else {
+        map[url] = { sid: chatSessionId, ts: Date.now() };
+      }
+      // LRU:超过 50 条丢最旧的
+      const entries = Object.entries(map).sort((a, b) => ((b[1] && b[1].ts) || 0) - ((a[1] && a[1].ts) || 0));
+      await chrome.storage.local.set({ readingChatSessions: Object.fromEntries(entries.slice(0, 50)) });
+    } catch {}
+  }
+
   function enterReading(opts?: { presetMarkdown?: string; presetTitle?: string }) {
     if (active) return;
     if (opts?.presetMarkdown) lastPresetOpts = opts;
     active = true;
     panelCollapsed = false;
-    // 每次进入生成一个新对话 session；首轮问题会带上正文，后续轮由服务端按此拼历史
+    // 每次进入生成一个新对话 session；首轮问题会带上正文，后续轮由服务端按此拼历史。
+    // 同一 URL 复用上次的 session(见 reuseChatSession):重进/刷新后追问上下文还在。
     chatSessionId = 'read-' + genId();
     chatBusy = false;
     firstChatTurn = true;
+    void reuseChatSession(currentUrl);
     removeReenterButton();
     removeExpandTab();
 

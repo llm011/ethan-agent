@@ -312,42 +312,48 @@ _HINTS = {
 }
 
 
-async def _call(method_key: str, params: dict, browser_session_id: str | None = None):
+async def _call(method_key: str, params: dict, browser_session_id: str | None = None,
+                *, client_name: str | None = None):
     """发起 browser RPC。自动解析目标客户端:
     - 操作既有 browser_session_id → 从 session_map 取该 session 所属客户端
     - 新建/列表等无 session_id 的操作 → 用当前 ethan 会话的活跃客户端
 
     当有多个客户端连接且未设活跃时,抛出明确错误提示 agent 询问用户。
+
+    client_name:调用方预解析好的目标客户端。create/attach_current 必须「路由到谁
+    就把新 session 绑给谁」——若路由和绑定各 resolve 一次,两次之间状态可能变化
+    (并行批次里的 use、瞬时掉线),绑错/绑空后该 session 就再也找不到归属。
     """
     smap = get_session_map()
     hub = get_hub()
     ethan_sid = get_session_id()
 
-    # 会话隔离门禁:凡是操作既有 browser session 的调用,该 session 必须属于当前 ethan 会话。
-    # 若绑定关系丢失(例如 ethan 重启、对话换 ID),允许先向扩展核实 session 真实存在且
-    # 未被其他 ethan 会话占用,再自动恢复绑定,避免用户明明在「这个」tab 上操作却被拒。
-    if browser_session_id is not None:
-        client_name = await _require_owned_or_recover(browser_session_id, ethan_sid)
-        if not client_name:
+    if client_name is None:
+        # 会话隔离门禁:凡是操作既有 browser session 的调用,该 session 必须属于当前 ethan 会话。
+        # 若绑定关系丢失(例如 ethan 重启、对话换 ID),允许先向扩展核实 session 真实存在且
+        # 未被其他 ethan 会话占用,再自动恢复绑定,避免用户明明在「这个」tab 上操作却被拒。
+        if browser_session_id is not None:
+            client_name = await _require_owned_or_recover(browser_session_id, ethan_sid)
+            if not client_name:
+                client_name = hub.resolve_client(ethan_sid)
+        else:
             client_name = hub.resolve_client(ethan_sid)
-    else:
-        client_name = hub.resolve_client(ethan_sid)
-        if client_name is None:
-            clients = hub.list_clients()
-            if not clients:
+            if client_name is None:
+                clients = hub.list_clients()
+                if not clients:
+                    raise BrowserError(
+                        "浏览器扩展未连接,请确认已安装并启用扩展",
+                        code=ERROR_CODE["extension_not_connected"],
+                        retryable=False,
+                    )
+                names = [c["name"] for c in clients]
                 raise BrowserError(
-                    "浏览器扩展未连接,请确认已安装并启用扩展",
+                    f"当前有 {len(clients)} 个浏览器客户端已连接: {', '.join(names)}。"
+                    f"请先用 browser_client(action='use', name='客户端名称') 选择一个,"
+                    f"或直接告诉用户你想操作哪个浏览器。也可以用 browser_client(action='list') 查看详情。",
                     code=ERROR_CODE["extension_not_connected"],
                     retryable=False,
                 )
-            names = [c["name"] for c in clients]
-            raise BrowserError(
-                f"当前有 {len(clients)} 个浏览器客户端已连接: {', '.join(names)}。"
-                f"请先用 browser_client(action='use', name='客户端名称') 选择一个,"
-                f"或直接告诉用户你想操作哪个浏览器。也可以用 browser_client(action='list') 查看详情。",
-                code=ERROR_CODE["extension_not_connected"],
-                retryable=False,
-            )
 
     result = await hub.call(METHODS[method_key], params,
                             client_name=client_name, browser_session_id=browser_session_id)
@@ -369,8 +375,10 @@ async def _require_owned_or_recover(browser_session_id: str, ethan_sid: str) -> 
         )
     smap = get_session_map()
     owned = smap.list_for(ethan_sid)
-    if browser_session_id in owned:
-        return smap.get_client(browser_session_id) or None
+    if browser_session_id in owned and smap.get_client(browser_session_id):
+        return smap.get_client(browser_session_id)
+    # owned 但没记客户端名(绑定成 "" 的历史数据)同样走探针:按当前活跃客户端猜
+    # 很容易猜错浏览器,错了扩展会报「session not found」,用户看到的是凭空失败。
 
     # --- 绑定关系丢失:向扩展核实 session 是否真的存在 ---
     hub = get_hub()
@@ -456,6 +464,114 @@ def _annotate_sessions(result: dict | None) -> dict:
     return result
 
 
+async def _describe_clients() -> list[dict]:
+    """给客户端列表补上「可分辨」信息——随机名分不清哪台是哪台是多浏览器误操作的根源。
+
+    每个客户端追加:
+      - owned_sessions: 当前对话绑定在该客户端上的 browser session id 列表(零 RPC)
+      - active_tab: 该浏览器当前活动标签页的 {title, host}(实时 RPC,失败则省略该字段)
+    """
+    import asyncio
+    from urllib.parse import urlparse
+
+    hub = get_hub()
+    owned = get_session_map().owned_by_client(get_session_id())
+
+    async def _active_tab(client_name: str) -> dict | None:
+        try:
+            res = await hub.call(METHODS["tab_user_list"], {},
+                                 client_name=client_name, timeout=3)
+        except Exception:
+            return None
+        tabs = res.get("tabs") if isinstance(res, dict) else None
+        if not isinstance(tabs, list):
+            return None
+        for t in tabs:
+            if isinstance(t, dict) and t.get("active"):
+                url = t.get("url") or ""
+                return {"title": t.get("title") or "",
+                        "host": urlparse(url).netloc if url else ""}
+        return None
+
+    clients = sorted(hub.list_clients(), key=lambda c: c["name"])
+    tab_results = await asyncio.gather(*[_active_tab(c["name"]) for c in clients])
+    for c, tab in zip(clients, tab_results):
+        c["owned_sessions"] = owned.get(c["name"], [])
+        if tab:
+            c["active_tab"] = tab
+    return clients
+
+
+def _clients_hint(clients: list[dict]) -> str:
+    """根据客户端描述生成给 agent 的选择指引。"""
+    if not clients:
+        return ("没有浏览器客户端连接。请确认已安装并启用 Ethan Browser 扩展。")
+    mine = {c["name"]: c.get("owned_sessions") or [] for c in clients
+            if c.get("owned_sessions")}
+    parts = [f"共 {len(clients)} 个客户端已连接。"]
+    if mine:
+        for n, ids in mine.items():
+            parts.append(f"本对话的 browser session 在 '{n}' 上（{len(ids)} 个），"
+                         f"操作既有 session 不受 use 影响。")
+        others = [c["name"] for c in clients if c["name"] not in mine]
+        if others:
+            parts.append(f"{'、'.join(others)} 没有本对话的会话，新建 session 前先用 use 选定。")
+    else:
+        parts.append("本对话还没有绑定任何 browser session。")
+        if len(clients) > 1:
+            parts.append("请结合各客户端的 active_tab（用户当前页面）判断要操作哪个浏览器，"
+                         "分不清就直接问用户。")
+    return " ".join(parts)
+
+
+async def _list_sessions_all_clients() -> dict:
+    """session_list 查询**所有**在线客户端并合并，每条 session 标注所属客户端。
+
+    只查活跃客户端时，另一个浏览器里的 session 对 agent 完全不可见，会被误判为
+    「不存在」而重新 create，在用户浏览器里留下重复的 tab group。只读操作无歧义，
+    多客户端时全部查询。
+    """
+    import asyncio
+
+    hub = get_hub()
+    online = sorted(c["name"] for c in hub.list_clients())
+    if not online:
+        raise BrowserError(
+            "浏览器扩展未连接,请确认已安装并启用扩展",
+            code=ERROR_CODE["extension_not_connected"],
+            retryable=False,
+        )
+
+    async def _one(client_name: str) -> tuple[str, dict | None, str]:
+        try:
+            res = await hub.call(METHODS["session_list"], {},
+                                 client_name=client_name, timeout=5)
+            return client_name, (res if isinstance(res, dict) else None), ""
+        except Exception as e:
+            return client_name, None, str(e)
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    errors: list[str] = []
+    for client_name, res, err in await asyncio.gather(*[_one(n) for n in online]):
+        if res is None:
+            errors.append(f"{client_name}: {err or '无结果'}")
+            continue
+        for s in res.get("sessions") or []:
+            if not isinstance(s, dict):
+                continue
+            sid = s.get("sessionId") or s.get("session_id")
+            if sid and sid in seen:
+                continue
+            if sid:
+                seen.add(sid)
+            merged.append({**s, "client": client_name})
+    out: dict = {"sessions": merged}
+    if errors:
+        out["_errors"] = errors
+    return out
+
+
 def _consent_desc() -> str | None:
     """会话级门禁:已授权返回 None(放行),否则返回授权说明触发 consent。"""
     if is_authorized(get_session_id()):
@@ -513,12 +629,15 @@ class BrowserSessionTool(_BrowserToolBase):
                     params["color"] = color
                 if background:
                     params["background"] = True
-                result = await _call("session_create", params)
+                # 先 resolve 一次,路由和绑定共用这个值:_call 内部再 resolve 的话,
+                # 两次之间状态可能变化(并行批里的 use / 瞬时掉线),绑错浏览器后
+                # 后续操作会报「session not found」。
+                client = get_hub().resolve_client(get_session_id())
+                result = await _call("session_create", params, client_name=client)
                 bsid = _extract_session_id(result)
                 if bsid:
-                    client = get_hub().get_active_client(get_session_id()) or ""
                     get_session_map().bind(bsid, get_session_id(),
-                                           client_name=client, keep_alive=keep_alive)
+                                           client_name=client or "", keep_alive=keep_alive)
                 return json.dumps(result, ensure_ascii=False)
             if action == "attach":
                 if not session:
@@ -551,15 +670,16 @@ class BrowserSessionTool(_BrowserToolBase):
                     params["title"] = title
                 if color:
                     params["color"] = color
-                result = await _call("session_attach_current", params)
+                # 同 create:路由与绑定共用一次 resolve,防止两次之间状态漂移
+                client = get_hub().resolve_client(get_session_id())
+                result = await _call("session_attach_current", params, client_name=client)
                 bsid = _extract_session_id(result)
                 if bsid:
-                    client = get_hub().get_active_client(get_session_id()) or ""
                     get_session_map().bind(bsid, get_session_id(),
-                                           client_name=client, keep_alive=keep_alive)
+                                           client_name=client or "", keep_alive=keep_alive)
                 return json.dumps(result, ensure_ascii=False)
             if action == "list":
-                result = await _call("session_list", {})
+                result = await _list_sessions_all_clients()
                 return json.dumps(_annotate_sessions(result), ensure_ascii=False)
             if action == "rename":
                 return json.dumps(await _call("session_rename", {"sessionId": session, "title": title},
@@ -1205,12 +1325,16 @@ class BrowserNetworkTool(_BrowserToolBase):
 
 class BrowserClientTool(_BrowserToolBase):
     name = "browser_client"
+    # 默认(Fast 档)广播里就带上它:_call 的多客户端报错让 agent「先用
+    # browser_client(use) 选择」,若这个工具本身还要 find_tools 激活,
+    # 提示就成了无法执行的空话。
+    fast_path = True
     description = (
         "管理浏览器客户端连接。多个浏览器可同时连接 Ethan Server,每个有自己的名字。"
-        "action=list 列出所有已连接的浏览器客户端(含名称);"
+        "action=list 列出所有已连接的浏览器客户端(含名称、各自当前活动标签页、本对话在其上的 session);"
         "use 设置当前对话使用哪个客户端(name 必填);"
         "status 查看当前对话的活跃客户端和全部已连接客户端。"
-        "当有多个浏览器连接时,操作浏览器前需先用 use 选择一个;仅一个连接时自动选中。"
+        "当有多个浏览器连接时,新建 session 前需先用 use 选择一个;仅一个连接时自动使用它。"
     )
     parameters = {
         "type": "object",
@@ -1226,18 +1350,11 @@ class BrowserClientTool(_BrowserToolBase):
         hub = get_hub()
         try:
             if action == "list":
-                clients = hub.list_clients()
-                if not clients:
-                    return json.dumps({
-                        "clients": [],
-                        "_hint": "没有浏览器客户端连接。请确认已安装并启用 Ethan Browser 扩展。",
-                    }, ensure_ascii=False)
-                active = hub.get_active_client(get_session_id())
+                clients = await _describe_clients()
                 return json.dumps({
                     "clients": clients,
-                    "active": active,
-                    "_hint": f"共 {len(clients)} 个客户端已连接。"
-                             + (f"当前活跃: {active}" if active else "尚未选择活跃客户端,用 use 选择。"),
+                    "active": hub.get_active_client(get_session_id()),
+                    "_hint": _clients_hint(clients),
                 }, ensure_ascii=False)
             if action == "use":
                 if not name:
@@ -1247,11 +1364,30 @@ class BrowserClientTool(_BrowserToolBase):
                     }, ensure_ascii=False)
                 ok = hub.set_active_client(get_session_id(), name)
                 if ok:
-                    return json.dumps({
+                    # 汇报名下 session 的分布:切客户端只影响「新建/无 session 操作」的路由,
+                    # 既有 session 仍按绑定路由到原浏览器(tab group 物理在那边)。
+                    # 不清理绑定:session 的 tab 还在旧浏览器里,清掉映射只会让
+                    # idle 回收(release)失去目标,留下孤儿 tab group。
+                    bound = get_session_map().owned_by_client(get_session_id())
+                    elsewhere = {c: ids for c, ids in sorted(bound.items()) if c and c != name}
+                    result: dict = {
                         "ok": True,
                         "active": name,
-                        "_hint": f"已切换到客户端 '{name}'。后续 browser_session/tab/page/network 操作都会路由到这个浏览器。",
-                    }, ensure_ascii=False)
+                        "bound_sessions_here": sorted(bound.get(name, [])),
+                    }
+                    hint = (f"已切换到客户端 '{name}'。后续新建 session 与"
+                            "browser_tab/user_list 等无 session 操作都会路由到这个浏览器。")
+                    if elsewhere:
+                        total = sum(len(v) for v in elsewhere.values())
+                        result["bound_sessions_elsewhere"] = elsewhere
+                        hint += (
+                            f" 注意:本对话还有 {total} 个既有 browser session 在旧客户端"
+                            f"（{'、'.join(f'{c} {len(ids)} 个' for c, ids in elsewhere.items())}）,"
+                            "操作它们仍会路由到原浏览器;若要在当前浏览器继续同样的页面,"
+                            "请新建 session 或让用户把标签页挪过来。"
+                        )
+                    result["_hint"] = hint
+                    return json.dumps(result, ensure_ascii=False)
                 clients = hub.list_clients()
                 names = [c["name"] for c in clients]
                 return json.dumps({
@@ -1261,13 +1397,13 @@ class BrowserClientTool(_BrowserToolBase):
                     "_hint": "可用客户端: " + ", ".join(names) if names else "没有已连接的客户端",
                 }, ensure_ascii=False)
             if action == "status":
+                clients = await _describe_clients()
                 active = hub.get_active_client(get_session_id())
-                clients = hub.list_clients()
+                hint = f"当前活跃: {active}" if active else _clients_hint(clients)
                 return json.dumps({
                     "active": active,
                     "clients": clients,
-                    "_hint": f"当前活跃: {active}" if active else "未设活跃客户端"
-                             + (f" (共 {len(clients)} 个已连接)" if clients else " (无连接)"),
+                    "_hint": hint,
                 }, ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:

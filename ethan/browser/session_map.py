@@ -84,6 +84,18 @@ class SessionMap:
             if e.ethan_session_id == ethan_session_id
         ]
 
+    def owned_by_client(self, ethan_session_id: str) -> dict[str, list[str]]:
+        """当前 ethan 会话名下的 browser session,按所属客户端分组。
+
+        返回 {client_name: [browser_session_id, ...]};client_name 为 "" 表示
+        绑定时未知(老数据),单独成组。
+        """
+        grouped: dict[str, list[str]] = {}
+        for bsid, e in self._entries.items():
+            if e.ethan_session_id == ethan_session_id:
+                grouped.setdefault(e.client_name, []).append(bsid)
+        return grouped
+
     def get_owner(self, browser_session_id: str) -> str:
         """返回该 browser session 当前绑定的 ethan 会话 ID，未绑定返回空串。"""
         entry = self._entries.get(browser_session_id)

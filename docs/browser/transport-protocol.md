@@ -1,6 +1,6 @@
 # 浏览器控制 · 传输层与协议
 
-本文说明 Ethan 服务端与 Chrome 扩展之间的通信:为什么选 WebSocket、JSON-RPC 信封长什么样、method/error 怎么定义、请求如何与响应配对、超时与断连如何处理、以及同一时刻只允许一条连接的 last-wins 策略。
+本文说明 Ethan 服务端与 Chrome 扩展之间的通信:为什么选 WebSocket、JSON-RPC 信封长什么样、method/error 怎么定义、请求如何与响应配对、超时与断连如何处理、以及多浏览器并存时的连接策略(last-wins 重连 / instanceId 撞名拒绝)。
 
 相关代码:`ethan/browser/hub.py`、`ethan/browser/ws_route.py`、`ethan/browser/protocol.py`、`browser-extension/src/background/ws-client.ts`。
 
@@ -37,19 +37,24 @@ sequenceDiagram
 
     Ext->>WS: WebSocket 连接 (ws://localhost:port/ws/browser)
     WS->>Ext: accept()
-    Ext->>WS: {"type":"auth","token":"<ethan web token>"}
+    Ext->>WS: {"type":"auth","token":"<ethan web token>","name":"<可选,本端名称>","instanceId":"<可选,安装实例标识>"}
     WS->>Store: resolve_web_token(token)
     alt token 无效
         Store-->>WS: None
         WS-->>Ext: close(code=4001)
     else token 有效
         Store-->>WS: user_id
-        WS->>Hub: attach(ws)  (last-wins)
-        WS-->>Ext: {"type":"auth_ok","version":1}
-        Ext->>Ext: 启动 20s 心跳 ping
-        loop 心跳
-            Ext->>WS: {"type":"ping"}
-            WS-->>Ext: {"type":"pong"}
+        alt 同名且 instanceId 不同(两台浏览器撞名)
+            WS-->>Ext: {"type":"auth_error","error":"客户端名已被另一台浏览器使用"}
+            WS-->>Ext: close(code=4001, reason="client name in use")
+        else 同名重连(同 instanceId)或新名字
+            WS->>Hub: attach(ws, name, instanceId)
+            WS-->>Ext: {"type":"auth_ok","version":1,"name":"<确认后的名称>"}
+            Ext->>Ext: 启动 20s 心跳 ping
+            loop 心跳
+                Ext->>WS: {"type":"ping"}
+                WS-->>Ext: {"type":"pong"}
+            end
         end
     end
 ```
@@ -58,7 +63,9 @@ sequenceDiagram
 
 - **首帧必须是 `auth`**。服务端 `accept()` 之后第一条消息若不是合法 `auth` 帧、或 token 解析失败,直接 `close(4001)`。
 - **token 复用 ethan 的 web token 体系**:`get_user_store().resolve_web_token(token)`,与 Web/HTTP 接口同源,不另设凭据。token 在扩展弹窗中配置。
-- 鉴权通过后服务端回 `auth_ok` 并携带协议版本 `version`(`RPC_VERSION = 1`),扩展据此开始心跳。
+- **`name`(可选)**:本端名称,多浏览器同时连接时用于区分;缺省时服务端自动分配随机名。
+- **`instanceId`(可选)**:扩展首启时用 `crypto.randomUUID()` 生成并持久化,同一浏览器始终不变。Hub 据此区分「同名重连」(同一浏览器,顶掉旧连接)和「同名撞名」(两台不同浏览器,拒绝**新**连接并先发一帧 `auth_error` 说明原因);任一方没带 `instanceId` 时退回纯 last-wins(兼容旧版扩展)。
+- 鉴权通过后服务端回 `auth_ok` 并携带协议版本 `version`(`RPC_VERSION = 1`)与服务端确认的 `name`,扩展据此开始心跳。
 
 ---
 
@@ -172,27 +179,24 @@ flowchart TD
 
 ---
 
-## 7. last-wins 连接策略与断连语义
+## 7. 连接策略:instanceId 区分的 last-wins + 撞名拒绝
 
-同机单浏览器场景下,扩展 Service Worker 被回收后重启、或用户重载扩展,都会产生"新连接进来时旧连接可能还在"的情况。策略是 **last-wins**:
+扩展 Service Worker 被回收后重启、用户重载扩展,都会产生"新连接进来时旧连接还在"的情况。同名连接默认 **last-wins**(新顶旧,服务重连);但多台浏览器可能装了同名扩展,纯 last-wins 会让两台机器互相顶替、谁也用不成。因此 attach 时按 `instanceId` 区分:
 
-```mermaid
-stateDiagram-v2
-    [*] --> 无连接
-    无连接 --> 已连接: attach(ws)
-    已连接 --> 已连接: attach(新ws)<br/>顶替旧连接<br/>旧 pending 全部 fail(retryable)
-    已连接 --> 无连接: detach(ws)<br/>断连<br/>pending 全部 fail(retryable)
-    note right of 已连接
-      _conn_lock 保护切换
-      被顶替/断连的连接:
-      conn.closed = True
-      fail_all(BrowserError retryable=True)
-    end note
-```
+| 场景 | 判定 | 行为 |
+|---|---|---|
+| 同一浏览器重连 | 同名,instanceId 相同(或任一方缺省) | last-wins:顶掉旧连接,旧 pending 全部 fail(retryable) |
+| 两台浏览器撞名 | 同名,instanceId 都存在且不同 | **拒绝新连接**(先回 `auth_error` 帧,再 `close(4001)`),保住正在服务的旧连接 |
 
-- **attach(新连接)**:若已有未关闭连接,先把旧连接标记 `closed`、`fail_all` 其全部挂起请求(`extension_not_connected`, `retryable=True`)、并尝试 `ws.close()`,再装入新连接。`_conn_lock` 保证切换原子。
-- **detach(断连)**:把该连接 `fail_all`;若它仍是当前连接则清空 `_conn`。
+- **detach(断连)**:把该连接 `fail_all`;若它仍是当前连接则从 `_conns` 移除。**不清理 `_session_clients`**(ethan 会话 → 浏览器的 use 绑定):断线往往是瞬时的,清掉会让用户刚 `browser_client(use)` 选好的浏览器凭空丢失;绑定的存活性由 `resolve_client` 每次按在线状态判断,同名重连后绑定自动继续生效。
 - **fail 的请求都是 `retryable=True`**:配合工具层的"重新 snapshot 后重试"提示,Agent 可自行重试,而不是整体卡死。
+
+多客户端并存时的路由语义(`BrowserHub.resolve_client` / 工具层):
+
+1. ethan 会话显式 `browser_client(use)` 过 → 用它;若它恰好掉线则跳过(绑定保留,重连恢复)。
+2. 未 use 且只有一个客户端在线 → 临时使用,**不落** `_session_clients`(避免以后连上第二台时掩盖歧义)。
+3. 未 use 且多台在线 → 路由不猜,报错引导 agent 用 `browser_client(action='list')` 查看各端(名称、当前活动标签页、本对话 session 分布)后 `use` 选择。
+4. 已存在的 browser session 永远按绑定路由到创建它的那台浏览器;`browser_session(action='list')` 会查询**所有**在线客户端并合并去重(每条 session 带 `client` 标注),避免「另一台浏览器里的 session 不可见 → 误判不存在 → 重复建 tab group」。
 
 > Hub 是**进程内单例**(`get_hub()`),这在单进程 `uvicorn` 下安全。这也是为什么本子系统依赖"保持单进程"这一架构前提——多 worker 会让扩展 WS 只连得上其中一个 worker,其余 worker 调用浏览器工具时找不到连接。该前提的完整论证见[设计决策记录](../browser-control-plan.md)第 11 节 Q2。
 

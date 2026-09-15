@@ -2,11 +2,14 @@
 
 职责:
   - 持有多个扩展 WS 连接,按客户端名称索引(name→conn)。
-  - 同名连接 last-wins:新连接顶掉同名旧连接。
+  - 同名连接 last-wins:新连接顶掉同名旧连接(同一浏览器重连);
+    但同名且 instance_id 不同视为两台不同浏览器抢名,拒绝新连接而非顶掉旧连接。
   - 发起 JSON-RPC 请求并按 id 配对响应,带 30s 超时。
   - per-session 锁:同一 browser session 的 pages.* 操作串行,不同 session 并行。
   - 断连时把所有 pending 请求 fail 成可重试错误。
   - per-ethan-session 活跃客户端:每个对话绑定一个当前操作的浏览器端。
+    只有人工 `browser_client(use)` 才会持久绑定;「只有一个客户端在线」时的
+    自动选中是临时的,不落 _session_clients——否则 A 掉线时会静默漂到 B。
 
 不保存 session/tab/page 状态镜像(扩展才是 source of truth);
 ethan_session_id ↔ browser_session_id 的映射在 session_map.py。
@@ -37,12 +40,19 @@ class BrowserError(Exception):
         self.retryable = retryable
 
 
+class BrowserClientNameConflictError(BrowserError):
+    """两个不同浏览器(Tab 实例)用了同一个客户端名。拒绝新连接,保住旧连接。"""
+
+
 class _Connection:
     """一条扩展 WS 连接的运行态。"""
 
-    def __init__(self, ws: Any, name: str):
+    def __init__(self, ws: Any, name: str, instance_id: str = ""):
         self.ws = ws
         self.name = name
+        # 浏览器安装实例标识(扩展侧 crypto.randomUUID 持久生成)。用于区分
+        # 「同一浏览器断线重连」和「两台浏览器撞名」——前者该顶替,后者该拒绝。
+        self.instance_id = instance_id
         self.pending: dict[int, asyncio.Future] = {}
         self.closed = False
         self.evicted = asyncio.Event()
@@ -69,11 +79,29 @@ class BrowserHub:
         """是否有任意一条扩展连接存活。"""
         return any(not c.closed for c in self._conns.values())
 
-    async def attach(self, ws: Any, name: str) -> _Connection:
-        """注册新扩展连接。同名连接 last-wins:顶掉旧连接并 fail 其 pending 请求。"""
+    async def attach(self, ws: Any, name: str, instance_id: str = "") -> _Connection:
+        """注册新扩展连接。
+
+        同名连接的两种情形区别对待:
+          - 同一浏览器重连(instance_id 相同,或任一方没有 instance_id)→ last-wins,
+            顶掉旧连接并 fail 其 pending 请求;
+          - 两台不同浏览器撞名(instance_id 都存在且不同)→ 拒绝**新**连接,
+            保留旧连接。否则两台机器会互相踢,谁也用不成。
+        """
         async with self._conn_lock:
             old = self._conns.get(name)
             if old is not None and not old.closed:
+                if (
+                    instance_id
+                    and old.instance_id
+                    and instance_id != old.instance_id
+                ):
+                    raise BrowserClientNameConflictError(
+                        f"客户端名 '{name}' 已被另一台浏览器使用。"
+                        "请在浏览器扩展的设置里改用不同的客户端名称。",
+                        code=ERROR_CODE["extension_not_connected"],
+                        retryable=False,
+                    )
                 logger.info("browser: client '%s' reconnecting, evicting previous", name)
                 old.closed = True
                 old.evicted.set()
@@ -86,13 +114,20 @@ class BrowserHub:
                     await old.ws.close()
                 except Exception:
                     pass
-            conn = _Connection(ws, name)
+            conn = _Connection(ws, name, instance_id=instance_id)
             self._conns[name] = conn
             logger.info("browser: client '%s' connected (%d total)", name, len(self._conns))
             return conn
 
     async def detach(self, conn: _Connection) -> None:
-        """连接断开:若仍是当前连接则移除,并 fail 所有 pending。"""
+        """连接断开:若仍是当前连接则移除,并 fail 所有 pending。
+
+        注意:**不清** _session_clients。扩展的 offscreen WS 断线重连很频繁
+        (SW 回收、网络抖动),通常几十秒内就回来;若断开时把绑定清掉,用户刚
+        browser_client(use) 选好的浏览器就丢了——实测表现为「use 的结果活不过
+        下一次独立调用」。绑定的存活性由 resolve_client 在每次解析时按在线状态
+        判断;连接恢复(同名重连)后绑定自动继续生效。
+        """
         async with self._conn_lock:
             conn.closed = True
             conn.fail_all(BrowserError(
@@ -106,10 +141,6 @@ class BrowserHub:
             if current is conn:
                 del self._conns[conn.name]
                 logger.info("browser: client '%s' disconnected (%d remaining)", conn.name, len(self._conns))
-            # 清理引用了此客户端的活跃会话映射
-            stale = [sid for sid, cname in self._session_clients.items() if cname == conn.name]
-            for sid in stale:
-                del self._session_clients[sid]
 
     def on_message(self, conn: _Connection, raw: str) -> None:
         """扩展回传的一条消息:解析为 JSON-RPC 响应并 resolve 对应 Future。"""
@@ -193,24 +224,28 @@ class BrowserHub:
         """解析某 ethan 会话应使用的客户端名称。
 
         优先级:
-          1. 会话已设的活跃客户端(且仍在线)
-          2. 只有一个客户端在线 → 自动选中
+          1. 会话已设的活跃客户端(且仍在线)——只有人工 browser_client(use) 会写入;
+             不在线时跳过但**不删除**,同名重连后绑定自动恢复
+          2. 只有一个客户端在线 → 临时使用它,**不写入** _session_clients
           3. 多个客户端且未设活跃 → 返回 None(由调用方提示 agent 询问用户)
+
+        1 掉线不删除的原因:断线往往是瞬时的(offscreen 重连),删掉会让用户的
+        use 选择丢失;而绑定死了不动也不会误路由——resolve 对离线客户端永不返回。
+        2 不持久化的原因:若「只有一个在线」时写死,后来又连上第二个,新会话的
+        歧义就被掩盖了。临时选中让「多个在线」时的歧义始终显式暴露,而单客户端
+        场景每次 resolve 结果相同,无额外成本。
         """
-        # 1. 已设活跃客户端
+        # 1. 已设活跃客户端(离线则跳过但不删)
         active = self._session_clients.get(ethan_session_id)
         if active:
             conn = self._conns.get(active)
             if conn and not conn.closed:
                 return active
-            # 活跃客户端已断连,清理
-            self._session_clients.pop(ethan_session_id, None)
 
         # 2. 在线客户端列表
         online = [name for name, conn in self._conns.items() if not conn.closed]
         if len(online) == 1:
-            # 只有一个,自动选中
-            self._session_clients[ethan_session_id] = online[0]
+            # 只有一个在线,临时使用;不写入 _session_clients(见 docstring)
             return online[0]
 
         # 3. 0 个或多个,无法自动决策

@@ -1,8 +1,11 @@
 """FastAPI WebSocket 路由 /ws/browser —— Chrome 扩展连接入口。
 
 扩展是 WS client,ethan 是 server(浏览器内无法当 server)。
-首帧必须发 {"type":"auth","token":"<ethan token>","name":"<客户端名称>"};校验失败直接 close。
-name 缺省时自动分配 "default"。同名连接 last-wins(同一浏览器的扩展重连)。
+首帧必须发 {"type":"auth","token":"<ethan token>","name":"<客户端名称>",
+"instanceId":"<浏览器实例标识>"};校验失败直接 close。
+name 缺省时自动分配 "browser-<序号>"。同名连接:instanceId 相同(同一浏览器重连)
+→ last-wins 顶掉旧连接;instanceId 不同(两台浏览器撞名)→ 拒绝新连接并回
+auth_error 帧,避免两台机器互相顶替。
 鉴权通过后把连接交给 BrowserHub,循环转发后续消息。
 """
 from __future__ import annotations
@@ -14,7 +17,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from ethan.browser.hub import get_hub
+from ethan.browser.hub import BrowserClientNameConflictError, get_hub
 from ethan.browser.protocol import RPC_VERSION
 
 logger = logging.getLogger("ethan.browser")
@@ -42,6 +45,15 @@ def _normalize_name(raw: str | None) -> str:
     return f"browser-{next(_name_gen)}"
 
 
+def _normalize_instance_id(raw: object) -> str:
+    """归一化浏览器实例标识:仅允许出现在首帧里的一个短字符串。"""
+    if isinstance(raw, str):
+        instance_id = raw.strip()[:128]
+        if instance_id:
+            return instance_id
+    return ""
+
+
 @router.websocket("/ws/browser")
 async def browser_ws(ws: WebSocket) -> None:
     await ws.accept()
@@ -60,11 +72,23 @@ async def browser_ws(ws: WebSocket) -> None:
         return
 
     client_name = _normalize_name(hello.get("name"))
+    instance_id = _normalize_instance_id(hello.get("instanceId"))
 
     await ws.send_text(json.dumps({"type": "auth_ok", "version": RPC_VERSION, "name": client_name}))
 
     hub = get_hub()
-    conn = await hub.attach(ws, client_name)
+    try:
+        conn = await hub.attach(ws, client_name, instance_id=instance_id)
+    except BrowserClientNameConflictError as e:
+        # 撞名但不是同一台浏览器:拒绝新连接,保住正在服务的旧连接。
+        # 先发一帧 auth_error 让扩展侧日志可见,再 close;扩展据此提示用户改名。
+        logger.warning("browser ws: name conflict for '%s', rejecting new connection", client_name)
+        try:
+            await ws.send_text(json.dumps({"type": "auth_error", "error": str(e)}))
+        except Exception:
+            pass
+        await ws.close(code=4001, reason="client name in use by another browser")
+        return
     logger.info("browser ws: extension '%s' connected", client_name)
 
     try:

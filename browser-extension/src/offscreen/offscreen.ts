@@ -12,6 +12,7 @@ interface WsClientConfig {
   serverUrl: string;
   token: string;
   clientName?: string;
+  instanceId?: string;
 }
 
 type RequestHandler = (message: unknown) => Promise<unknown | null>;
@@ -31,6 +32,8 @@ class BrowserWsClient {
   private lastCloseCode: number | null = null;
   // 服务端分配/确认的客户端名称
   private clientName: string = '';
+  // 最近一次鉴权被拒的原因(如撞名),仅诊断展示用
+  private lastAuthError: string = '';
 
   constructor(
     private getConfig: () => Promise<WsClientConfig | null>,
@@ -41,12 +44,13 @@ class BrowserWsClient {
     return !!this.ws && this.ws.readyState === WebSocket.OPEN && this.authed;
   }
 
-  get status(): { connected: boolean; diag: string; closeCode: number | null; clientName: string } {
+  get status(): { connected: boolean; diag: string; closeCode: number | null; clientName: string; authError: string } {
     return {
       connected: this.isConnected,
       diag: this.diagState,
       closeCode: this.lastCloseCode,
       clientName: this.clientName,
+      authError: this.lastAuthError,
     };
   }
 
@@ -105,6 +109,11 @@ class BrowserWsClient {
       if (cfg.clientName) {
         authMsg.name = cfg.clientName;
       }
+      if (cfg.instanceId) {
+        // 浏览器安装实例标识:服务端据此区分「同一浏览器重连」(顶掉旧连接)
+        // 和「两台浏览器撞名」(拒绝新连接),避免两台机器互相顶替。
+        authMsg.instanceId = cfg.instanceId;
+      }
       ws.send(JSON.stringify(authMsg));
     };
 
@@ -157,6 +166,7 @@ class BrowserWsClient {
       this.authed = true;
       this.diagState = 'connected';
       this.lastCloseCode = null;
+      this.lastAuthError = '';
       this.clientName = msg.name || '';
       this.startPing();
       this.clearStable();
@@ -167,6 +177,16 @@ class BrowserWsClient {
     }
     if (msg.type === 'pong') {
       this.clearPong();
+      return;
+    }
+
+    // 服务端拒绝鉴权(含「客户端名已被另一台浏览器使用」的撞名拒绝)。
+    // close 4001 随后到达,统一走 auth_failed;这里先把原因打进日志和诊断状态。
+    if (msg.type === 'auth_error') {
+      console.warn('[EthanBrowser:offscreen] auth rejected:', msg.error);
+      this.authed = false;
+      this.diagState = 'auth_failed';
+      this.lastAuthError = typeof msg.error === 'string' ? msg.error : '';
       return;
     }
 
