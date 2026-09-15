@@ -417,7 +417,9 @@ async def _require_owned_or_recover(browser_session_id: str, ethan_sid: str) -> 
 
     # 扩展确认 session 存在即可恢复绑定。
     # 单用户场景下不同对话操作同一 tab 是正常行为，无需防跨对话抢占。
-    smap.bind(browser_session_id, ethan_sid, client_name=found_client)
+    # keep_alive 沿用原值:回填只是补客户端名,不能顺手把「对话结束保留」标志冲掉。
+    smap.bind(browser_session_id, ethan_sid, client_name=found_client,
+              keep_alive=smap.is_keep_alive(browser_session_id))
     return found_client
 
 

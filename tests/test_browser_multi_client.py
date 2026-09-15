@@ -396,11 +396,12 @@ def test_orphan_binding_is_rehomed_by_probe(monkeypatch):
             "b": lambda m, p: {"sessions": [{"sessionId": "s-orphan"}]},
         }, single="a")
         smap = SessionMap()
-        smap.bind("s-orphan", "e1", client_name="")
+        smap.bind("s-orphan", "e1", client_name="", keep_alive=True)
         _patch(monkeypatch, hub, smap)
 
         await browser_mod._call("session_list", {}, browser_session_id="s-orphan")
         assert smap.get_client("s-orphan") == "b"  # 探针回填
+        assert smap.is_keep_alive("s-orphan") is True  # 回填不冲掉保留标志
         # 后续调用直接路由到 b,不再走探针
         hub.calls.clear()
         await browser_mod._call("session_list", {}, browser_session_id="s-orphan")
