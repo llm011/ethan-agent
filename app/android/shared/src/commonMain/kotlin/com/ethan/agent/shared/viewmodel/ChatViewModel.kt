@@ -501,25 +501,27 @@ class ChatViewModel(
                         assistantIndex = assistantIndex,
                     )
                     _state.update { it.copy(connectionState = ConnectionState.Idle) }
+                    // 正常跑完，放行队首
+                    drainQueue()
                 } catch (e: Exception) {
                     // SSE 断连后自动重连（指数退避），失败才显示横幅
                     val reconnected = autoReconnect(sessionId, assistantIndex)
                     if (!reconnected) {
+                        // 失败收场不 drain：队列原样保留给用户处理
                         _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                    } else {
+                        // 重连后接续跑完，同样放行队首
+                        drainQueue()
                     }
                 }
-                // 正常跑完（含重连后跑完）就放行队首；失败收场/用户停止（job 被取消，
-                // 走不到这里）都不 drain，队列原样保留给用户处理。
-                drainQueue()
+                // 用户主动停止（stopStreaming 取消本 job）走不到任何 drain：队列保留
             }
         }
     }
 
-    /** 本轮生成正常结束后取出队首消息自动发出；失败收场时保留队列不动 */
+    /** 本轮生成正常结束后取出队首消息自动发出 */
     private fun drainQueue() {
-        val state = _state.value
-        if (state.error != null) return
-        val next = state.queuedMessages.firstOrNull() ?: return
+        val next = _state.value.queuedMessages.firstOrNull() ?: return
         _state.update {
             it.copy(
                 queuedMessages = it.queuedMessages - next,
