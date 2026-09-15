@@ -80,12 +80,14 @@ Ethan Android 是 [Ethan Agent](https://github.com/ethan-agent/ethan-agent) 的�
 | 1 | 进入对话页，加载模型列表和对话模式 | `GET /api/models`, `GET /api/modes` |
 | 2 | 选择模型（下拉）和模式（FilterChip，如「苏念·陪伴倾听」） | — |
 | 3 | 输入消息；若无 session 先创建 | `POST /api/sessions?model=&mode=` |
-| 4 | 发送消息，SSE 流式接收 | `POST /api/chat` (stream=true) |
-| 5 | 解析 SSE 事件：`content` 增量、`tool` 状态、`consent_request`、`done`+`usage` | — |
+| 4 | 发送消息，SSE 流式接收；生成中发送改为**排队**（队列 chips 可移除/取回编辑，本轮跑完自动按序发出） | `POST /api/chat` (stream=true) |
+| 5 | 解析 SSE 事件：`content` 增量、`tool` 状态、`consent_request`、`done`+`usage`；工具结束时清空正文、旧文本进步骤 thought（对齐 web 的替换语义） | — |
 | 6 | 收到授权请求 → 弹窗 Allow/Deny | `POST /api/consent/{id}` |
 | 7 | 长按消息 → 设置引用，下次发送带 `quote` | — |
 | 8 | 附件按钮 → 系统文件选择器 → 上传 | `POST /api/upload` |
 | 9 | 首次使用显示 Onboarding 横幅 | `GET/POST /api/onboarding/*` |
+| 10 | 生成中「补充信息」独立入口：立即注入当前 run（无活跃 run 时 409 自动降级普通发送） | `POST /api/chat/{id}/inject` |
+| 11 | 输入框展开全屏编辑（长文本写完再发）；双击气泡进阅读模式，返回键只退阅读不退会话 | — |
 
 **Slash 命令（客户端拦截）**：
 - `/new` — 新建对话
@@ -108,9 +110,9 @@ error            → 错误提示
 
 | 步骤 | 行为 | API |
 |------|------|-----|
-| 1 | 展示会话卡片列表（标题、摘要、模型、来源、时间） | `GET /api/sessions` |
-| 2 | 搜索框 300ms debounce | `GET /api/sessions?q=` |
-| 3 | 后台每 3 秒轮询（搜索时暂停） | `GET /api/poll` |
+| 1 | 展示会话卡片列表（标题、摘要、模型、来源、时间），顶部排他类别筛选：全部对话 / 定时任务对话 / 心跳对话（默认排除定时、心跳、后台任务会话，与 web 同口径） | `GET /api/sessions`（`hide_heartbeat` / `hide_scheduled` / `hide_background` / `title_prefixes`） |
+| 2 | 搜索框 300ms debounce（与类别筛选 AND 合成） | `GET /api/sessions?q=` |
+| 3 | 后台每 3 秒轮询（搜索时暂停；类别视图下轮询不回灌，防冲掉专属列表） | `GET /api/poll` |
 | 4 | 点击卡片 → 跳转对应对话 | — |
 | 5 | 重命名 / 删除 | `PATCH/DELETE /api/sessions/{id}` |
 
