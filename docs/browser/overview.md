@@ -17,9 +17,10 @@ Ethan 自身是一个常驻的异步 HTTP 服务(单进程 `uvicorn`)。浏览�
 ### 不在本阶段范围
 
 - **跨公网远程控制**:当前假设 ethan 与浏览器在同一台机器(本机裸跑或本机 Docker),传输层只面向 `localhost`。
-- **多浏览器连接池**:同一时刻只维护一条扩展连接(后文 last-wins 策略)。
 - **完整跨域 iframe 操作**:仅做基础处理。
 - **完整的 turn/lease/overlay 运行时**:RPC id 仅用于请求追踪。
+
+> 多浏览器:**支持多台浏览器同时连接**(按客户端名称区分,`instanceId` 防撞名互踢,见[传输层](transport-protocol.md)第 7 节),但不是连接池——每台各自一条连接,不做负载均衡/故障转移,路由语义见同节。
 
 ---
 
@@ -57,9 +58,9 @@ flowchart LR
 
 | 层 | 位置 | 职责 | 是否持有状态 |
 |---|---|---|---|
-| **Agent 工具** | `ethan/tools/builtin/browser.py` | 把模型的 action 参数映射为 JSON-RPC method;做会话归属门禁、snapshot 截断、截图落盘 | 否 |
-| **BrowserHub** | `ethan/browser/hub.py` | 持有唯一 WS 连接;请求/响应按 id 配对;30s 超时;per-session 串行锁;断连即 fail | 仅连接运行态,不镜像浏览器状态 |
-| **WS 路由** | `ethan/browser/ws_route.py` | `/ws/browser` 端点;首帧 token 鉴权;ping/pong;把连接交给 Hub | 否 |
+| **Agent 工具** | `ethan/tools/builtin/browser.py` | 把模型的 action 参数映射为 JSON-RPC method;做会话归属门禁、多客户端路由/绑定、snapshot 截断、截图落盘 | 否(绑定在 Hub/session_map) |
+| **BrowserHub** | `ethan/browser/hub.py` | 按名称持有**多条**扩展 WS 连接;请求/响应按 id 配对;30s 超时;per-session 串行锁;断连即 fail;ethan 会话 → 浏览器的 use 绑定 | 仅连接运行态,不镜像浏览器状态 |
+| **WS 路由** | `ethan/browser/ws_route.py` | `/ws/browser` 端点;首帧 token 鉴权(含 `name`/`instanceId`);ping/pong;把连接交给 Hub | 否 |
 | **扩展 ws-client** | `browser-extension/.../ws-client.ts` | WS 客户端;心跳 ping;`chrome.alarms` 保活;指数退避重连 | 连接态 |
 | **扩展 rpc** | `browser-extension/.../rpc.ts` | method 白名单 + 参数校验 + 分发到 session-store / page-controller | 否 |
 | **session-store** | `browser-extension/.../session-store.ts` | session ↔ Chrome TabGroup 映射,标签归属,**浏览器状态的唯一真源** | 是(权威) |
@@ -125,7 +126,7 @@ ethan/browser/
 ├── auth.py            会话级一次性授权状态
 └── http_route.py      /api/browser/shot/{name} 截图文件路由
 
-ethan/tools/builtin/browser.py   browser_session / browser_tab / browser_page 三工具
+ethan/tools/builtin/browser.py   browser_session / browser_tab / browser_page / browser_network / browser_client 五工具
 
 browser-extension/
 ├── src/manifest.json            MV3 manifest(无 nativeMessaging,改 host_permissions)
@@ -149,6 +150,6 @@ browser-extension/
 
 ## 5. 各专题文档导航
 
-- **[传输层与协议](transport-protocol.md)** —— WebSocket 选型、JSON-RPC 信封、method/error 表、req-id 配对、超时与断连语义、last-wins 连接策略。
+- **[传输层与协议](transport-protocol.md)** —— WebSocket 选型、JSON-RPC 信封、method/error 表、req-id 配对、超时与断连语义、多浏览器连接策略(last-wins / 撞名拒绝 / 路由语义)。
 - **[扩展内核(CDP/AX)](extension-internals.md)** —— Service Worker 保活、CDP attach 缓存、可访问性树快照算法、ref 句柄生命周期、page-controller 各动作的 CDP 实现。
 - **[会话/并发/安全](session-security.md)** —— 会话绑定模型、per-session 锁、idle release、token 鉴权、会话级授权门禁、会话归属隔离、截图隐私与清理、`eval` 权限边界。

@@ -45,7 +45,7 @@ async function load() {
   refreshStatus();
 }
 
-function setStatus(connected, diag, clientName) {
+function setStatus(connected, diag, clientName, authError) {
   const dot = $('dot');
   const text = $('statusText');
   dot.classList.remove('on', 'off');
@@ -74,8 +74,14 @@ function setStatus(connected, diag, clientName) {
 
   dot.classList.add('off');
   if (diag === 'auth_failed') {
-    text.textContent = 'Token 错误';
-    setHint('鉴权失败，请检查 Token 是否与 ethan web token 一致', 'err');
+    if (authError) {
+      // 服务端明确拒绝(如:客户端名已被另一台浏览器使用)
+      text.textContent = '连接被拒绝';
+      setHint(authError, 'err');
+    } else {
+      text.textContent = 'Token 错误';
+      setHint('鉴权失败，请检查 Token 是否与 ethan web token 一致', 'err');
+    }
   } else if (diag === 'connection_failed') {
     text.textContent = '无法连接';
     setHint('正在诊断…', 'warn');
@@ -127,6 +133,7 @@ async function queryConnected() {
       connected: !!(resp && resp.connected),
       diag: resp?.diag || 'unknown',
       clientName: resp?.clientName || '',
+      authError: resp?.authError || '',
     };
   } catch (e) {
     setHint('查询失败: ' + (e?.message || e), 'err');
@@ -154,29 +161,29 @@ async function refreshStatus() {
     setStatus(false, 'connection_failed');
     return;
   }
-  const { connected, diag, clientName } = await queryConnected();
-  setStatus(connected, diag, clientName);
+  const { connected, diag, clientName, authError } = await queryConnected();
+  setStatus(connected, diag, clientName, authError);
 }
 
 /** 轮询状态：重连 + 握手需要一点时间，连查几次直到连上或超时。 */
 async function pollUntilConnected(tries = 12, intervalMs = 400) {
   setStatus(null, 'connecting');
   for (let i = 0; i < tries; i++) {
-    const { connected, diag, clientName } = await queryConnected();
+    const { connected, diag, clientName, authError } = await queryConnected();
     if (connected) {
       setStatus(true, 'connected', clientName);
       return;
     }
     // auth_failed 不需要重试，直接显示
     if (diag === 'auth_failed') {
-      setStatus(false, diag);
+      setStatus(false, diag, clientName, authError);
       return;
     }
     await new Promise(r => setTimeout(r, intervalMs));
   }
   // 超时后最后查一次状态
-  const { connected, diag, clientName } = await queryConnected();
-  setStatus(connected, diag || 'connection_failed', clientName);
+  const { connected, diag, clientName, authError } = await queryConnected();
+  setStatus(connected, diag || 'connection_failed', clientName, authError);
 }
 
 /** 当前输入值写入 storage。storage.onChanged 会触发 background 自动重连。 */

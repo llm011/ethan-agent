@@ -12,6 +12,7 @@ export interface ServerConfig {
   serverUrl: string; // 如 ws://localhost:8900/ws/browser
   token: string;
   clientName?: string; // 本端名称,用于多浏览器区分(缺省时服务端自动分配)
+  instanceId?: string; // 本浏览器安装实例标识,用于区分「同浏览器重连」和「两台浏览器撞名」
 }
 
 /** 把 ws://host/ws/browser 转成 http://host（wss→https）。 */
@@ -22,13 +23,36 @@ export function wsToHttp(wsUrl: string): string {
     .replace(/\/ws\/browser\/?$/, '');
 }
 
-/** 从 chrome.storage.local 读 serverUrl/token/clientName，缺 serverUrl/token 则返回 null。 */
+/** 首次调用时生成并持久化浏览器实例标识。同一浏览器始终返回同一个值。 */
+export async function ensureInstanceId(): Promise<string> {
+  const { instanceId } = await chrome.storage.local.get(['instanceId']);
+  if (instanceId) return instanceId;
+  const fresh =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `inst-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    await chrome.storage.local.set({ instanceId: fresh });
+  } catch {
+    // storage 写失败(极罕见)就退化为每次连接随机,服务端按无 instanceId 处理
+    return fresh;
+  }
+  return fresh;
+}
+
+/** 从 chrome.storage.local 读 serverUrl/token/clientName/instanceId，缺 serverUrl/token 则返回 null。 */
 export async function readServerConfig(): Promise<ServerConfig | null> {
   const { serverUrl, token, clientName } = await chrome.storage.local.get([
     'serverUrl', 'token', 'clientName',
   ]);
   if (!serverUrl || !token) return null;
-  return { serverUrl, token, clientName: clientName || undefined };
+  const instanceId = await ensureInstanceId();
+  return {
+    serverUrl,
+    token,
+    clientName: clientName || undefined,
+    instanceId: instanceId || undefined,
+  };
 }
 
 export const BROWSER_RPC_METHODS = {
