@@ -76,13 +76,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // 否则会出现"A 会话的旧消息被塞进 B 会话"的串台。
   const olderReqSessionRef = useRef<string | null>(null);
   const streamingRef = useRef(false);
-  // 兜底：ref 与 state 正常时始终同向，一旦不同向说明有路径只改了其中一个
-  // （历史上 handleSend 主路径用的就是裸 setStreaming，ref 停在旧值），
-  // 谁更新就认谁，避免 ref 卡在 true 后 handleSend 永远静默返回。
+  // 唯一的写入点：必须同时更新 ref 和 state，两者永不脱节。
+  // 历史上这里有过裸 setStreaming（发送主路径 / 自动续跑 / 切会话重置 /
+  // handleCommand 入参），ref 停在旧值，`if (streamingRef.current) return;`
+  // 那道守卫就会永久拦截后续发送，且完全静默。
+  // 不要改成「在 render 里比对 state 与 ref 再纠正」——那只是用另一个真相源
+  // 掩盖漏调用，漏改会被静默兜住，反而更难发现。
   const _setStreaming = (v: boolean) => { streamingRef.current = v; setStreaming(v); };
-  streamingRef.current = streaming !== streamingRef.current && !streaming
-    ? false
-    : streamingRef.current;
   // 后台任务条：展示本进程内运行中/刚完成的后台任务（其会话不在侧边栏列表里）
   const [bgTasks, setBgTasks] = useState<BackgroundTask[]>([]);
   const [bgPolling, setBgPolling] = useState<string | null>(null);
@@ -882,13 +882,17 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (!text.trim() && pendingFiles.length === 0) return;
     // 用 ref 读取最新值，避免 state 批处理延迟导致新会话被旧 streaming=true 拦截
     if (streamingRef.current) {
-      // 正常路径下 ChatInput 已经在 streaming 时把消息塞进排队队列，走不到这里；
-      // 真走到这儿说明 streaming 状态有残留（历史上 ref 卡 true 时消息被静默吞掉，
-      // 用户只看到"发了没反应"）。兜底排队 + 留一条可见提示，不再无声丢弃。
-      inputStoreRef.current.addToQueue(text);
+      // 正常路径下 ChatInput 已经在 streaming 时把消息塞进排队队列，走不到这里。
+      // 真走到这儿说明 streaming 状态有残留，而早前是静默 return —— 用户只看到
+      //「发了没反应」，连消息去哪了都不知道。这里只留一条可见提示。
+      //
+      // 刻意**不**在这里 addToQueue：本守卫跑在 sessionId 解析之前，队列是按
+      // currentSessionRef 归属的，此刻还分不清这条消息属于哪个会话，贸然入队会把
+      // 消息排到（随后被 drain 发往）错误的会话。入队只该由 ChatInput 那条
+      // 已知会话的正常路径负责。
       setMessages((prev) => [...prev, {
         role: "assistant",
-        content: "⏳ 上一条还在生成中，这条已加入排队，等它结束后自动发送。",
+        content: "⚠️ 上一条还在生成中，这条没有发出去。请等它结束后重发。",
         created_at: Date.now() / 1000,
       }]);
       return;
