@@ -168,11 +168,16 @@ class SessionsViewModel(
             if (_state.value.query.isBlank()) {
                 detectUnread(sessions)
                 _state.update { st ->
+                    // /api/poll 是轻量接口，不回 snippet（首条 query 预览）——直接灌回
+                    // 会把刚加载好的卡片预览 3 秒后冲成空。按 id 把旧列表的 snippet
+                    // 补回去（轮询里新出现的会话本来就没有，置 null 不动）。
+                    val prevSnippets = st.sessions.associate { it.id to it.snippet }
+                    val merged = sessions.map { s -> s.copy(snippet = s.snippet ?: prevSnippets[s.id]) }
                     st.copy(
                         // 抽屉始终吃未过滤全量列表（它要展示定时/心跳分组）
                         drawerSessions = sessions,
                         // 类别视图是 fetchCategory 按前缀专属拉的，轮询的全量列表不能冲掉它
-                        sessions = if (st.categoryFilter.isEmpty()) sessions else st.sessions,
+                        sessions = if (st.categoryFilter.isEmpty()) merged else st.sessions,
                     )
                 }
             }

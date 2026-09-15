@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -47,9 +45,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -65,6 +61,7 @@ import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.SnackbarContainer
 import com.ethan.agent.ui.components.SourceBadge
+import com.ethan.agent.ui.components.EthanTopBar
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -127,135 +124,15 @@ fun SessionsScreen(
         SummaryBottomSheet(summary = summary, onDismiss = onDismissSummary)
     }
 
+    var searchExpanded by remember { mutableStateOf(false) }
+
     Scaffold(
-        snackbarHost = { SnackbarContainer(snackbar) },
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { padding ->
-        var searchExpanded by remember { mutableStateOf(false) }
-
-        // 本页没有 topBar，而 enableEdgeToEdge 下 Scaffold 的 contentPadding 仍包含状态栏
-        // 高度 —— 于是顶部会留出一条空白（筛选条本该紧贴状态栏）。
-        // 这里把状态栏 inset 消费掉，改由筛选条自己用 statusBarsPadding() 顶上去，
-        // 让「返回 + 来源筛选 + 搜索」这条筛选栏充当事实上的顶栏。
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .consumeWindowInsets(padding),
-        ) {
-            // Filter bar card
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                shape = MaterialTheme.shapes.extraLarge,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            ) {
-                Column {
-                // 类别 chips（排他，对齐 web all-sessions-view）：全部对话 / 定时任务对话 / 心跳对话。
-                // 「全部对话」= 排除定时/心跳（它们有专属类别入口），不再是全部混在一起。
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(start = 8.dp, end = 8.dp, top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    CATEGORY_CHIPS.forEach { (label, key) ->
-                        val categorySelected = state.categoryFilter == key
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = if (categorySelected) MaterialTheme.colorScheme.secondaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            border = if (categorySelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.clickable(
-                                indication = null,
-                                interactionSource = remember { MutableInteractionSource() },
-                            ) { onToggleCategory(key) },
-                        ) {
-                            Text(
-                                text = label,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (categorySelected) MaterialTheme.colorScheme.onSecondaryContainer
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Back button
-                    IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-
-                    // Scrollable chips
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                    // "全部" chip：空集合表示全部
-                    val allSelected = state.selectedSources.isEmpty()
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = if (allSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        border = if (allSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.clickable(
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                        ) { onSelectAllSources() },
-                    ) {
-                        Text(
-                            text = "全部",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (allSelected) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    ALL_SOURCE_CHIPS.forEach { sourceKey ->
-                        val selected = state.selectedSources.contains(sourceKey)
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = if (selected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.clickable(
-                                indication = null,
-                                interactionSource = remember { MutableInteractionSource() },
-                            ) { onToggleSource(sourceKey) },
-                        ) {
-                            Text(
-                                text = sourceKey,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (selected) MaterialTheme.colorScheme.onPrimary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-
-                // Search icon
-                IconButton(
-                    onClick = { searchExpanded = !searchExpanded },
-                    modifier = Modifier.size(36.dp),
-                ) {
+        topBar = {
+            // 标准 EthanTopBar（返回 | 标题 | 搜索），与设置/文档等子页一致。
+            // 之前返回键挤在来源筛选行里、外面还套了张带描边的卡片，层级很怪 ——
+            // 现在顶栏归顶栏，类别/来源筛选平铺在顶栏下方，不再有那个框。
+            EthanTopBar(title = "全部对话", onBack = onBack) {
+                IconButton(onClick = { searchExpanded = !searchExpanded }) {
                     Icon(
                         Icons.Default.Search,
                         contentDescription = "搜索",
@@ -264,8 +141,95 @@ fun SessionsScreen(
                     )
                 }
             }
-            } // end Column（类别 + 来源两行）
-            } // end filter bar Surface
+        },
+        snackbarHost = { SnackbarContainer(snackbar) },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { padding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            // 类别 chips（排他，对齐 web all-sessions-view）：全部对话 / 定时任务对话 / 心跳对话。
+            // 「全部对话」= 排除定时/心跳（它们有专属类别入口），不再是全部混在一起。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                CATEGORY_CHIPS.forEach { (label, key) ->
+                    val categorySelected = state.categoryFilter == key
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (categorySelected) MaterialTheme.colorScheme.secondaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        border = if (categorySelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                        ) { onToggleCategory(key) },
+                    ) {
+                        Text(
+                            text = label,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (categorySelected) MaterialTheme.colorScheme.onSecondaryContainer
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            // 来源 chips（多选）：「全部」= 空集合
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                val allSelected = state.selectedSources.isEmpty()
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (allSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    border = if (allSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                    ) { onSelectAllSources() },
+                ) {
+                    Text(
+                        text = "全部",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (allSelected) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                ALL_SOURCE_CHIPS.forEach { sourceKey ->
+                    val selected = state.selectedSources.contains(sourceKey)
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                        ) { onToggleSource(sourceKey) },
+                    ) {
+                        Text(
+                            text = sourceKey,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
 
             // Expandable inline search bar
             AnimatedVisibility(
@@ -346,7 +310,14 @@ fun SessionsScreen(
                     }
 
                     item(key = "all_header") {
-                        GroupHeader("全部对话")
+                        // 分组标题跟随类别（类别筛选下还写「全部对话」会文不对题）
+                        GroupHeader(
+                            when (state.categoryFilter) {
+                                "scheduled" -> "定时任务对话"
+                                "heartbeat" -> "心跳对话"
+                                else -> "全部对话"
+                            },
+                        )
                     }
                     items(state.filteredSessions, key = { it.id }) { session ->
                         SessionCard(
