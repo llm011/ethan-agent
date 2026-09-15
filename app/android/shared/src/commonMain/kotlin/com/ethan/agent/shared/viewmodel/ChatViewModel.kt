@@ -396,12 +396,20 @@ class ChatViewModel(
     fun setShowScrollToBottom(show: Boolean) { _state.update { it.copy(showScrollToBottom = show) } }
     fun clearUnread() { _state.update { it.copy(unreadCount = 0) } }
 
-    /** 发送消息：流式发送中则 inject，否则普通发送 */
+    /** 发送消息：流式发送中则排队，否则普通发送 */
     fun sendMessage() {
         val current = _state.value
-        val text = current.inputText.trim()
-        val images = current.pendingImages
+        sendInternal(current.inputText.trim(), current.pendingImages, fromQueue = false)
+    }
+
+    /**
+     * 统一发送路径。[fromQueue] = 出队直发（drainQueue 调用）：不碰输入框 ——
+     * 那里可能是用户在生成期间打的新草稿，覆盖等于丢字（web 出队也不经过输入框），
+     * 也不能把草稿挂的 quote 误带给排队的消息。
+     */
+    private fun sendInternal(text: String, images: List<PendingImage>, fromQueue: Boolean) {
         if (text.isEmpty() && images.isEmpty()) return
+        val current = _state.value
         // 模型歧义（旧纯 id 命中多个同名）时不能发：避免静默切到另一个 provider
         if (current.modelAmbiguous) return
 
@@ -432,12 +440,18 @@ class ChatViewModel(
             // 待发送图片转成 UI 渲染格式（用 dataUrl 即时预览）和 API 格式
             val uiImages = images.map { UiMessageImage(displayUrl = it.dataUrl) }
             val apiImages = images.map { com.ethan.agent.core.model.MessageImage(data = it.base64Data, mediaType = it.mediaType) }
-            val userMessage = UiMessage(role = "user", content = text, quote = current.quote, createdAt = Clock.System.now().toEpochMilliseconds() / 1000, images = uiImages)
+            val userMessage = UiMessage(
+                role = "user", content = text,
+                // 出队直发不带 quote：草稿上挂的 quote 属于用户正在写的那条，不能误带给排队的消息
+                quote = if (fromQueue) null else current.quote,
+                createdAt = Clock.System.now().toEpochMilliseconds() / 1000, images = uiImages,
+            )
             _state.update {
                 it.copy(
-                    inputText = "",
-                    pendingImages = emptyList(),
-                    quote = null,
+                    // 出队直发不碰输入框（可能是用户正在打的新草稿）
+                    inputText = if (fromQueue) it.inputText else "",
+                    pendingImages = if (fromQueue) it.pendingImages else emptyList(),
+                    quote = if (fromQueue) it.quote else null,
                     messages = it.messages + userMessage,
                     isStreaming = true,
                     connectionState = ConnectionState.Streaming,
@@ -521,15 +535,14 @@ class ChatViewModel(
 
     /** 本轮生成正常结束后取出队首消息自动发出 */
     private fun drainQueue() {
-        val next = _state.value.queuedMessages.firstOrNull() ?: return
-        _state.update {
-            it.copy(
-                queuedMessages = it.queuedMessages - next,
-                inputText = next.text,
-                pendingImages = next.images,
-            )
-        }
-        sendMessage()
+        val state = _state.value
+        val next = state.queuedMessages.firstOrNull() ?: return
+        // 模型歧义未解时先不出队：sendInternal 会早退，出队即丢；留在队列里等
+        // 用户选完模型再发（下一条消息跑完后会再次 drain）
+        if (state.modelAmbiguous) return
+        _state.update { it.copy(queuedMessages = it.queuedMessages - next) }
+        // 直发，不经过输入框：输入框里可能是用户在生成期间打的新草稿，覆盖等于丢字
+        sendInternal(next.text, next.images, fromQueue = true)
     }
 
     /** 移除排队中的消息（队列 chip 上的 ×） */

@@ -49,6 +49,11 @@ data class SessionsUiState(
     // 空集合表示"全部"，避免 source 为 null 或非已知来源的 session 被永久隐藏
     val selectedSources: Set<String> = emptySet(),
     val unreadSessionIds: Set<String> = emptySet(),
+    /**
+     * 抽屉数据源：**未过滤**的全量列表。主列表（sessions）默认视图已在服务端
+     * 排除定时/心跳/后台会话，而抽屉恰恰要展示这三类的专属分组 —— 两者必须分开喂。
+     */
+    val drawerSessions: List<SessionInfo> = emptyList(),
 ) {
     /** 按类别筛选：默认「全部对话」不显示定时/心跳/后台（对齐 web —— 它们有专属入口） */
     private val categoryFiltered: List<SessionInfo>
@@ -111,6 +116,13 @@ class SessionsViewModel(
         }
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
+            // 抽屉要的未过滤列表单独拉一次：不能复用 cachedSessions（那里的缓存
+            // 现在带 hide_* 过滤参数，读出来会缺定时/心跳，抽屉分组就空了）
+            launch {
+                try {
+                    _state.update { it.copy(drawerSessions = repository.poll()) }
+                } catch (_: Exception) {}
+            }
             if (query.isBlank()) {
                 // 非搜索：用 cached flow，先秒出缓存再网络刷新。
                 // 服务端过滤对齐 web：默认视图就不含定时/心跳/后台会话（各有专属入口），
@@ -151,14 +163,18 @@ class SessionsViewModel(
     }
 
     private suspend fun refreshQuietly() {
-        // 类别筛选激活时暂停轮询（对齐 web）：定时/心跳类别是按前缀单独拉的列表，
-        // 轮询回灌的是未过滤的全量列表，会把类别视图冲掉
-        if (_state.value.categoryFilter.isNotEmpty()) return
         try {
             val sessions = repository.poll()
             if (_state.value.query.isBlank()) {
                 detectUnread(sessions)
-                _state.update { it.copy(sessions = sessions) }
+                _state.update { st ->
+                    st.copy(
+                        // 抽屉始终吃未过滤全量列表（它要展示定时/心跳分组）
+                        drawerSessions = sessions,
+                        // 类别视图是 fetchCategory 按前缀专属拉的，轮询的全量列表不能冲掉它
+                        sessions = if (st.categoryFilter.isEmpty()) sessions else st.sessions,
+                    )
+                }
             }
         } catch (_: Exception) {}
     }

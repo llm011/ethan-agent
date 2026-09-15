@@ -119,7 +119,9 @@ private fun MainContent(authViewModel: AuthViewModel) {
         gesturesEnabled = true,
         drawerContent = {
             AppDrawerContent(
-                sessions = sessionsState.sessions,
+                // 抽屉用未过滤全量列表：主列表默认视图已在服务端排除定时/心跳，
+                // 直接喂给抽屉的话它的定时/心跳分组会永远为空
+                sessions = sessionsState.drawerSessions,
                 unreadSessionIds = sessionsState.unreadSessionIds,
                 onNewChat = {
                     // 开新会话。两个坑：
