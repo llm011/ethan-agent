@@ -172,32 +172,42 @@ def serve_main(
 ) -> None:
     """Start the HTTP API server. Default runs in foreground."""
     if ctx.invoked_subcommand is None:
-        host, port = _server_bind_defaults(host, port)
-        conflicts = _find_conflicting_servers()
-        if conflicts and not force:
-            from rich.console import Console
+        import os
 
-            console = Console()
-            console.print(
-                "[red]✗ 已有 ethan 实例正在使用同一数据目录，拒绝启动。[/red]"
-            )
-            console.print()
-            for pid, db in conflicts:
-                console.print(f"  运行中的实例: [bold]pid={pid}[/bold]")
-                console.print(f"  数据目录:     [dim]{db}[/dim]")
-            console.print()
-            console.print(
-                "  多个实例同时写同一个 sessions.db 会导致 [bold]database is locked[/bold]，"
-                "定时任务与写入静默失败。"
-            )
-            console.print()
-            console.print("  可选操作：")
-            console.print("    ethan serve stop          — 停掉已有实例")
-            console.print(
-                "    使用不同数据目录              — 设 ETHAN_DATA_DIR 环境变量"
-            )
-            console.print("    ethan serve --force        — 强制启动（不推荐）")
-            raise typer.Exit(1)
+        host, port = _server_bind_defaults(host, port)
+        # ETHAN_NO_WATCHDOG=1 是开发/测试开关（CLAUDE.md 的多 worktree 规范），
+        # 语义就是「我知道自己在干什么，别接管我的进程」。worktree 里跑测试时
+        # sessions.db 与常驻服务是同一个文件，不放行会把日常开发流程堵死。
+        if not force and not os.environ.get("ETHAN_NO_WATCHDOG"):
+            conflicts = _find_conflicting_servers()
+            if conflicts:
+                from rich.console import Console
+
+                console = Console()
+                console.print(
+                    "[red]✗ 已有 ethan 实例正在使用同一数据目录，拒绝启动。[/red]"
+                )
+                console.print()
+                for pid, db in conflicts:
+                    console.print(f"  运行中的实例: [bold]pid={pid}[/bold]")
+                    console.print(f"  数据目录:     [dim]{db}[/dim]")
+                console.print()
+                console.print(
+                    "  多个实例同时写同一个 sessions.db 会导致 [bold]database is locked[/bold]，"
+                    "定时任务与写入静默失败。"
+                )
+                console.print()
+                console.print("  可选操作：")
+                console.print("    ethan serve stop          — 停掉已有实例")
+                console.print(
+                    "    使用不同数据目录              — 设 ETHAN_DATA_DIR 环境变量"
+                )
+                console.print(
+                    "    开发/测试                    — 设 ETHAN_NO_WATCHDOG=1（跳过本检测，"
+                    "不写 PID、不拉起 watchdog）"
+                )
+                console.print("    ethan serve --force        — 强制启动（不推荐，会锁冲突）")
+                raise typer.Exit(1)
         from ethan.interface.api import run_server
         run_server(host=host, port=port)
 
