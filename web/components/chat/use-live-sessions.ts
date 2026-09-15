@@ -89,9 +89,9 @@ export function collectChangedSessions(
  * run_manager.create 的说明），规则见 collectChangedSessions。
  *
  * 刻意**不**维护「我打开的这条会话上次的 updated_at」那种精确基线：这里的列表是
- * 隐藏了心跳/定时会话前缀的**过滤切片**，而消费方那侧可能是被过滤掉的那批（用户
- * 点进一个「[定时] …」会话完全正常）。两边口径一旦不一致，基线就会永久地一边刷个
- * 不停、一边永远不刷。只比「本次与上一次」的相对变化，则与过滤口径完全无关。
+ * 隐藏了心跳会话前缀的**过滤切片**（定时会话保留，见 tick 里 fetchPoll 的说明），
+ * 而消费方那侧可能正开着一条被过滤掉的会话。两边口径一旦不一致，基线就会永久地
+ * 一边刷个不停、一边永远不刷。只比「本次与上一次」的相对变化，则与过滤口径完全无关。
  */
 export function useLiveSessions(): void {
   useEffect(() => {
@@ -104,7 +104,11 @@ export function useLiveSessions(): void {
       if (document.hidden) return;
       let data;
       try {
-        data = await fetchPoll(true, true);
+        // hideHeartbeat=true：心跳会话是纯内部噪声，用户不会打开，滤掉省带宽。
+        // hideScheduled=false：**定时会话必须留下**——本功能最初就是盯着一个定时任务
+        // 会话发现「跑完后别处又追加一轮不刷新」的，若把 [定时] 前缀滤掉（后端 chat.py:151），
+        // 那条会话的 updated_at 变化永远不会进入比对，它自己反而刷不上来。
+        data = await fetchPoll(true, false);
       } catch {
         // 网络/后端暂时不可用：保留上一次的基线，下一轮再比。
         return;
