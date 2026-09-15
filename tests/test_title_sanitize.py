@@ -7,7 +7,7 @@ markdown 字符，会把 `foo_bar` / `C# guide` / `A > B` 这类合法标题静�
 （heading `#` / quote `>`），保留标题内部的合法字符。
 """
 
-from ethan.memory.session import _sanitize_title
+from ethan.memory.session import _sanitize_title, strip_title_decoration
 
 
 def test_strip_wrapping_bold():
@@ -71,3 +71,12 @@ def test_strip_cjk_bracket_marks():
     assert _sanitize_title("标题（草稿）") == "标题（草稿）"
     # 剔除后不留连续空格
     assert _sanitize_title("《a》 《b》 新功能") == "a b 新功能"
+
+
+def test_strip_title_decoration_helper():
+    """公共小函数：剔符号 + 压空格 + strip（_sanitize/_auto/REPL 初始标题共用）。"""
+    assert strip_title_decoration("《三体》 读后  感") == "三体 读后 感"
+    assert strip_title_decoration("  a\\n\\nb  ") == "a\\n\\nb"
+    # 单个换行不归它管（\\s{2,} 才压），交给调用方 replace("\\n", " ")
+    assert strip_title_decoration("a\\nb") == "a\\nb"
+    assert strip_title_decoration("") == ""

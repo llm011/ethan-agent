@@ -104,8 +104,7 @@ def _auto_title(messages: list[Message]) -> str:
             # 去掉命令前缀（/help xxx → xxx；/review url 保留 url 由 _rule_title 处理）
             t = re.sub(r"^/(?:help|new|model|token|btw|stop)\s+", "", t)
             # 剔除书名号/方头括号类装饰符号（用户原文可能就带《》），留纯文字
-            t = _TITLE_BRACKET_RE.sub("", t)
-            t = re.sub(r"\s{2,}", " ", t).strip()
+            t = strip_title_decoration(t)
             t = t.replace("\n", " ").strip()
             if not t:
                 t = m.content.strip().replace("\n", " ")
@@ -204,6 +203,16 @@ _MD_WRAP_RE = re.compile(r"^\s*([*_`~]{1,3})(.+?)\1\s*$", re.DOTALL)
 _TITLE_BRACKET_RE = re.compile(r"[《〉〈》【】〖〗〔〕「」『』]")
 
 
+def strip_title_decoration(text: str) -> str:
+    """剔除标题里的书名号/方头括号类装饰符号并收敛空白，留纯文字。
+
+    剔《》【】「」等符号 + 压连续空格 + strip 这套动作是公共逻辑，
+    _sanitize_title / _auto_title / REPL 初始标题共用，别再各写一遍。
+    """
+    t = _TITLE_BRACKET_RE.sub("", text)
+    return re.sub(r"\s{2,}", " ", t).strip()
+
+
 def _sanitize_title(raw: str) -> str:
     """清洗模型返回的标题：去掉 <think> 思考块、包裹用的 markdown 标记、首尾引号/空白。
 
@@ -227,9 +236,8 @@ def _sanitize_title(raw: str) -> str:
         if not m:
             break
         t = m.group(2).strip()
-    t = _TITLE_BRACKET_RE.sub("", t)  # 剔除《》【】「」等装饰符号
-    t = re.sub(r"\s{2,}", " ", t).strip()  # 剔除后可能留下连续空格
-    t = t.strip().strip('"\'“”').strip()
+    t = strip_title_decoration(t)  # 剔《》【】「」等装饰符号 + 压连续空格
+    t = t.strip('"\'“”').strip()
     return t
 
 
