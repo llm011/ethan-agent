@@ -103,6 +103,9 @@ def _auto_title(messages: list[Message]) -> str:
             t = re.sub(r"[*#`_~]", "", t)
             # 去掉命令前缀（/help xxx → xxx；/review url 保留 url 由 _rule_title 处理）
             t = re.sub(r"^/(?:help|new|model|token|btw|stop)\s+", "", t)
+            # 剔除书名号/方头括号类装饰符号（用户原文可能就带《》），留纯文字
+            t = _TITLE_BRACKET_RE.sub("", t)
+            t = re.sub(r"\s{2,}", " ", t).strip()
             t = t.replace("\n", " ").strip()
             if not t:
                 t = m.content.strip().replace("\n", " ")
@@ -196,6 +199,9 @@ _MD_BLOCK_PREFIX_RE = re.compile(r"^\s*(?:#{1,6}\s+|>+\s*)+")
 # 首尾成对的行内强调定界符：**bold** *italic* _em_ `code` ~~del~~
 # 只剥掉包裹整个标题的定界符，保留标题内部的 _ # > 等合法字符
 _MD_WRAP_RE = re.compile(r"^\s*([*_`~]{1,3})(.+?)\1\s*$", re.DOTALL)
+# 书名号/方头括号类装饰符号（《》【】「」等）：模型爱拿它们包标题（如《xxx》／【xxx】），
+# 出现在列表里只剩装饰作用，全部剔除留纯文字。圆括号不在此列——"标题（草稿）"有实义。
+_TITLE_BRACKET_RE = re.compile(r"[《〉〈》【】〖〗〔〕「」『』]")
 
 
 def _sanitize_title(raw: str) -> str:
@@ -206,6 +212,7 @@ def _sanitize_title(raw: str) -> str:
 
     注意：只剥掉「包裹整个标题的」行内强调定界符和「行首的」块级标记，
     保留标题内部的合法字符——`foo_bar`、`C# guide`、`A > B` 不应被改动。
+    书名号/方头括号类装饰符号（《》【】「」等）则全部剔除，列表里只剩装饰。
     """
     if not raw:
         return ""
@@ -220,6 +227,8 @@ def _sanitize_title(raw: str) -> str:
         if not m:
             break
         t = m.group(2).strip()
+    t = _TITLE_BRACKET_RE.sub("", t)  # 剔除《》【】「」等装饰符号
+    t = re.sub(r"\s{2,}", " ", t).strip()  # 剔除后可能留下连续空格
     t = t.strip().strip('"\'“”').strip()
     return t
 
@@ -268,7 +277,7 @@ def _load_naming_rules() -> str:
 
 _TITLE_SYSTEM_BASE = (
     "你是一个标题生成助手。你只能基于给出的文本总结标题，无法也无需访问任何链接或外部资源；"
-    "标题不超过 20 个字，只输出标题本身，不加引号或标点。"
+    "标题不超过 20 个字，只输出标题本身，不加引号或标点，不要用《》【】「」等符号包裹。"
 )
 
 

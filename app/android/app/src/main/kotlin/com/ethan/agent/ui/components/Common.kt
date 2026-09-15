@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
@@ -51,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -405,11 +407,19 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
     var subExpanded by remember { mutableStateOf(true) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
+        // 点击行展开执行详情（对齐 Web detailOpen）：完整参数全文 + 思考 + 结果详情。
+        // 运行中也允许展开——args 从 start 起就有，此时点开是为了看完整命令。
+        val hasDetailContent = !step.thought.isNullOrBlank() || !step.resultDetail.isNullOrBlank()
+        val expandable = step.args.isNotBlank() || (!isRunning && hasDetailContent)
+        var detailOpen by remember { mutableStateOf(false) }
+        val toggleDetail: () -> Unit = { detailOpen = !detailOpen }
+
         // 步骤主行：[✓ tool_name] 耗时 ✓
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = (indent * 12).dp),
+                .padding(start = (indent * 12).dp)
+                .then(if (expandable) Modifier.clickable(onClick = toggleDetail) else Modifier),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 子步骤折叠标记（仅当有subSteps时显示）
@@ -425,6 +435,9 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
             }
 
             // [✓ tool_name] 状态标记 + 工具名
+            // weight(1f) 独占剩余宽度：工具名（多在 13~20 字符）基本能展示全，
+            // 耗时和状态图标靠右对齐；原来 name/spacer 各 weight(1f) 只给名字一半宽度，
+            // skill_run 这类名字都被截成 skill_r…
             Text(
                 "[$statusMark ${step.tool}]",
                 style = MaterialTheme.typography.bodySmall.copy(
@@ -433,10 +446,8 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
                 color = statusColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f),
             )
-
-            Spacer(Modifier.weight(1f))
 
             // 双耗时：✨模型生成耗时（start 即有，running 态也显示）+ 🕐工具执行耗时（done 后显示）
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -467,9 +478,18 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
                 color = statusColor,
                 fontWeight = FontWeight.Bold,
             )
+            // 可展开时给个入口提示（对齐 Web 的「详情」按钮）
+            if (expandable) {
+                Text(
+                    if (detailOpen) "收起 ▾" else "详情 ▸",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
         }
 
-        // 参数摘要（args第一行，缩进显示）
+        // 参数摘要（args第一行，缩进显示；点击同主行，展开看完整参数）
         val argsLine = step.args.lines().firstOrNull { it.isNotBlank() }
         if (!argsLine.isNullOrBlank()) {
             Text(
@@ -482,6 +502,7 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(if (expandable) Modifier.clickable(onClick = toggleDetail) else Modifier)
                     .padding(start = (indent * 12 + 16).dp),
             )
         }
@@ -504,8 +525,9 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
         // 只在步骤跑完后显示：运行中后端给的就是空串（stream_collector 在 start 时
         // 把 result_preview 置为 ""），此时硬渲染也没内容。补上这一行后，
         // 「运行中一行 / 跑完突然一堆」的信息落差就没了——每一步结束即出结果。
-        // 与 Web 一致：只有 running 态不显示（`start` 是 Android 侧的前置态，等同 running）
-        step.resultPreview?.takeIf { it.isNotBlank() && !isRunning && step.state != "start" }?.let { preview ->
+        // 与 Web 一致：只有 running 态不显示（`start` 是 Android 侧的前置态，等同 running）；
+        // 详情展开时也不显示（Web 同款行为，展开卡片里已有完整结果）
+        step.resultPreview?.takeIf { it.isNotBlank() && !isRunning && step.state != "start" && !detailOpen }?.let { preview ->
             Text(
                 preview,
                 style = MaterialTheme.typography.bodySmall.copy(
@@ -521,6 +543,29 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
             )
         }
 
+        // 展开的执行详情卡片（对齐 Web detailOpen 卡片）：完整参数 + 思考 + 结果详情
+        if (detailOpen && expandable) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = (indent * 12 + 16).dp, top = 4.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (step.args.isNotBlank()) {
+                    ToolDetailSection("参数", step.args)
+                }
+                step.thought?.takeIf { it.isNotBlank() }?.let {
+                    ToolDetailSection("思考", it)
+                }
+                step.resultDetail?.takeIf { it.isNotBlank() }?.let {
+                    ToolDetailSection("结果", it)
+                }
+            }
+        }
+
         // 子步骤（递归渲染，缩进+前缀>）
         if (hasSubSteps && subExpanded) {
             step.subSteps!!.forEachIndexed { subIndex, sub ->
@@ -531,6 +576,27 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
             }
         }
     }
+}
+
+/** 详情卡片里的一个小节：灰色小标签 + 全文（超长限高滚动，避免撑爆气泡）。 */
+@Composable
+private fun ToolDetailSection(label: String, text: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+    )
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall.copy(
+            fontFamily = FontFamily.Monospace,
+        ),
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+        softWrap = true,
+        modifier = Modifier
+            .heightIn(max = 200.dp)
+            .verticalScroll(rememberScrollState()),
+    )
 }
 
 @Composable
@@ -573,7 +639,8 @@ private fun SubToolStepRow(sub: com.ethan.agent.core.model.SubToolStep, indent: 
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
+            // 同主步骤：名字独占剩余宽度，耗时/状态靠右
+            modifier = Modifier.weight(1f),
         )
         if (sub.durationMs != null) {
             Spacer(Modifier.width(8.dp))
@@ -584,7 +651,6 @@ private fun SubToolStepRow(sub: com.ethan.agent.core.model.SubToolStep, indent: 
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             )
         }
-        Spacer(Modifier.weight(1f))
         Text(
             statusMark,
             style = MaterialTheme.typography.bodySmall,
