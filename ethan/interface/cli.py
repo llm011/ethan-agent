@@ -69,14 +69,109 @@ def _register_subcommands():
 serve_app = typer.Typer(help="管理 API 服务")
 app.add_typer(serve_app, name="serve")
 
+
+def _find_conflicting_servers() -> list[tuple[int, str]]:
+    """找出正在运行、且会写入同一个 sessions.db 的 serve 进程。
+
+    冲突的本质是抢同一个 SQLite 文件（单写者模型），不是抢端口——两个实例用不同
+    端口照样互锁。所以判据取「进程实际打开的 sessions.db 路径」与当前进程目标路径
+    是否一致，而不是端口是否相同。
+
+    返回 [(pid, db_path), ...]，不含当前进程自身。
+    """
+    import os
+    import subprocess
+    from pathlib import Path
+
+    try:
+        from ethan.core.paths import user_sessions_db_path
+
+        my_db = user_sessions_db_path().resolve()
+    except Exception:
+        return []
+
+    me = os.getpid()
+    try:
+        r = subprocess.run(
+            ["pgrep", "-f", "ethan.*serve"],
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return []
+
+    conflicts: list[tuple[int, str]] = []
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if not line.isdigit():
+            continue
+        pid = int(line)
+        if pid == me:
+            continue
+        # 用 lsof 读该进程实际打开的 sessions.db，比解析环境变量更可靠
+        try:
+            lr = subprocess.run(
+                ["lsof", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            continue
+        for lline in lr.stdout.splitlines():
+            if "sessions.db" not in lline:
+                continue
+            # lsof 最后一列是路径；-journal/-wal 附属文件要归一化回主库
+            path = lline.split()[-1]
+            for suffix in ("-journal", "-wal", "-shm"):
+                if path.endswith(suffix):
+                    path = path[: -len(suffix)]
+            try:
+                if Path(path).resolve() == my_db:
+                    conflicts.append((pid, str(my_db)))
+                    break
+            except Exception:
+                continue
+    return conflicts
+
+
 @serve_app.callback(invoke_without_command=True)
 def serve_main(
     ctx: typer.Context,
     host: str = typer.Option("0.0.0.0", "--host", help="Bind host"),
     port: int = typer.Option(8900, "--port", help="Bind port"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="已有实例在运行同一数据目录时，仍强制启动（不推荐，会导致 SQLite 锁冲突）",
+    ),
 ) -> None:
     """Start the HTTP API server. Default runs in foreground."""
     if ctx.invoked_subcommand is None:
+        conflicts = _find_conflicting_servers()
+        if conflicts and not force:
+            from rich.console import Console
+
+            console = Console()
+            console.print(
+                "[red]✗ 已有 ethan 实例正在使用同一数据目录，拒绝启动。[/red]"
+            )
+            console.print()
+            for pid, db in conflicts:
+                console.print(f"  运行中的实例: [bold]pid={pid}[/bold]")
+                console.print(f"  数据目录:     [dim]{db}[/dim]")
+            console.print()
+            console.print(
+                "  多个实例同时写同一个 sessions.db 会导致 [bold]database is locked[/bold]，"
+                "定时任务与写入静默失败。"
+            )
+            console.print()
+            console.print("  可选操作：")
+            console.print("    ethan serve stop          — 停掉已有实例")
+            console.print(
+                "    使用不同数据目录              — 设 ETHAN_DATA_DIR 环境变量"
+            )
+            console.print("    ethan serve --force        — 强制启动（不推荐）")
+            raise typer.Exit(1)
         from ethan.interface.api import run_server
         run_server(host=host, port=port)
 
