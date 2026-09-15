@@ -136,6 +136,55 @@ def _count_content(text: str) -> int:
 SHORT_QUESTION_CHARS = 3
 
 
+# 标题长度上限，与 _TITLE_SYSTEM_BASE 的「不超过 20 个字」/ naming.md 第 3 行一致。
+# 只用于**截断模型输出**（模型可能不守规矩）；_rule_title 的模板标题不适用——命名
+# 模板天然长于 20 字，硬切只会切出残句，见 _rule_title 的说明。
+_TITLE_MAX_LEN = 20
+
+
+# 一条消息里的 GitHub PR / GitLab MR 链接，捕获 owner/repo 与编号。
+# 这里是「PR/MR 链接」的**单一真相源**：_rule_title 用它填模板，_clean 用它决定
+# 哪些链接不能脱敏。两处共用同一个正则，避免各写一份而慢慢漂移。
+_PR_URL_RE = re.compile(
+    r"https?://github\.com/(?P<gh_repo>[^/\s]+/[^/\s]+)/pull/(?P<gh_num>\d+)"
+    r"|https?://gitlab\.com/(?P<gl_repo>[^/\s]+/[^/\s]+)/-/merge_requests/(?P<gl_num>\d+)"
+)
+
+# 模型照抄 naming.md 示例的典型特征：模板占位符没被替换就吐了出来，或者把示例里的
+# owner/repo 抄成了字面量。命中即视为生成失败。
+#
+# 只认「模板里真实出现过的占位符名」+ 尖括号包裹的中文占位符，不用宽泛的 `<[^>]+>`：
+# 后者会把 `支持 <T> 泛型`、`std::vector<int>` 这类合法技术标题一并误杀。
+#
+# 已知取舍：这是**枚举式**的，用户在 naming.md 里自定义的占位符名不在列表里就漏过去。
+# 反过来「凡带尖括号即判可疑」误杀面太大（技术标题里 <T>、<div> 很常见），
+# 且护栏只是兜底——主修复是让模板的值由代码填（_rule_title / _pr_title_from_text），
+# 模型本就不需要看到占位符示例。
+_PLACEHOLDER_RE = re.compile(
+    r"<\s*(?:owner|repo|branch|pr|mr|n|number|编号|分支名|分支|仓库|数字)\s*>"
+    r"|(?<![\w/])(?:owner|org)/repo(?![\w/])",
+    re.IGNORECASE,
+)
+
+
+def _pr_title_from_text(text: str) -> str | None:
+    """从任意文本里找出第一个 PR/MR 链接并填充命名模板；没有链接返回 None。
+
+    模板（对齐 naming.md）：
+      GitHub PR  → `#<编号> <owner>/<repo> code review`
+      GitLab MR  → `!<编号> <owner>/<repo> code review`
+
+    链接可以出现在文本**任意位置**（行首的 `/review` 只是其中一种写法），
+    从而不必把「模板该填什么值」交给模型去猜。
+    """
+    m = _PR_URL_RE.search(text)
+    if not m:
+        return None
+    if m.group("gh_repo"):
+        return f"#{m.group('gh_num')} {m.group('gh_repo')} code review"
+    return f"!{m.group('gl_num')} {m.group('gl_repo')} code review"
+
+
 # 成对的 <think>...</think> 思考块（跨行）
 _THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think\s*>", re.IGNORECASE | re.DOTALL)
 # 残留的未闭合 <think>（被截断时只剩开标签），其后内容全丢
@@ -245,11 +294,41 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
     from ethan.memory.consolidator import get_lite_model
     from ethan.providers.manager import create_provider
 
-    # 去掉 URL，避免 lite 模型误以为需要访问外链而拒绝生成标题
-    _url_re = _re.compile(r"https?://\S+")
+    # 外链脱敏：避免 lite 模型误以为需要访问外链而拒绝生成标题。
+    # 但 PR/MR 链接必须**原样保留**——naming.md 的模板要用它填 owner/repo/编号，
+    # 一旦变成 [链接] 模型就再也拿不到值，只能照抄规则文件里的示例占位符
+    # （曾产生标题 "#100 owner/repo code"）。
+    # 用「单个正则 + 回调」而不是两次 sub：两次 sub 时先跑 _PR_URL_RE 等于什么都没做，
+    # 后面 _url_re 照样把 PR 链接吃掉。
+    _scrub_re = _re.compile(
+        rf"(?P<pr>{_PR_URL_RE.pattern})|(?P<other>https?://\S+)",
+    )
 
     def _clean(text: str) -> str:
-        return _url_re.sub("[链接]", text[:100]).strip()
+        # 逐个 URL 判断保留还是脱敏，同时给「非 URL 的正文」单独计长：链接本身不占
+        # 100 字预算。这样第 100 字符正好落在 PR 链接中间时，链接仍被完整保留，不会
+        # 被切半截。（旧写法 text[:100] 是先切残再匹配，半截 URL 匹配不上 _PR_URL_RE，
+        # 于是被当普通外链脱敏，又回到模型拿不到 owner/repo 的老问题。）
+        out: list[str] = []
+        used = 0
+        last = 0
+
+        def _head(seg: str) -> str:
+            """非 URL 正文按剩余预算截断。"""
+            nonlocal used
+            room = max(0, 100 - used)
+            kept = seg[:room]
+            used += len(kept)
+            return kept
+
+        for m in _scrub_re.finditer(text):
+            out.append(_head(text[last:m.start()]))
+            if used >= 100:
+                break
+            out.append(m.group(0) if m.group("pr") else "[链接]")
+            last = m.end()
+        out.append(_head(text[last:]))
+        return "".join(out).strip()
 
     turns = [(m.role, _clean(m.content)) for m in messages if m.role in ("user", "assistant") and m.content][:6]
     if not turns:
@@ -287,8 +366,10 @@ async def _generate_smart_title(messages: list[Message], retries: int = 3) -> st
                 disable_thinking=True,
             )
             title = _sanitize_title(resp.content)
-            if title and not _refusal_re.match(title):
-                return title[:20]
+            # _PLACEHOLDER_RE 命中 = 模型把 naming.md 的模板占位符原样吐了回来，
+            # 这不是标题，当作生成失败重试；全失败返回 None，调用方保留占位标题。
+            if title and not _refusal_re.match(title) and not _PLACEHOLDER_RE.search(title):
+                return title[:_TITLE_MAX_LEN]
         except Exception:
             pass
         if attempt < retries - 1:
@@ -300,31 +381,23 @@ _PROTECTED_PREFIXES = ("[定时]", "[后台]", "[心跳]")
 
 
 def _rule_title(text: str) -> str | None:
-    """从 /review 命令中解析出确定性标题（无需 LLM），格式对齐 naming.md。
+    """消息里出现 PR/MR 链接时，直接解析出确定性标题（无需 LLM），格式对齐 naming.md。
 
-    GitHub: `/review https://github.com/llm011/ethan-agent/pull/100`
+    链接可以在**任意位置**，不要求 `/review` 前缀也不要求行首——用户常写成
+    「帮我 review 这个 PR <链接>」。这样模板的值由代码从链接里填，模型不必猜。
+
+    GitHub: `帮我 review 这个 PR https://github.com/llm011/ethan-agent/pull/100`
       → `#100 llm011/ethan-agent code review`
-    GitLab: `/review https://gitlab.com/larksuite/cli/-/merge_requests/42`
+    GitLab: `https://gitlab.com/larksuite/cli/-/merge_requests/42 这个改得对吗`
       → `!42 larksuite/cli code review`
-    命中返回标题，未命中/无链接返回 None（交由模型按 naming.md 兜底）。
-    """
-    import re as _re
 
-    t = text.strip()
-    if not (t.lower().startswith("/review ") or t.lower() == "/review"):
-        return None
-    target = t[7:].strip()
-    if not target:
-        return None
-    # 匹配 GitHub PR URL: github.com/owner/repo/pull/123
-    m = _re.search(r"github\.com/([^/]+/[^/]+)/pull/(\d+)", target)
-    if m:
-        return f"#{m.group(2)} {m.group(1)} code review"
-    # 匹配 GitLab MR URL: gitlab.com/owner/repo/-/merge_requests/123
-    m = _re.search(r"gitlab\.com/([^/]+/[^/]+)/-/merge_requests/(\d+)", target)
-    if m:
-        return f"!{m.group(2)} {m.group(1)} code review"
-    return None
+    命中返回标题，没有链接则返回 None（如 `/review <分支名>`，交由模型按 naming.md 兜底）。
+
+    注意：**不做 20 字截断**。命名模板天然长于 20 字（`#100 llm011/ethan-agent code
+    review` 就是 35 字符），硬切只会得到 `#100 llm011/ethan-agent code` 这类残句——
+    这正是模板占位符标题那次的成因。≤20 字是给模型的 prompt 约束，规则路径不适用。
+    """
+    return _pr_title_from_text(text)
 
 
 def _is_placeholder_title(current_title: str, messages: list[Message]) -> bool:
