@@ -31,8 +31,10 @@ EDITABLE_FIELDS: list[ConfigField] = [
                 desc="单次回复的最大 token 数", min_val=1),
     ConfigField("defaults.max_tool_iterations", "工具迭代上限", "int",
                 desc="单次回复的最大工具调用轮次。stuck detection 在真正死循环前强制收尾", min_val=1),
-    ConfigField("defaults.model_sync", "定时/心跳任务跟随默认模型", "bool",
-                desc="true（默认）时切默认模型会同步作用于定时任务与心跳任务；false 时二者各自独立配置"),
+    # 注意：defaults.model_sync 刻意不放进本表。它不是一个独立的布尔开关——打开时必须
+    # 同时清空 schedule_model / heartbeat.model 才成立（否则开关显示"跟随"、实际仍用旧模型）。
+    # set_value 是纯属性写入，没有联动钩子，走 config_set 会破坏这个不变量。该开关只在
+    # 设置页（PATCH /settings/agent）维护，那里会做联动。
     ConfigField("defaults.heartbeat.enabled", "心跳", "bool",
                 desc="是否启用定时心跳（Agent 周期性自检/整理）"),
     ConfigField("defaults.heartbeat.interval_minutes", "心跳间隔（分钟）", "int",

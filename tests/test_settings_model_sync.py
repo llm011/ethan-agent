@@ -138,6 +138,22 @@ def test_omitted_model_sync_leaves_fields_alone(client):
     assert client._cfg.defaults.heartbeat.model == "gemini-3.5-flash"
 
 
+# ── 不变量：model_sync 不能走 config_set（无联动钩子）─────────────────
+
+
+def test_model_sync_not_exposed_to_config_set():
+    """model_sync 刻意不进 EDITABLE_FIELDS。
+
+    它打开时必须同时清空 schedule_model / heartbeat.model 才成立。而 config_set
+    走的是纯属性写入的 set_value，没有联动钩子——一旦暴露，agent 通过 config_set
+    打开开关会留下旧模型值，出现「开关显示跟随、实际仍用旧模型」的静默不一致。
+    该开关只在设置页维护。本测试锁住这个决定。
+    """
+    from ethan.core.config_schema import get_field
+
+    assert get_field("defaults.model_sync") is None
+
+
 # ── 落盘：exclude_defaults 行为 ────────────────────────────────────
 
 

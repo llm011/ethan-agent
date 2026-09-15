@@ -769,7 +769,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                         />
                         定时/心跳任务跟随默认模型
                       </label>
-                      <p className="text-xs text-muted-foreground">打开时二者都用默认模型，切换默认模型会一起生效；关闭后可分别指定，留空仍等于跟随默认模型。</p>
+                      <p className="text-xs text-muted-foreground">打开时两项都直接用默认模型。关闭后需为各项选择模型才真正独立；仍留空的项会继续跟随默认模型。</p>
                     </div>
 
                     <div className={`grid gap-2 ${agentForm.model_sync ? "opacity-50" : ""}`}>
