@@ -186,17 +186,19 @@ def _downscale_bytes(raw: bytes, media_type: str = "image/png", max_dim: int = _
         return raw, False, media_type
 
 
-def downscale_image_b64(data_b64: str, media_type: str, max_dim: int = _MAX_IMAGE_DIM) -> tuple[str, bool]:
+def downscale_image_b64(data_b64: str, media_type: str, max_dim: int = _MAX_IMAGE_DIM) -> tuple[str, bool, str]:
     """如果图片任一边超过 max_dim，按比例缩小，保留原始格式。
 
-    返回 (新 base64, 是否缩放)。Pillow 不可用或解析失败时返回原图，
-    交由 agent 层的 reactive fallback 兜底。
+    返回 (新 base64, 是否缩放, 输出 media_type)。缩放时非 JPEG 一律重编码为 PNG
+    （含 gif/webp），所以输出 media_type 必须取返回值——沿用入参会造成
+    「PNG 字节 + image/gif 标注」的错配，API 端解码失败。
+    Pillow 不可用或解析失败时返回原图，交由 agent 层的 reactive fallback 兜底。
     """
     raw = base64.b64decode(data_b64)
-    downscaled, did_resize, _ = _downscale_bytes(raw, media_type, max_dim)
+    downscaled, did_resize, out_media_type = _downscale_bytes(raw, media_type, max_dim)
     if not did_resize:
-        return data_b64, False
-    return base64.b64encode(downscaled).decode("ascii"), True
+        return data_b64, False, media_type
+    return base64.b64encode(downscaled).decode("ascii"), True, out_media_type
 
 
 # ---------------------------------------------------------------------------

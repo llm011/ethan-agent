@@ -284,15 +284,17 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
         for img in msg.images:
             if "data" in img:
                 # 当前消息的原始 base64 图片，落盘前缩放一次
-                data, downscaled = downscale_image_b64(img["data"], img.get("media_type", "image/png"))
-                resolved.append({"data": data, "media_type": img.get("media_type", "image/png")})
+                # media_type 取 downscale 返回值：缩放时非 JPEG 会重编码为 PNG，
+                # 沿用原 mime 会与实际字节错配
+                data, _, img_mime = downscale_image_b64(img["data"], img.get("media_type", "image/png"))
+                resolved.append({"data": data, "media_type": img_mime})
             elif "path" in img:
                 # 历史消息：落盘时已缩放，但兼容旧数据（升级前未缩放）仍调用 downscale 做安全网
                 b64 = load_image_b64(img["path"])
                 if b64:
                     media_type = img.get("media_type", "image/png")
-                    data, downscaled = downscale_image_b64(b64, media_type)
-                    entry: dict = {"data": data, "media_type": media_type}
+                    data, _, img_mime = downscale_image_b64(b64, media_type)
+                    entry: dict = {"data": data, "media_type": img_mime}
                     # 保留 split_group 标记，后续用于生成顺序提示
                     sg = img.get("split_group")
                     if sg is not None:

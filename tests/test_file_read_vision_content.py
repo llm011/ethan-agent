@@ -16,6 +16,8 @@ import asyncio
 import base64
 import io
 
+import pytest
+
 from ethan.core import context as ctx
 from ethan.tools.builtin.file import FileReadTool
 
@@ -87,6 +89,8 @@ def test_text_file_has_no_images(tmp_path):
         assert not result.images
 
 
+# 缩放断言需要 Pillow（computer-use extra 的传递依赖，base 安装没有）
+@pytest.mark.skipif(not HAVE_PIL, reason="缩放断言需要 Pillow")
 def test_large_image_downscaled_to_max_dim(tmp_path):
     """超大图附给模型前必须缩放，控制上下文体积。"""
     p = tmp_path / "big.png"
@@ -97,3 +101,27 @@ def test_large_image_downscaled_to_max_dim(tmp_path):
     assert result.images, "大图同样要附（缩放后）"
     img = Image.open(io.BytesIO(base64.b64decode(result.images[0]["data"])))
     assert max(img.size) <= 1568, f"附图应缩到 1568px 内，实际 {img.size}"
+
+
+@pytest.mark.skipif(not HAVE_PIL, reason="缩放断言需要 Pillow")
+def test_large_gif_downscale_relabels_media_type(tmp_path):
+    """>1568px 的 gif 缩放后被重编码为 PNG：media_type 必须跟着变 image/png。
+
+    缩放路径非 JPEG 一律存 PNG——media_type 若沿用原 mime，就是
+    「PNG 字节 + image/gif 标注」，API 端解码失败。
+    """
+    p = tmp_path / "big.gif"
+    buf = io.BytesIO()
+    Image.new("RGB", (2000, 1200), (10, 200, 30)).save(buf, format="GIF")
+    p.write_bytes(buf.getvalue())
+
+    result = _read(p)
+
+    assert result.images, "大 gif 同样要附（缩放后）"
+    img = result.images[0]
+    assert img["media_type"] == "image/png", (
+        f"缩放后 gif 重编码为 PNG，media_type 应为 image/png，实际 {img['media_type']}"
+    )
+    with Image.open(io.BytesIO(base64.b64decode(img["data"]))) as im:
+        assert im.format == "PNG"
+        assert max(im.size) <= 1568
