@@ -166,6 +166,9 @@ file_read(path="~/config.yaml", max_lines=100)
 安设计：
 - 文件超过 1MB 拒绝读取，提示用 max_lines
 - 输出超 8000 字符截断
+- 读图片：前端渲染卡片（资产落盘），同时把缩放后的图（≤1568px，png/jpeg/gif/webp）
+  附进 ToolResult.images，VLM 模型可直接「看到」内容——agent 用 file_read 看
+  浏览器/CUA 截图就走这条路；svg/bmp 不被视觉 API 接受，只给卡片
 
 ### FileWriteTool — `ethan/tools/builtin/file.py`
 

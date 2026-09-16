@@ -27,6 +27,10 @@ _MAGIC_MIME = [
     (b"RIFF", "image/webp"),  # RIFF....WEBP
 ]
 
+# VLM API 接受的图片格式。svg 是矢量文本、bmp 基本无人用，两家主流 API 都不收
+# 作为 image block，这两类只给前端卡片 + 路径说明，不附图给模型。
+_VLM_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
 
 def _persist_image_asset(filename: str, data: bytes, mime: str) -> str | None:
     """把图片写入会话资产目录，返回可直接给前端 <img> 用的相对 URL。
@@ -187,8 +191,17 @@ class FileReadTool(BaseTool):
                 return f"📷 图片 {p.name}（{mime}）过大（{size} 字节），未渲染。建议缩小后重试。"
             try:
                 data = p.read_bytes()
-                # 给模型：简短说明，不含 base64（避免浪费 context）
-                model_content = f"📷 已读取图片文件 {p.name}（{mime}），图片已在前端以卡片形式渲染展示，无需在回复中重复贴出。"
+                # 给模型：文字说明 + 图片本体。模型（VLM）读截图后能直接「看到」内容，
+                # 这是「截个图看看界面啥状态」的主通路；仅当格式被 VLM API 接受时附图，
+                # svg/bmp 不附，文案也不能声称「已附上」（模型会以为看到了其实没有）。
+                # 非 VLM 模型由 agent 层 reactive strip（图片报错写盘重试）/
+                # provider 层 supports_vision 兜底剥离，不会 400。
+                attach = mime in _VLM_MIMES
+                model_content = (
+                    f"📷 已读取图片文件 {p.name}（{mime}），"
+                    + ("图片内容已附在本结果中，可直接查看分析；" if attach else "")
+                    + "图片已在前端以卡片形式渲染展示，无需在回复中重复贴出。"
+                )
                 card = {
                     "type": "image",
                     "title": p.name,
@@ -214,7 +227,21 @@ class FileReadTool(BaseTool):
                     # 但记录告警——这是应尽量避免的降级路径。
                     logger.warning("file_read: 图片资产落盘失败，降级为内联 base64: %s", p)
                     card["url"] = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
-                return ToolResult(tool_call_id="", content=model_content, cards=[card])
+                # 附图给模型：先缩到视觉 API 的经济尺寸（1568px，超出部分纯浪费 token），
+                # 与落盘用的 _MAX_IMAGE_DIM=8000（长图切分阈值）不是一个口径。
+                # 这些图只进会话内存上下文（tool 消息不入库），不会像 cards 那样写进 DB。
+                images = None
+                if attach:
+                    from ethan.core.assets import VISION_MAX_DIM, downscale_image_b64
+
+                    # media_type 必须取 downscale 返回值：>1568px 的 gif/webp 缩放后
+                    # 会被重编码为 PNG，沿用原 mime 会造成「PNG 字节 + image/gif 标注」
+                    # 的错配，API 端解码失败。
+                    scaled_b64, _, img_mime = downscale_image_b64(
+                        base64.b64encode(data).decode("ascii"), mime, max_dim=VISION_MAX_DIM
+                    )
+                    images = [{"data": scaled_b64, "media_type": img_mime}]
+                return ToolResult(tool_call_id="", content=model_content, cards=[card], images=images)
             except Exception as e:
                 return f"Read image error: {e}"
 

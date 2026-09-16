@@ -38,4 +38,5 @@ jobs:
           tests/test_provider_fallback.py
           tests/test_is_local.py
           tests/test_mcp_apps.py
+          tests/test_file_read_vision_content.py
           -q
