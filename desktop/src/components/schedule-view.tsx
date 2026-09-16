@@ -26,6 +26,9 @@ import { Textarea } from "@ethan/shared/ui/textarea";
 import { MdEditor } from "@/components/md-editor";
 import { HeaderFillet } from "@/components/header-fillet";
 
+// all 模式截断展示的时间窗：今天 + 未来 2 天；更远期的折叠进「还有 N 个…点击展开」
+const ALL_VIEW_FUTURE_DAYS = 2;
+
 // ── Timeline helpers ─────────────────────────────────────────────
 interface DateGroup {
   year: number;
@@ -88,7 +91,7 @@ export function ScheduleView() {
   const [activeScene, setActiveScene] = useState<string>("work");
   const [viewMode, setViewMode] = useState<"today" | "all">("today");
   const [viewLayout, setViewLayout] = useState<"timeline" | "list">("timeline");
-  const [futureDays, setFutureDays] = useState(2); // all 模式下初始展示今天+未来2天，点 load more 往未来加1天
+  const [expandAll, setExpandAll] = useState(false); // all 模式下点「展开」后不再按时间窗截断，保证与 tab badge 数一致
   const [confirmState, setConfirmState] = useState<{ open: boolean; id: string }>({ open: false, id: "" });
   const [scheduledSessions, setScheduledSessions] = useState<SessionInfo[]>([]);
   const [sessionsExpanded, setSessionsExpanded] = useState(false);
@@ -235,7 +238,7 @@ export function ScheduleView() {
     return { counts, paused };
   }, [scenes, jobs]);
 
-  // today 模式：只展示今天+明天的任务；all 模式：过去全部 + 今天到未来 futureDays 天，点 load more 扩展
+  // today 模式：只展示今天+明天的任务；all 模式：过去全部 + 今天到未来 futureDays 天，点「展开」看剩余
   const visibleJobs = useMemo(() => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -250,15 +253,23 @@ export function ScheduleView() {
         return key === todayStr || key === tomorrowStr;
       });
     }
-    // all 模式：过去的全部 + 今天到未来 futureDays 天 + 无下次执行时间的任务
-    const maxTime = startOfToday + (futureDays + 1) * 86400000;
+    // all 模式：展开后不再截断（badge 数的是分类全部任务，列表必须能对上，
+    // 否则 tab 显示 4 个列表只有 3 个，第 4 个像凭空消失）
+    if (expandAll) return sceneJobs;
+    // 截断时：过去的全部 + 今天到未来 ALL_VIEW_FUTURE_DAYS 天（含当天全天）+ 无下次执行时间的任务。
+    // -1ms 让「今天+N 天」严格覆盖到 23:59:59，整点 00:00 的任务（如每周一
+    // 00:00 的 cron）不会被边界差一毫秒挤出去。
+    const maxTime = startOfToday + (ALL_VIEW_FUTURE_DAYS + 1) * 86400000 - 1;
     return sceneJobs.filter(j => {
       if (!j.next_run_time) return true; // 暂停/无下次执行的任务始终展示
       const d = new Date(j.next_run_time);
       if (isNaN(d.getTime())) return true;
-      return d.getTime() < maxTime;
+      return d.getTime() <= maxTime;
     });
-  }, [sceneJobs, viewMode, futureDays]);
+  }, [sceneJobs, viewMode, expandAll]);
+
+  // all 模式下被时间窗截掉的任务数（提示用户「还有 N 个」，对齐 tab badge 的预期）
+  const hiddenCount = viewMode === "all" && !expandAll ? sceneJobs.length - visibleJobs.length : 0;
 
   const dateGroups = useMemo(() => groupJobsByDate(visibleJobs), [visibleJobs]);
 
@@ -487,13 +498,13 @@ export function ScheduleView() {
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧：时间轴 */}
         <ScrollArea className="flex-1 p-6">
-          {/* load more：all 模式下且有被截断的任务时才显示 */}
-          {viewMode === "all" && !loading && visibleJobs.length > 0 && visibleJobs.length < sceneJobs.length && (
+          {/* 展开：all 模式下有被时间窗截掉的任务时显示，带剩余数量（与 tab badge 对得上） */}
+          {hiddenCount > 0 && !loading && (
             <div className="pb-3 text-center">
               <button
-                onClick={() => setFutureDays(d => d + 1)}
+                onClick={() => setExpandAll(true)}
                 className="text-xs text-primary hover:underline"
-              >load more…</button>
+              >还有 {hiddenCount} 个更远期的任务，点击展开…</button>
             </div>
           )}
           {loading && visibleJobs.length === 0 ? (
@@ -502,7 +513,7 @@ export function ScheduleView() {
             </div>
           ) : visibleJobs.length === 0 ? (
             <div className="text-center text-muted-foreground pt-10">
-              {viewMode === "today" ? "今天和明天暂无定时任务" : "暂无定时任务"}
+              {viewMode === "today" ? "今天和明天暂无定时任务" : hiddenCount > 0 ? "更远期的任务已折叠，点击上方展开" : "暂无定时任务"}
             </div>
           ) : viewLayout === "list" ? (
             /* ── Card Grid Layout ── */
