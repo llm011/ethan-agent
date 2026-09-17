@@ -159,6 +159,44 @@ def test_start_server_proceeds_when_dead(monkeypatch):
     assert "8989" in " ".join(spawned["cmd"])
 
 
+def test_start_server_survives_missing_pid_dir(monkeypatch, tmp_path):
+    """全新机器上 /tmp/ethan 还不存在时也要能启动（否则 watchdog 直接崩）。
+
+    CI 上曾因此失败：_start_server 无脑 open(/tmp/ethan/server_subprocess.log)，
+    目录不存在就 FileNotFoundError——偏偏发生在「最需要重启 server」的时刻。
+    """
+    import ethan.watchdog as w
+
+    missing_dir = tmp_path / "no" / "such" / "dir"
+    monkeypatch.setattr(w, "_PID_DIR", missing_dir)
+    monkeypatch.setattr(w, "_check_server_health", lambda _p: False)
+
+    spawned = {"cmd": None}
+
+    class _FakeProc:
+        pid = 999
+
+    def _fake_popen(cmd, **kwargs):
+        spawned["cmd"] = cmd
+        # stdout 必须是可用的文件对象或 DEVNULL，不能是 None
+        assert kwargs.get("stdout") is not None
+        return _FakeProc()
+
+    calls = {"n": 0}
+
+    def _health_then_ok(_p):
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    monkeypatch.setattr(w, "_check_server_health", _health_then_ok)
+    monkeypatch.setattr(w.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(w.time, "sleep", lambda _s: None)
+
+    w._start_server(8989)  # 不抛错即为通过
+
+    assert spawned["cmd"] is not None
+
+
 # ── 忙 vs 死 ─────────────────────────────────────────────────────────
 
 

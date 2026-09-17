@@ -341,9 +341,15 @@ def _start_server(port: int = DEFAULT_PORT) -> None:
     ]
     env["PATH"] = ":".join(extra_paths) + ":" + env.get("PATH", "")
 
-    # 重定向到日志文件（非 DEVNULL），方便排查 server 启动/运行期错误
+    # 重定向到日志文件（非 DEVNULL），方便排查 server 启动/运行期错误。
+    # _PID_DIR 可能还不存在（全新机器 / /tmp 被清理过），不建目录这里会直接
+    # FileNotFoundError——watchdog 在「要重启 server」这条最需要它的路径上崩掉。
     log_path = _PID_DIR / "server_subprocess.log"
-    log_f = open(log_path, "a", buffering=1)  # 行缓冲，实时写
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_f = open(log_path, "a", buffering=1)  # 行缓冲，实时写
+    except OSError:
+        log_f = subprocess.DEVNULL
     proc = subprocess.Popen(
         cmd,
         cwd=str(project_root),
