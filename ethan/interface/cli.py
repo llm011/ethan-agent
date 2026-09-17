@@ -70,18 +70,27 @@ serve_app = typer.Typer(help="管理 API 服务")
 app.add_typer(serve_app, name="serve")
 
 
-def _find_conflicting_servers() -> list[tuple[int, str]]:
+def _find_conflicting_servers(extra_exclude_pids: set[int] | None = None) -> list[tuple[int, str]]:
     """找出正在运行、且会写入同一个 sessions.db 的 serve 进程。
 
     冲突的本质是抢同一个 SQLite 文件（单写者模型），不是抢端口——两个实例用不同
     端口照样互锁。所以判据取「进程实际打开的 sessions.db 路径」与当前进程目标路径
     是否一致，而不是端口是否相同。
 
-    返回 [(pid, db_path), ...]，不含当前进程自身。
+    返回 [(pid, db_path), ...]，不含当前进程自身，也不含 ``extra_exclude_pids``。
+
+    ``extra_exclude_pids``：额外要视为「合法、非冲突」的 PID 集合。典型场景是
+    ``ethan server status`` —— 它是独立的短命 CLI 进程，``me`` 是它自己，而那个
+    **正常运行的常驻 server**（PID 记在 /tmp/ethan/server.pid）并不是 ``me``，
+    若不排除就会被误报成「冲突」（只要有 1 个健康 server 在跑，status 就永远
+    多报 1 个）。启动 serve / 清理残留时则**不**传此参数——那时正主确实是要
+    抢同一个库的冲突方。
     """
     import os
     import subprocess
     from pathlib import Path
+
+    exclude = set(extra_exclude_pids or ())
 
     try:
         from ethan.core.paths import user_sessions_db_path
@@ -106,7 +115,7 @@ def _find_conflicting_servers() -> list[tuple[int, str]]:
         if not line.isdigit():
             continue
         pid = int(line)
-        if pid == me:
+        if pid == me or pid in exclude:
             continue
         # 用 lsof 读该进程实际打开的 sessions.db，比解析环境变量更可靠
         try:

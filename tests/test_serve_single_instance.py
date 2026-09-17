@@ -130,6 +130,61 @@ class TestFindConflictingServers:
              patch("ethan.core.paths.user_sessions_db_path", return_value=db):
             assert _find_conflicting_servers() == []
 
+    def test_extra_exclude_pids_filters_legit_server(self, tmp_path: Path):
+        """extra_exclude_pids 里的 PID 应被视为合法、不算冲突。
+
+        对应 status 场景：唯一那个健康的常驻 server（记在 server.pid）不是当前
+        CLI 进程，传进来排除后就不该出现在冲突列表里。
+        """
+        db = tmp_path / "sessions.db"
+
+        def fake_run(cmd, *a, **kw):
+            if cmd[0] == "pgrep":
+                return _fake_proc(stdout="50472\n")
+            if cmd[0] == "lsof":
+                return _fake_proc(stdout=f"python 50472 u 3r REG 0,1 0 1 {db}\n")
+            return _fake_proc()
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("ethan.core.paths.user_sessions_db_path", return_value=db):
+            # 不排除：正主被误报为冲突（复现 bug）
+            assert _find_conflicting_servers() == [(50472, str(db))]
+            # 排除正主后：无冲突
+            assert _find_conflicting_servers(extra_exclude_pids={50472}) == []
+
+    def test_extra_exclude_pids_still_reports_extras(self, tmp_path: Path):
+        """排除正主后，真正多出来的第二个实例仍要被报为冲突。"""
+        db = tmp_path / "sessions.db"
+
+        def fake_run(cmd, *a, **kw):
+            if cmd[0] == "pgrep":
+                return _fake_proc(stdout="50472\n70000\n")
+            if cmd[0] == "lsof":
+                pid = cmd[cmd.index("-p") + 1]
+                return _fake_proc(stdout=f"python {pid} u 3r REG 0,1 0 1 {db}\n")
+            return _fake_proc()
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("ethan.core.paths.user_sessions_db_path", return_value=db):
+            conflicts = _find_conflicting_servers(extra_exclude_pids={50472})
+
+        assert conflicts == [(70000, str(db))]
+
+    def test_extra_exclude_pids_none_is_noop(self, tmp_path: Path):
+        """extra_exclude_pids=None 时行为与不传参数一致（向后兼容）。"""
+        db = tmp_path / "sessions.db"
+
+        def fake_run(cmd, *a, **kw):
+            if cmd[0] == "pgrep":
+                return _fake_proc(stdout="88888\n")
+            if cmd[0] == "lsof":
+                return _fake_proc(stdout=f"python 88888 u 3r REG 0,1 0 1 {db}\n")
+            return _fake_proc()
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("ethan.core.paths.user_sessions_db_path", return_value=db):
+            assert _find_conflicting_servers(extra_exclude_pids=None) == [(88888, str(db))]
+
     def test_pgrep_failure_is_safe(self, tmp_path: Path):
         """pgrep 抛异常时不应崩溃（返回空列表，允许启动）。"""
         def fake_run(cmd, *a, **kw):

@@ -310,10 +310,20 @@ def status() -> None:
     # 多实例告警：多个 serve 抢同一份 sessions.db / 同一端口时，桌面端会表现为
     # 「反复失联」（连接被踢断）。这种情况在 status 里必须显式提示，否则用户只会
     # 看到「服务运行中」而不知道后台还在互相打架。
+    #
+    # 但 status 自身是独立的短命 CLI 进程：正常运行的那个常驻 server 并不是当前
+    # 进程，若不排除就会被 _find_conflicting_servers 误报成「冲突」——只要有 1 个
+    # 健康 server 在跑，status 就永远多报 1 个（它数的那个 pid 恰恰是唯一的正主）。
+    # 所以把 /tmp/ethan/server.pid 记录的合法 server PID 作为「非冲突」排除掉，
+    # 只对真正多出来的实例告警。
     try:
         from ethan.interface.cli import _find_conflicting_servers
+        from ethan.watchdog import SERVER_PID_FILE, _read_pid
 
-        conflicts = _find_conflicting_servers()
+        legit_pid = _read_pid(SERVER_PID_FILE)
+        conflicts = _find_conflicting_servers(
+            extra_exclude_pids={legit_pid} if legit_pid else None
+        )
     except Exception:
         conflicts = []
     if conflicts:
