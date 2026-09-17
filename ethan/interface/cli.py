@@ -87,10 +87,10 @@ def _find_conflicting_servers(extra_exclude_pids: set[int] | None = None) -> lis
     抢同一个库的冲突方。
     """
     import os
-
-    exclude = set(extra_exclude_pids or ())
     import subprocess
     from pathlib import Path
+
+    exclude = set(extra_exclude_pids or ())
 
     try:
         from ethan.core.paths import user_sessions_db_path
