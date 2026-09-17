@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 _PID_DIR = Path("/tmp/ethan")
 SERVER_PID_FILE = _PID_DIR / "server.pid"
 WATCHDOG_PID_FILE = _PID_DIR / "watchdog.pid"
+# watchdog 自己的日志。不能用 DEVNULL：watchdog 是「发现 server 不健康 → kill →
+# 重启」这条链上唯一的决策者，它的日志一旦丢弃，事后就只能看到 server 被反复重启
+# （表现为「桌面端老失联」），却查不到是谁、因为什么触发的重启。
+WATCHDOG_LOG_FILE = _PID_DIR / "watchdog.log"
 # watchdog 正在监控的端口。单独存一个文件而不是塞进 watchdog.pid：PID 文件
 # 被别处按「一行整数」读取，混入端口会解析失败。少了这个文件就没法判断
 # 复用到的 watchdog 盯的是不是我们这次的端口。
@@ -177,11 +181,18 @@ def ensure_watchdog_running(port: int = DEFAULT_PORT) -> None:
     venv_python = project_root / ".venv" / "bin" / "python3"
     python = str(venv_python) if venv_python.exists() else sys.executable
 
+    # 日志落盘而非 DEVNULL，见 WATCHDOG_LOG_FILE 的说明
+    try:
+        WATCHDOG_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        log_f = open(WATCHDOG_LOG_FILE, "a", buffering=1)
+    except OSError:
+        log_f = subprocess.DEVNULL
+
     proc = subprocess.Popen(
         [python, "-m", "ethan.watchdog", "--daemon", "--port", str(port)],
         cwd=str(project_root),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_f,
+        stderr=subprocess.STDOUT,
         start_new_session=True,  # 脱离父进程会话，父死不影响子
     )
     logger.info("[Watchdog] Started watchdog (pid=%d), monitoring port %d", proc.pid, port)
@@ -200,7 +211,13 @@ def check_watchdog_health(port: int = DEFAULT_PORT) -> None:
 
 
 def _check_server_health(port: int) -> bool:
-    """HTTP ping server health endpoint。"""
+    """HTTP ping server health endpoint。
+
+    注意：这里「返回 False」只表示「这次探测没拿到 200」，不等于 server 已死。
+    单纯的超时常发生在 server 事件循环被长任务占住时（LLM 流式、memory reindex、
+    SQLite 忙等），此时进程健康、端口也在监听。调用方需结合 _port_in_use 判断，
+    否则会把健康的 server 误杀重启——每次重启都会踢断桌面端连接。
+    """
     import urllib.error
     import urllib.request
     try:
@@ -212,6 +229,43 @@ def _check_server_health(port: int) -> bool:
             return resp.status == 200
     except Exception:
         return False
+
+
+def _server_is_dead(port: int) -> bool:
+    """判定 server 是否「真的死了」——端口上已没有任何监听进程。
+
+    只有这种情况才值得 kill + 重启：进程没了/没绑上端口。进程还在监听但 health
+    超时，属于「忙」，应当继续观察而不是重启。
+    """
+    return not _port_in_use(port)
+
+
+def _port_in_use(port: int) -> bool:
+    """端口上是否还有进程在监听。"""
+    try:
+        import subprocess as sp
+        result = sp.run(
+            ["lsof", "-ti", f":{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=3,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _wait_port_released(port: int, timeout: float = 10.0) -> bool:
+    """等端口真正释放（上限 timeout 秒）。
+
+    固定 sleep(2) 不够稳：SIGKILL 之后 socket 可能仍处于 TIME_WAIT / 未回收，
+    2 秒后拉起新进程照样 Errno 48，于是进入「起不来就再杀再起」的循环——每次
+    循环都会把桌面端连接踢断一次。这里轮询到真释放为止。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _port_in_use(port):
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def _kill_server(port: int = DEFAULT_PORT) -> None:
@@ -246,11 +300,22 @@ def _kill_server(port: int = DEFAULT_PORT) -> None:
         pass
 
     _remove_pid(SERVER_PID_FILE)
-    time.sleep(2)  # 等端口释放
+    if not _wait_port_released(port):
+        logger.error(
+            "[Watchdog] Port %d still in use after kill — new server will fail to bind",
+            port,
+        )
 
 
 def _start_server(port: int = DEFAULT_PORT) -> None:
     """拉起 server 进程（监听 port）。"""
+    # 幂等：已经有健康的 server 在监听就不要再拉一个。
+    # 重复拉起必然绑不上端口，而绑失败的进程曾经会挂成僵尸（见 api.run_server 的
+    # 说明），白白污染 server.pid / heartbeat / 调度器，还会踢断桌面端连接。
+    if _check_server_health(port):
+        logger.info("[Watchdog] Server already healthy on port %d — skipping start", port)
+        return
+
     project_root = Path(__file__).parent.parent
     venv_python = project_root / ".venv" / "bin" / "python3"
 
@@ -340,20 +405,31 @@ def watchdog_main(port: int = DEFAULT_PORT) -> None:
                     logger.info("[Watchdog] Server recovered after %d failures", consecutive_failures)
                 consecutive_failures = 0
             else:
-                consecutive_failures += 1
-                logger.warning(
-                    "[Watchdog] Server health check failed (%d/%d)",
-                    consecutive_failures, MAX_FAILURES,
-                )
-
-                if consecutive_failures >= MAX_FAILURES:
-                    logger.error("[Watchdog] Server unresponsive, restarting...")
-                    _kill_server(port)
-                    _start_server(port)
+                # 区分「忙」和「死」：端口上还有监听进程 → 大概率只是事件循环被占住
+                # （LLM 流式 / reindex / SQLite 忙等），重启反而会打断正在跑的任务、
+                # 踢断桌面端连接。只有端口上彻底没人监听了才判定死亡并重启。
+                if not _server_is_dead(port):
+                    logger.warning(
+                        "[Watchdog] Health check timed out but port %d still has a "
+                        "listener — treating as busy, not restarting",
+                        port,
+                    )
                     consecutive_failures = 0
-                    # 重启后等一个周期再检查
-                    time.sleep(HEALTH_CHECK_INTERVAL)
-                    continue
+                else:
+                    consecutive_failures += 1
+                    logger.warning(
+                        "[Watchdog] Server health check failed (%d/%d)",
+                        consecutive_failures, MAX_FAILURES,
+                    )
+
+                    if consecutive_failures >= MAX_FAILURES:
+                        logger.error("[Watchdog] Server unresponsive, restarting...")
+                        _kill_server(port)
+                        _start_server(port)
+                        consecutive_failures = 0
+                        # 重启后等一个周期再检查
+                        time.sleep(HEALTH_CHECK_INTERVAL)
+                        continue
 
             # 顺便检查 lark event bus（如果 server 在，bus 不在说明可能静默断连）
             if healthy and not _check_lark_event_bus():

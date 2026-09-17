@@ -214,6 +214,38 @@ pnpm tauri build  # 产出 dmg/exe
 ./deploy/install.sh
 ```
 
+或使用内置命令（生成 `~/Library/LaunchAgents/com.ethan.agent.plist`）：
+
+```bash
+ethan server install     # 安装并启动
+ethan server status      # 查看运行状态（会提示多实例冲突）
+ethan server restart     # 重启
+ethan server stop        # 停止
+ethan server uninstall   # 卸载
+```
+
+> ⚠️ **不要同时用 launchd 和内置 watchdog 守护同一个服务。** launchd 的 `KeepAlive`
+> 已经是守护者，plist 里因此带了 `ETHAN_NO_WATCHDOG=1` 关掉 serve 内置的 watchdog。
+> 两个守护者盯同一个端口时，谁先抢到端口，另一个就会一直绑定失败并重启（实测可刷出
+> 上千次 `address already in use`），每次重启都会踢断桌面端 WebSocket——表现为
+> **「桌面端反复失联」**。
+
+### 服务反复失联 / 起不来？先查多实例
+
+同一个端口同一时间只应有一个 ethan 实例。多实例互抢端口和数据目录（`sessions.db`）
+是「服务不稳定、桌面端老掉线」的最常见原因：
+
+```bash
+ethan server status                    # 有冲突会直接列出来
+lsof -nP -iTCP:8900 -sTCP:LISTEN       # 看谁真正持有端口
+cat /tmp/ethan/watchdog.log            # watchdog 的重启决策日志
+tail -f ~/.ethan/logs/api.err.log      # 服务启动/绑定错误
+```
+
+端口上已有健康实例时，重复启动会**立刻退出**并提示（不会挂成僵尸进程）。
+保留唯一实例：`ethan server stop` 后重新启动，或 `ethan server uninstall` 卸掉
+launchd 服务再手动 `ethan serve`。
+
 ---
 
 ## 数据目录

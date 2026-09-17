@@ -354,7 +354,23 @@ cd app/android
 
 ```bash
 ./deploy/install.sh
+# 或使用内置命令：
+ethan server install    # 安装并启动
+ethan server status     # 查看状态（会提示多实例冲突）
+ethan server restart    # 重启
+ethan server stop       # 停止
+ethan server uninstall  # 卸载
 ```
+
+> ⚠️ **同一端口同一时间只能有一个 ethan 实例。** launchd 的 plist 里设了
+> `ETHAN_NO_WATCHDOG=1`——因为 `KeepAlive` 本身已经是守护者。两个守护者盯同一个
+> 端口时，抢不到的那个会无限重试（实测可刷出上千次 `address already in use`），
+> 每次重试都会踢断桌面端 WebSocket——这正是**「桌面端反复失联」**的常见原因。
+>
+> 服务起不来或反复掉线时依次排查：`ethan server status`、
+> `lsof -nP -iTCP:8900 -sTCP:LISTEN`、`cat /tmp/ethan/watchdog.log`、
+> `tail -f ~/.ethan/logs/api.err.log`。重复启动现在会**立刻退出**并给出明确提示，
+> 不会再挂成僵尸进程。
 
 ---
 

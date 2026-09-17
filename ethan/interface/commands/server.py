@@ -28,6 +28,11 @@ _PLIST_TEMPLATE = """\
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <!-- launchd 默认重启节流是 10s。端口被占时进程会立刻退出（见 api.run_server
+         的重复实例检测），KeepAlive 便会以这个间隔无限重试。拉到 60s 让重试不至于
+         变成刷屏，也给用户留出 `ethan server stop` 的时间。 -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
     <key>StandardOutPath</key>
     <string>{ethan_home}/logs/api.out.log</string>
     <key>StandardErrorPath</key>
@@ -36,6 +41,12 @@ _PLIST_TEMPLATE = """\
     <dict>
         <key>PATH</key>
         <string>{bin_dir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- launchd 自己就是守护进程（KeepAlive=true）。必须关掉 serve 内置的
+             watchdog，否则两个保姆同时管一个端口：谁先抢到 8989，另一个就一直
+             绑定失败并重启，实测能刷出上千次 Errno 48，每次都把桌面端连接踢断
+             （表现为「桌面端老失联」）。此处让 launchd 独占守护职责。 -->
+        <key>ETHAN_NO_WATCHDOG</key>
+        <string>1</string>
     </dict>
 </dict>
 </plist>"""
@@ -172,12 +183,54 @@ def uninstall() -> None:
     console.print("[green]✓ 服务已卸载。[/green]")
 
 
+def _stop_leftover_instances(console: Console) -> None:
+    """停掉 launchd 之外的残留 ethan 实例（如 watchdog 拉起的那个）。
+
+    `restart` 走 launchd unload/load，只能管到自己拉起的进程。如果端口还被另一个
+    实例（watchdog 的、或历史遗留的）占着，launchd 重启出来的新进程照样绑不上——
+    重启看起来"成功"了，实际端口上还是旧进程，用户会以为重启无效。这里一并清掉。
+    """
+    import signal
+
+    try:
+        from ethan.interface.cli import _find_conflicting_servers
+
+        conflicts = _find_conflicting_servers()
+    except Exception:
+        conflicts = []
+    if not conflicts:
+        return
+
+    console.print(f"[dim]发现 {len(conflicts)} 个残留实例，正在停止...[/dim]")
+    for pid, _db in conflicts:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            continue
+    # 给它们一点时间优雅退出，仍在的再强杀
+    import time
+
+    time.sleep(2)
+    for pid, _db in conflicts:
+        try:
+            os.kill(pid, 0)  # 存活探测
+        except (ProcessLookupError, PermissionError):
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
 @app.command("restart")
 def restart() -> None:
     """重启 Ethan 后台服务。"""
     console = Console()
     if _is_installed():
         _launchctl("unload", str(PLIST_PATH))
+        # launchd 的进程停了，但可能还有别的实例占着端口，先清干净再拉起，
+        # 否则新进程绑不上，重启看起来无效。
+        _stop_leftover_instances(console)
         result = _launchctl("load", str(PLIST_PATH))
         if result.returncode != 0:
             console.print(f"[red]重启失败：{result.stderr.strip()}[/red]")
@@ -253,3 +306,19 @@ def status() -> None:
             console.print(f"  程序:   {fields['exe']}")
         console.print(f"  日志:   {Path.home() / '.ethan' / 'logs' / 'api.out.log'}")
         console.print(f"  plist:  {PLIST_PATH}")
+
+    # 多实例告警：多个 serve 抢同一份 sessions.db / 同一端口时，桌面端会表现为
+    # 「反复失联」（连接被踢断）。这种情况在 status 里必须显式提示，否则用户只会
+    # 看到「服务运行中」而不知道后台还在互相打架。
+    try:
+        from ethan.interface.cli import _find_conflicting_servers
+
+        conflicts = _find_conflicting_servers()
+    except Exception:
+        conflicts = []
+    if conflicts:
+        console.print()
+        console.print("[yellow]⚠ 检测到多个 ethan 实例在运行，会互相抢端口/数据库：[/yellow]")
+        for pid, db in conflicts:
+            console.print(f"    pid={pid}  →  {db}")
+        console.print("  [dim]建议只保留一个：ethan server stop 后重启，或卸载 launchd 服务。[/dim]")

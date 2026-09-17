@@ -357,7 +357,24 @@ On first launch, configure the server URL (e.g. `http://<your-nas>:8900`) and Ac
 
 ```bash
 ./deploy/install.sh
+# or use the built-in commands:
+ethan server install    # install + start
+ethan server status     # check status (also flags multi-instance conflicts)
+ethan server restart    # restart
+ethan server stop       # stop
+ethan server uninstall  # uninstall
 ```
+
+> ⚠️ **Only one ethan instance may own a port at a time.** The launchd plist sets
+> `ETHAN_NO_WATCHDOG=1` because launchd's `KeepAlive` is already the supervisor —
+> running both supervisors against one port makes the loser retry forever (thousands
+> of `address already in use`), and each retry drops the desktop client's WebSocket.
+> That is the usual cause of **"the desktop app keeps disconnecting"**.
+>
+> If the server won't start or keeps dropping, check: `ethan server status`,
+> `lsof -nP -iTCP:8900 -sTCP:LISTEN`, `cat /tmp/ethan/watchdog.log`, and
+> `tail -f ~/.ethan/logs/api.err.log`. A duplicate start now **exits immediately**
+> with a clear message instead of lingering as a zombie process.
 
 ---
 

@@ -284,6 +284,29 @@ if _WEB_DIST.exists():
         return Response(status_code=404)
 
 
+def _port_is_served(host: str, port: int) -> bool:
+    """端口上是否已有健康的 ethan 实例在应答（而非仅仅被占用）。
+
+    只探测 /api/health：别的进程恰好占了端口不算「ethan 已在跑」，不该据此拒绝
+    启动；而一个健康的 ethan 已经在这个端口上时，再起一个必然绑不上。
+    """
+    import urllib.error
+    import urllib.request
+
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "", "::") else host
+    try:
+        req = urllib.request.Request(
+            f"http://{probe_host}:{port}/api/health",
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            body = resp.read(512).decode("utf-8", "replace")
+        # 只有确认是 ethan 才判定「已在跑」，避免误判其它占用同端口的服务
+        return resp.status == 200 and "ethan" in body.lower()
+    except Exception:
+        return False
+
+
 def run_server(host: str | None = None, port: int | None = None):
     import os
 
@@ -303,10 +326,34 @@ def run_server(host: str | None = None, port: int | None = None):
     host = host or "0.0.0.0"
     port = port or 8900
 
+    # 端口上已有健康的 ethan：立刻退出，别启动。
+    # 这一条是「服务反复失联」的根治点——被 launchd/watchdog/桌面端拉起的重复实例
+    # 曾在这里一路跑完 lifespan（含 memory reindex，耗时数十秒），最后才在 uvicorn
+    # 绑端口时报 Errno 48，而 uvicorn 并不终止进程，于是挂成一个不监听任何端口、
+    # 却持续占 CPU 的僵尸，并把 server.pid / heartbeat / 调度器全部污染一遍。
+    # 重复拉起时应当干脆地失败，让上层（launchd 的 KeepAlive）不再得到「起来了」的假象。
+    if _port_is_served(host, port):
+        logging.getLogger(__name__).error(
+            "[Server] 端口 %s:%d 上已有健康的 ethan 实例在运行，拒绝重复启动。"
+            "如需重启请先运行 `ethan serve stop`。",
+            host,
+            port,
+        )
+        raise SystemExit(1)
+
     # lifespan 里的 watchdog 拉起逻辑拿不到这里的参数，通过模块级状态传递
     global _SERVER_BIND
     _SERVER_BIND = (host, port)
 
     # 暴露端口给同进程内的后台任务回调（background_task 用它拼 base url，而非写死 8900）
     os.environ["ETHAN_SERVER_PORT"] = str(port)
-    uvicorn.run(app, host=host, port=port)
+    try:
+        uvicorn.run(app, host=host, port=port)
+    except SystemExit:
+        raise
+    except BaseException:
+        # 绑端口失败等启动期异常：必须让进程真的结束。
+        # uvicorn 在 bind 失败时只打日志、不抛错也不退出，进程会带着一堆已启动的
+        # 后台线程（调度器/心跳/channel listener）继续挂着——正是僵尸的来源。
+        logging.getLogger(__name__).exception("[Server] uvicorn 异常退出")
+        raise SystemExit(1)
