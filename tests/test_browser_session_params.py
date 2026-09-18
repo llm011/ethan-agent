@@ -1,6 +1,6 @@
 """缺 session 参数 / 多客户端下 attach 的行为。
 
-两个回归点(来自会话 s_20260918_0950_2183):
+两个回归点(来自一次多浏览器标签整理会话):
   1. 模型调 browser_tab(action=close, tab=...) 时漏传 session,过去报
      「该 browser session 不属于当前对话」——把「漏传参数」误导成「归属出错」,
      模型据此去 attach_current / 切换浏览器,空转 30 步。
@@ -63,7 +63,7 @@ def test_missing_session_reports_missing_not_ownership(monkeypatch):
     set_session_id("e1")
     _patch(monkeypatch, _FakeHub(TWO_CLIENTS), SessionMap())
 
-    out = json.loads(asyncio.run(BrowserTabTool().run(action="close", tab="1341423282")))
+    out = json.loads(asyncio.run(BrowserTabTool().run(action="close", tab="1")))
     assert "不属于当前对话" not in json.dumps(out, ensure_ascii=False)
     assert "session" in out["error"]
     assert "browser_session" in out["_hint"]  # 给出取 id 的下一步

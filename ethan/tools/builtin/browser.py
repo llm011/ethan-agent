@@ -370,7 +370,7 @@ async def _require_owned_or_recover(browser_session_id: str, ethan_sid: str) -> 
     """
     if not browser_session_id:
         # 调用方漏传 session,不是归属问题。这两者过去共用同一句报错,把模型
-        # 引向了错误的方向:实测会话 s_20260918_0950_2183 里模型看到「不属于当前
+        # 引向了错误的方向:实测一次多浏览器标签整理会话里模型看到「不属于当前
         # 对话」后,一路去 attach_current / 切换浏览器 / 重读技能,整整 30 步都
         # 没意识到自己只是漏了个参数。这里改成可执行的自查提示,并说清去哪取 id。
         raise BrowserError(
@@ -619,7 +619,7 @@ class _BrowserToolBase(BaseTool):
 
         过去这种情况会落到归属校验里,报出「该 browser session 不属于当前对话」,
         模型据此以为归属出错,转而去 attach_current / 切换浏览器,始终没发现自己
-        只是漏了参数(实测 s_20260918_0950_2183 因此空转 30 步)。这里直接点明缺什么、
+        只是漏了参数(实测一次多浏览器标签整理会话因此空转 30 步)。这里直接点明缺什么、
         去哪取,给一条可执行的下一步。
         """
         return json.dumps({
@@ -690,7 +690,7 @@ class BrowserSessionTool(_BrowserToolBase):
                 # 必须用 _list_sessions_all_clients:它查全部在线客户端并带回 client 标注。
                 # 过去这里用 _call("session_list", {}),那个走 resolve_client——两个客户端
                 # 在线且未 use 时会直接抛「请先用 browser_client 选择一个」,把 attach 整个
-                # 堵死(实测 s_20260918_0950_2183 里 attach 路径也因此不可用)。
+                # 堵死(实测多浏览器会话里 attach 路径也因此不可用)。
                 # 只读的跨客户端查询没有歧义,不该要求先选定客户端。
                 list_result = await _list_sessions_all_clients()
                 target = None

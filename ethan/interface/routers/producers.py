@@ -159,7 +159,7 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
                 # 过去这里无条件 unbind，于是「保留」等于「后端失忆」——扩展还记着
                 # session，ethan 却查不到了；下一轮 session_list 返回空，agent 判定
                 # 没有可用 session 就去 attach/create，在多客户端下进一步触发
-                # 「请先 use 选一个」，整个整理流程空转（实测 s_20260918_0950_2183）。
+                # 「请先 use 选一个」，整个整理流程空转（实测多浏览器标签整理场景）。
                 # 保留时也把 keep_alive 置上，避免下一轮收尾又把它当成待清理项弹卡片。
                 # bind 会新建 _Entry（last_active 自动置为当前），无需再 touch。
                 smap.bind(bsid, session_id, client_name=cname, keep_alive=True)

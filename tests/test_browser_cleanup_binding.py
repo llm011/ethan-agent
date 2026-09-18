@@ -1,6 +1,6 @@
 """浏览器 session 收尾清理:用户选「保留」时不得丢掉后端绑定。
 
-现场(会话 s_20260918_0950_2183):
+现场(多浏览器标签整理会话):
   _close_browser_sessions 在 finally 里无条件 smap.unbind(bsid),
   于是用户点「保留」后,扩展侧仍追踪该 session,但 ethan 的 session_map 已经
   忘了它。下一轮 browser_session(list) 返回 {"sessions": []},agent 判定
