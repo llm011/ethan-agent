@@ -146,6 +146,7 @@ method 命名空间对齐扩展侧 dispatch 字符串,这样移植过来的扩�
 | `session_required` | 4103 | 缺少 session |
 | `tab_not_found` | 4104 | tab 不存在 |
 | `session_not_found` | 4107 | session 不存在 / 不属于当前对话 |
+| `invalid_params` | -32602 | 工具调用缺必填参数(如漏传 `session`);与"不归属"区分,提示补参数而非改归属 |
 | `page_ref_not_found` | 4109 | ref 失效(通常因导航/刷新) |
 | `page_operation_failed` | 4110 | CDP 页面操作失败 |
 

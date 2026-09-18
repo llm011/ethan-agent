@@ -81,6 +81,10 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
                 smap.unbind(bsid)
                 continue
             if smap.is_keep_alive(bsid):
+                # release 是真放权：通知扩展「ethan 不再管这个 session」，扩展侧同步
+                # 不再把它算作受控 session。这里 unbind 与扩展状态一致，是对的——
+                # 与下面 keep 分支的区别就在这里：keep 只是 ethan 自己收尾，扩展仍追踪，
+                # 所以 keep 绝不能 unbind（否则 ethan 失忆、扩展还记得，两边对不上）。
                 try:
                     await hub.call(
                         METHODS["session_release"],
@@ -137,19 +141,29 @@ async def _close_browser_sessions(session_id: str | None, run=None) -> None:
             bsid = item["sessionId"]
             cname = item.get("_client", "")
             if not cname:
+                # 没有客户端名就无法再路由到这个 session，留着也是死绑定
                 smap.unbind(bsid)
                 continue
-            try:
-                if action == "close":
+            if action == "close":
+                # 关闭：真正关掉 tab group，扩展侧也不再追踪 → 解绑是正确的
+                try:
                     await hub.call(
                         METHODS["session_close"], {"sessionId": bsid}, client_name=cname, browser_session_id=bsid
                     )
-                # "keep" 只解绑后端映射，不调 session_release：
-                # 扩展继续追踪该 session，下次对话可通过 list + attach 复用。
-            except Exception:
-                logger.warning("browser: cleanup action '%s' failed for %s", action, bsid)
-            finally:
-                smap.unbind(bsid)
+                except Exception:
+                    logger.warning("browser: cleanup close failed for %s", bsid)
+                finally:
+                    smap.unbind(bsid)
+            else:
+                # "keep"：用户要保留这些 tab，扩展继续追踪，**绑定也必须保留**。
+                # 过去这里无条件 unbind，于是「保留」等于「后端失忆」——扩展还记着
+                # session，ethan 却查不到了；下一轮 session_list 返回空，agent 判定
+                # 没有可用 session 就去 attach/create，在多客户端下进一步触发
+                # 「请先 use 选一个」，整个整理流程空转（实测 s_20260918_0950_2183）。
+                # 保留时也把 keep_alive 置上，避免下一轮收尾又把它当成待清理项弹卡片。
+                # bind 会新建 _Entry（last_active 自动置为当前），无需再 touch。
+                smap.bind(bsid, session_id, client_name=cname, keep_alive=True)
+                logger.info("browser: kept session %s (client=%s) after cleanup", bsid, cname)
     except Exception:
         logger.debug("browser cleanup skipped: %s", session_id)
 

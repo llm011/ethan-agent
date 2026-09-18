@@ -78,6 +78,25 @@ flowchart TD
 - 用户回头继续对话时,Agent 重新 `create` 一个 session 即可。
 - 截图清理与扩展是否连接无关,总是执行(见第 6 节)。
 
+### 3.1 对话收尾清理:keep 必须保留绑定
+
+除了空闲扫描,每轮生成的收尾阶段(`producers._close_browser_sessions`)也会处理本对话名下的 browser session:标记了 `keep_alive` 的直接 `sessions.release`;其余弹卡片让用户选「关闭」或「保留」,超时默认保留。
+
+```mermaid
+flowchart TD
+    End["生成结束<br/>_close_browser_sessions"] --> KA{"keep_alive?"}
+    KA -->|是| Rel["sessions.release + unbind<br/>(双方一致: 都放权)"]
+    KA -->|否| Card["弹卡片确认<br/>(超时 120s 默认 keep)"]
+    Card -->|close| Close["sessions.close + unbind<br/>(双方一致: 都关闭)"]
+    Card -->|keep| Keep["touch + bind(keep_alive=True)<br/>**不解绑**"]
+```
+
+关键区别在 **keep 分支不能 `unbind`**:
+
+- `release` / `close` 都是**双向一致**的操作——扩展不再追踪该 session,`unbind` 与之相符。
+- 而 keep 只是 ethan 自己这轮收尾,扩展**仍然追踪**该 session。若此时 `unbind`,就变成"扩展还记得、ethan 已失忆":下一轮 `browser_session(list)` 返回空,Agent 判定"本对话没有可用 session",转而去 `attach` / `create`,在多客户端下进一步撞上"请先 use 选一个"。实测该缺陷让一次标签整理空转 30 步,最终报出的却是"该 session 不属于当前对话"。
+- keep 时同时置 `keep_alive=True`,避免下一轮收尾又把它当成待清理项反复弹卡片。
+
 ---
 
 ## 4. 安全边界总览
@@ -117,14 +136,26 @@ flowchart TD
 
 ```python
 # 伪代码,见 ethan/tools/builtin/browser.py
-def _require_owned(browser_session_id):
-    owned = get_session_map().list_for(get_session_id())
-    if browser_session_id not in owned:
+async def _require_owned_or_recover(browser_session_id, ethan_sid):
+    if not browser_session_id:
+        # 缺参数 ≠ 归属出错：报成后者会把模型引去 attach / 切换浏览器
+        raise BrowserError("缺少 session 参数: ...先 list 取 sessionId 再带上 session= 重试",
+                           code=ERROR_CODE["invalid_params"])
+    if browser_session_id in smap.list_for(ethan_sid) and smap.get_client(browser_session_id):
+        return smap.get_client(browser_session_id)
+    # 绑定丢失（ethan 重启 / 对话换 ID）：探针查扩展侧该 session 是否真实存在
+    found = probe_all_clients(browser_session_id)
+    if found is None:
         raise BrowserError("该 browser session 不属于当前对话,拒绝操作",
                            code=ERROR_CODE["session_not_found"])
+    smap.bind(browser_session_id, ethan_sid, client_name=found)  # 恢复绑定
+    return found
 ```
 
 - 这道门禁在 `_call()` 入口**统一收口**,一处覆盖 `rename` / `release` / `close` 以及全部 `tab.*` / `page.*` 操作。
+- **缺参数与不归属必须区分报错**。两者过去共用同一句"不属于当前对话",实测把模型带偏:它在 30 步里反复去 `attach_current` / 切换客户端,始终没意识到自己只是漏传了 `session`。现在缺参报 `invalid_params` (-32602) 并给出"先 `browser_session(list)` 取 id"的下一步;工具层(`browser_tab` / `browser_page` / `browser_session`)还会在分发前提前拦下必填 `session` 的动作。
+- **绑定丢失走"探针恢复"而非直接拒绝**:ethan 重启、对话换 ID 后 `SessionMap`(纯进程内)会失忆,但扩展侧 session 仍在。此时遍历所有在线客户端查 `sessions.list`,确认存在就回填绑定并沿用原 `keep_alive`,避免"用户明明在自己的 tab 上却被拒"。
+- **`attach` 不能复用会歧义的 `session_list`**:存在性校验改用 `_list_sessions_all_clients()`。旧的 `_call("session_list")` 走 `resolve_client`,在两个客户端在线且未 `use` 时会抛"请先选一个",把 attach 整个堵死。校验通过后按 session **实际所在**的客户端绑定,而非当前活跃客户端。
 - `create` / `attach_current` 不带既有 `browser_session_id`(新建后才 `bind`),天然绕开门禁。
 - `session_list` 的返回也按当前对话过滤(`_filter_owned_sessions`),不向某对话泄漏其他对话/用户的 session id。
 - 效果:即便对话 B 已通过自己的 consent 授权,也无法操作对话 A 创建的 session——跨对话操控在触达 Hub 之前就被拒绝。

@@ -369,9 +369,15 @@ async def _require_owned_or_recover(browser_session_id: str, ethan_sid: str) -> 
     不用再去二次 resolve。未通过校验且恢复失败则抛出 BrowserError。
     """
     if not browser_session_id:
+        # 调用方漏传 session,不是归属问题。这两者过去共用同一句报错,把模型
+        # 引向了错误的方向:实测会话 s_20260918_0950_2183 里模型看到「不属于当前
+        # 对话」后,一路去 attach_current / 切换浏览器 / 重读技能,整整 30 步都
+        # 没意识到自己只是漏了个参数。这里改成可执行的自查提示,并说清去哪取 id。
         raise BrowserError(
-            "该 browser session 不属于当前对话,拒绝操作",
-            code=ERROR_CODE["session_not_found"],
+            "缺少 session 参数:本操作需要指定要操作的 browser session。"
+            "请先用 browser_session(action='list') 取 sessionId,再带上 session= 重试。",
+            code=ERROR_CODE["invalid_params"],
+            retryable=False,
         )
     smap = get_session_map()
     owned = smap.list_for(ethan_sid)
@@ -608,6 +614,26 @@ class _BrowserToolBase(BaseTool):
     def _authorize(self) -> None:
         mark_authorized(get_session_id())
 
+    def _missing_session(self, action: str) -> str:
+        """缺少 session 参数时的统一返回。
+
+        过去这种情况会落到归属校验里,报出「该 browser session 不属于当前对话」,
+        模型据此以为归属出错,转而去 attach_current / 切换浏览器,始终没发现自己
+        只是漏了参数(实测 s_20260918_0950_2183 因此空转 30 步)。这里直接点明缺什么、
+        去哪取,给一条可执行的下一步。
+        """
+        return json.dumps({
+            "error": f"{action} 需要 session 参数,当前未提供。",
+            "_hint": (
+                "本操作必须指定要操作的 browser session。"
+                "先调 browser_session(action='list') 取 sessionId"
+                "(返回的每条含 status: owned=本对话已绑定,可用),再带上 session=<sessionId> 重试。"
+                "若 list 为空,说明本对话还没有 tab group,"
+                "用 browser_session(action='create', url=...) 新建,"
+                "或 browser_session(action='attach_current') 接管当前标签页。"
+            ),
+        }, ensure_ascii=False)
+
 
 class BrowserSessionTool(_BrowserToolBase):
     name = "browser_session"
@@ -620,7 +646,7 @@ class BrowserSessionTool(_BrowserToolBase):
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": ["create", "attach", "attach_current", "list", "rename", "release", "close", "update"]},
-            "session": {"type": "string", "description": "目标 session_id(attach/rename/release/close 必填)"},
+            "session": {"type": "string", "description": "目标 session_id(attach/rename/release/close/update 必填;从 browser_session(action='list') 取)"},
             "url": {"type": "string", "description": "create 时打开的初始 URL"},
             "title": {"type": "string", "description": "session 标题(create/attach_current/rename)"},
             "color": {"type": "string", "description": "Tab Group 颜色（grey/blue/red/yellow/green/pink/purple/cyan/orange）"},
@@ -633,6 +659,10 @@ class BrowserSessionTool(_BrowserToolBase):
     async def run(self, action: str, session: str = "", url: str = "", title: str = "", color: str = "", keep_alive: bool = False, background: bool = True) -> str:
         self._authorize()
         try:
+            # create/attach_current/list 是新建或全局操作,不需要既有 session;
+            # attach/rename/release/close/update 需要一个目标 id,缺了提前说清楚。
+            if action in ("attach", "rename", "release", "close", "update") and not session:
+                return self._missing_session(action)
             if action == "create":
                 params: dict = {}
                 if url:
@@ -655,20 +685,29 @@ class BrowserSessionTool(_BrowserToolBase):
                 return json.dumps(result, ensure_ascii=False)
             if action == "attach":
                 if not session:
-                    return json.dumps({"error": "attach 需要指定 session id"})
-                client = get_hub().resolve_client(get_session_id())
+                    return self._missing_session(action)
+                # 先查清这个 session 到底在哪台浏览器上,再决定路由与绑定。
+                # 必须用 _list_sessions_all_clients:它查全部在线客户端并带回 client 标注。
+                # 过去这里用 _call("session_list", {}),那个走 resolve_client——两个客户端
+                # 在线且未 use 时会直接抛「请先用 browser_client 选择一个」,把 attach 整个
+                # 堵死(实测 s_20260918_0950_2183 里 attach 路径也因此不可用)。
+                # 只读的跨客户端查询没有歧义,不该要求先选定客户端。
+                list_result = await _list_sessions_all_clients()
+                target = None
+                for s in list_result.get("sessions", []) or []:
+                    if not isinstance(s, dict):
+                        continue
+                    sid = s.get("sessionId") or s.get("session_id")
+                    if sid == session:
+                        target = s
+                        break
+                if target is None:
+                    return json.dumps({"error": f"session {session} 不存在，无法 attach"})
+                # 以 session 实际所在的客户端为准,而不是当前活跃客户端:
+                # attach 的是扩展里既有的 tab group,它物理上就在那台浏览器。
+                client = target.get("client") or get_hub().resolve_client(get_session_id())
                 if not client:
                     return json.dumps({"error": "没有可用的浏览器客户端"})
-                # 校验 session 存在性：attach 不存在的 id 会假成功，后续操作全挂
-                list_result = await _call("session_list", {})
-                known_ids = set()
-                for s in (list_result or {}).get("sessions", []) or []:
-                    if isinstance(s, dict):
-                        sid = s.get("sessionId") or s.get("session_id")
-                        if sid:
-                            known_ids.add(sid)
-                if session not in known_ids:
-                    return json.dumps({"error": f"session {session} 不存在，无法 attach"})
                 # 校验归属：已被其他对话绑定时拒绝，避免覆盖式接管互相踩
                 owner = get_session_map().get_owner(session)
                 cur_sid = get_session_id()
@@ -677,7 +716,7 @@ class BrowserSessionTool(_BrowserToolBase):
                 get_session_map().bind(session, cur_sid,
                                        client_name=client, keep_alive=keep_alive)
                 get_session_map().touch(session)
-                return json.dumps({"attached": True, "sessionId": session})
+                return json.dumps({"attached": True, "sessionId": session, "client": client})
             if action == "attach_current":
                 params = {}
                 if title:
@@ -732,8 +771,8 @@ class BrowserTabTool(_BrowserToolBase):
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": ["open", "list", "user_list", "find_tab", "attach", "attach_batch", "active", "activate", "close", "detach", "move"]},
-            "session": {"type": "string", "description": "目标 session_id"},
-            "tab": {"type": "string", "description": "目标 tab_id(attach/activate/close)"},
+            "session": {"type": "string", "description": "目标 session_id(除 user_list/find_tab 外必填;从 browser_session(action='list') 取)"},
+            "tab": {"type": "string", "description": "目标 tab_id(attach/activate/close;从 browser_tab(action='user_list'/'list') 结果取 tabId)"},
             "url": {"type": "string", "description": "open 时打开的 URL;find_tab 时按域名或 URL 前缀匹配"},
             "active_only": {"type": "boolean", "description": "find_tab 专用:true=只返回用户当前活动的 tab,忽略 url"},
             "tabs": {"type": "array", "items": {"type": "string"}, "description": "attach_batch 时的 tab_id 列表"},
@@ -745,6 +784,11 @@ class BrowserTabTool(_BrowserToolBase):
     async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1) -> str:
         self._authorize()
         try:
+            # 提前拦缺参:只有 user_list/find_tab 是全局的,其余都要 session。
+            # 不拦的话会一路走到 _require_owned_or_recover,过去那里报的是
+            # 「不属于当前对话」,把「漏传参数」误导成「归属出错」。
+            if action not in ("user_list", "find_tab") and not session:
+                return self._missing_session(action)
             if action == "open":
                 return json.dumps(await _call("tab_open", {"sessionId": session, "url": url},
                                               browser_session_id=session), ensure_ascii=False)
@@ -866,6 +910,10 @@ class BrowserPageTool(_BrowserToolBase):
 
     async def run(self, action: str, session: str = "", **kw) -> str:
         self._authorize()
+        # 提前拦缺参:snapshot_read 是读本地落盘文件,不需要 session;其余都要。
+        # 缺参时给出可取 id 的下一步,而不是让它落到归属校验里报「不属于当前对话」。
+        if action != "snapshot_read" and not session:
+            return self._missing_session(action)
         try:
             raw = await self._run_impl(action, session, **kw)
         except BrowserError as e:
