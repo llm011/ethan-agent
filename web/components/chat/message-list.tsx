@@ -127,6 +127,18 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
     return () => observer.disconnect();
   }, [hasMore, needOlder, messages.length, onLoadOlder]);
 
+  // 圆点导航点到「尚未渲染的更早一屏」时展开分页。用与上滚触顶相同的步长，
+  // 保持两种展开方式行为一致（都从末尾往外扩 visibleCount）。
+  const handleDotsNeedOlder = useCallback(() => {
+    setVisibleCount((c) => Math.min(c + LOAD_MORE_COUNT, messages.length));
+  }, [messages.length]);
+
+  // 圆点触发的滚动要标记为程序滚动：否则 scroll 监听会把这次滚动当成用户手动上滑，
+  // 解除 stickToBottom 锁定。
+  const markProgrammaticScroll = useCallback(() => {
+    programmaticScrollRef.current = true;
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
       programmaticScrollRef.current = true;
@@ -234,7 +246,19 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
       </div>
     </div>
 
-      <QueryDots messages={messages} scrollRef={scrollRef} />
+      {/* 只把「已渲染」的消息交给圆点：messages 是完整的，但 DOM 里只挂了
+          visibleMessages 这一段（末尾 visibleCount 条）。若把完整 messages 交给
+          QueryDots，靠前的圆点会指向 data-msg-idx 不在 DOM 中的节点 →
+          querySelector 返回 null → handleClick 静默 return，表现为「点了没反应、
+          控制台也不报错」。这里传 startIdx 让它按同一坐标系计算。
+          onReachOlder：点到尚未渲染的消息时，先展开分页再滚动。 */}
+      <QueryDots
+        messages={messages}
+        startIdx={startIdx}
+        scrollRef={scrollRef}
+        onNeedOlder={hasMore ? handleDotsNeedOlder : undefined}
+        onBeforeScroll={markProgrammaticScroll}
+      />
 
       {/* 滚动到底部按钮：不在底部时显示；点击后锁定跟随新消息 */}
       {messages.length > 0 && !isAtBottom && (

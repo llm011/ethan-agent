@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { ArrowDown } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
+import { QueryDots } from "./query-dots";
 import type { Message } from "@ethan/shared/chat/types";
 import { isPersistedId } from "@ethan/shared/chat/history";
 import type { Annotation } from "@/lib/api";
@@ -125,6 +126,18 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
     return () => observer.disconnect();
   }, [hasMore, needOlder, messages.length, onLoadOlder]);
 
+  // 圆点导航点到「尚未渲染的更早一屏」时展开分页。用与上滚触顶相同的步长，
+  // 保持两种展开方式行为一致（都从末尾往外扩 visibleCount）。
+  const handleDotsNeedOlder = useCallback(() => {
+    setVisibleCount((c) => Math.min(c + LOAD_MORE_COUNT, messages.length));
+  }, [messages.length]);
+
+  // 圆点触发的滚动要标记为程序滚动：否则 scroll 监听会把这次滚动当成用户手动上滑，
+  // 解除 stickToBottom 锁定。
+  const markProgrammaticScroll = useCallback(() => {
+    programmaticScrollRef.current = true;
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
       programmaticScrollRef.current = true;
@@ -185,7 +198,9 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
 
   return (
     <div className="relative flex-1 flex flex-col min-h-0">
-    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4">
+    {/* pl-7 给左侧圆点导航让位——圆点栏是 absolute left-0 w-7 叠在容器上的，
+        不留padding 会被消息内容压住。 */}
+    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 pl-7">
       <div className="max-w-3xl mx-auto w-full flex flex-col gap-6">
         {/* 顶部加载更多指示器：
             本地还有未展开的消息、或服务端还有更早一页时都要挂哨兵。
@@ -207,8 +222,9 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
           </div>
         )}
         {visibleMessages.map((msg, i) => (
+          // data-msg-idx 是圆点导航的锚点，必须与 QueryDots 的 startIdx 同一坐标系
+          <div key={msg.id ?? `idx-${startIdx + i}`} data-msg-idx={startIdx + i}>
           <MessageBubble
-            key={msg.id ?? `idx-${startIdx + i}`}
             msg={msg}
             isStreaming={streaming}
             isLast={startIdx + i === messages.length - 1}
@@ -227,9 +243,22 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
             onRefresh={onRefresh}
             annotations={isPersistedId(msg.id) ? annotationsByMessage?.[msg.id] : undefined}
           />
+          </div>
         ))}
       </div>
     </div>
+
+      {/* 左侧圆点导航：只把「已渲染」的消息交给它——messages 是完整的，但 DOM 里
+          只挂了 visibleMessages 这一段。若把完整 messages 传进去，靠前的圆点会指向
+          data-msg-idx 不在 DOM 中的节点，点击后静默无反应（控制台也不报错）。
+          传 startIdx 让它按同一坐标系计算；onNeedOlder 让「点更早的消息」先展开分页。 */}
+      <QueryDots
+        messages={messages}
+        startIdx={startIdx}
+        scrollRef={scrollRef}
+        onNeedOlder={hasMore ? handleDotsNeedOlder : undefined}
+        onBeforeScroll={markProgrammaticScroll}
+      />
 
       {/* 滚动到底部按钮：不在底部时显示；点击后锁定跟随新消息 */}
       {messages.length > 0 && !isAtBottom && (
