@@ -19,7 +19,7 @@ Ethan 支持通过多种渠道收发消息，无需公网 IP。
 1. 在飞书开发者后台创建企业自建应用
 2. 获取 App ID 和 App Secret
 3. 在 Ethan Web 设置 → 渠道 → 飞书 中填入凭据
-4. 重启服务：`./manager.sh restart`
+4. 重启服务：`ethan server restart`（未装成 launchd 服务时，直接重启 `ethan serve` 进程）
 
 ### 初始化 lark-cli
 
