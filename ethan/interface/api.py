@@ -42,7 +42,12 @@ from ethan.interface.routers import (
     ui_resources,
     wait_for_user,
 )
-from ethan.interface.routers.mcp_server import get_mcp_app as _get_mcp_app
+from ethan.interface.routers.mcp_server import (
+    get_mcp_app as _get_mcp_app,
+)
+from ethan.interface.routers.mcp_server import (
+    get_mcp_lifespan as _get_mcp_lifespan,
+)
 from ethan.memory.api_keys import APIKeyStore
 
 # 飞书接入走 WebSocket 长连接（lark_events.py，由 lifespan 里 start_lark_listener 启动），
@@ -173,7 +178,12 @@ async def lifespan(app: FastAPI):
     key_store = APIKeyStore()
     await key_store.init()
     app.state.api_key_store = key_store
-    yield
+    # MCP 的 session manager 必须在这里启动：/mcp 是 mount 上去的子应用，Starlette 的
+    # Mount 不转发子应用 lifespan，所以子应用自己挂的 lifespan 不会被执行；不 enter 的话
+    # 每个 MCP 请求都抛 "Task group is not initialized" → 端点整体 HTTP 500。
+    # 传 _MCP_APP 保证驱动的是 mount 出去的那个实例的 session manager。
+    async with _get_mcp_lifespan(_MCP_APP)(app):
+        yield
     if _lark_ready():
         from ethan.interface.channels.lark.events import _wait_lark_listener_stopped, stop_lark_listener
         stop_lark_listener()
@@ -253,7 +263,10 @@ app.include_router(desktop_ws_router)  # /ws/desktop, WebSocket, no prefix
 app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{name}
 
 # MCP Server endpoint: 豆包等外部 MCP 客户端通过 http://localhost:8900/mcp 连接
-app.mount("/mcp", _get_mcp_app())
+# 保存引用：lifespan 里要用**同一个** app 的 lifespan 来启动它的 session manager，
+# 详见 _get_mcp_lifespan 的 docstring。
+_MCP_APP = _get_mcp_app()
+app.mount("/mcp", _MCP_APP)
 
 if _WEB_DIST.exists():
     app.mount("/_next", StaticFiles(directory=str(_WEB_DIST / "_next")), name="next-static")

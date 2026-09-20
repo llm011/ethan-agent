@@ -102,6 +102,31 @@ async def ask_ethan(prompt: str, session_id: str | None = None) -> str:
     return f"{content}\n\n[session_id={session_id}]"
 
 
+def get_mcp_lifespan(mcp_app=None):
+    """MCP streamable-HTTP 的 session manager lifespan。
+
+    **为什么需要这个函数**：`/mcp` 是 mount 到主 FastAPI app 上的，而 Starlette 的
+    `Mount` **不会**转发子应用的 lifespan（只有交给 Uvicorn 的那个顶层 lifespan 会被
+    调用）。`streamable_http_app()` 却把 session manager 的启动放在它返回的那个 Starlette
+    的 lifespan 里 —— 于是没人 enter 它，session manager 的 task group 从未初始化，
+    **每一个**请求（连 initialize 都是）都抛
+    `RuntimeError: Task group is not initialized. Make sure to use run().`，
+    表现为 MCP 端点整体 HTTP 500。
+
+    只在子应用上挂 `lifespan=` 是**没用的**（Mount 不转发，我实测过），必须由 `api.py`
+    的顶层 lifespan 显式 enter 这里返回的 context。
+
+    `mcp_app` 必须是 `get_mcp_app()` 的返回值本身：session manager 的 `.run()` 每实例只能
+    调用一次，且驱动 lifespan 的实例必须与处理请求的实例是同一个，否则 task group 依然
+    没启动。不传时退回 `get_mcp_app()` 新建一个，仅供单测等场景。
+    """
+    app = mcp_app if mcp_app is not None else get_mcp_app()
+    inner = getattr(app, "_ethan_inner_mcp_app", None)
+    if inner is None:  # 传进来的不是 get_mcp_app() 的产物
+        inner = mcp_server.streamable_http_app()
+    return inner.router.lifespan_context
+
+
 def get_mcp_app():
     """Return the Starlette ASGI app for mounting, with API key auth middleware."""
 
@@ -134,8 +159,13 @@ def get_mcp_app():
     from starlette.applications import Starlette
     from starlette.routing import Mount
 
+    # 这里不再挂 lifespan：本 app 是被 api.py mount 的，Starlette 的 Mount 不会转发
+    # 子应用 lifespan，挂在这儿等于没挂。session manager 由顶层 lifespan 经
+    # get_mcp_lifespan() 启动（见该函数 docstring）。
     authed_app = Starlette(
         routes=[Mount("/", app=app)],
         middleware=[Middleware(MCPAuthMiddleware)],
     )
+    # 记下 inner app，供 get_mcp_lifespan(authed_app) 取到同一个 session manager
+    authed_app._ethan_inner_mcp_app = app
     return authed_app
