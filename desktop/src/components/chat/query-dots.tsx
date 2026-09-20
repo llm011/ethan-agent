@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useRef, useLayoutEffect, useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { Message } from "@ethan/shared/chat/types";
