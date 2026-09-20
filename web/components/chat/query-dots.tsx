@@ -13,10 +13,13 @@ interface QueryDotsProps {
   startIdx: number;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   /**
-   * 点击的圆点落在尚未渲染的更早一屏时调用：请父组件先展开分页，
-   * 让目标消息进 DOM，之后本组件再滚动过去。
+   * 点击的圆点落在尚未渲染的更早一屏时调用：请父组件展开分页让**目标消息**进 DOM，
+   * 之后本组件再滚动过去。
+   *
+   * 入参是目标下标——父组件据此一次展开到位。不要做成「每次只多展开一屏」：
+   * 目标可能早好几屏，靠本组件重试几帧是等不到的。
    */
-  onNeedOlder?: () => void;
+  onNeedOlder?: (targetIdx: number) => void;
   /**
    * 滚动前调用，让父组件把这次滚动标记为「程序触发」——否则会被
    * message-list 的手动滚动监听误判成用户上滑，而解除跟随底部的锁定。
@@ -35,6 +38,8 @@ export function QueryDots({ messages, startIdx, scrollRef, onNeedOlder, onBefore
   // hideTimer：鼠标从按钮移到 tooltip 的 8px 间隙过渡期保留 tooltip
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dotsRef = useRef<HTMLDivElement>(null);
+  // 递增令牌，用于作废过期的「等分页展开后滚动」重试链（见 handleClick）
+  const clickTokenRef = useRef(0);
 
   const userMessages = messages
     .map((m, i) => ({ msg: m, idx: i }))
@@ -91,27 +96,37 @@ export function QueryDots({ messages, startIdx, scrollRef, onNeedOlder, onBefore
   };
 
   const handleClick = (msgIdx: number) => {
+    // 每次点击领一个新令牌，作废上一次仍在等待的重试链——否则连点两个圆点时，
+    // 前一个「等分页展开」的 rAF 链可能在新目标滚到位之后才命中，把视图拽回去。
+    clickTokenRef.current += 1;
+    const token = clickTokenRef.current;
+
     if (scrollToMsg(msgIdx)) return;
 
     // 目标在尚未渲染的更早一屏（首屏只渲染末尾 visibleCount 条）。
     // 这里必须主动展开分页再滚，否则就是「点了没反应、控制台也不报错」。
     if (onNeedOlder && msgIdx < startIdx) {
-      onNeedOlder();
-      // 等分页展开后 DOM 才是完整的。setState 之后要两帧左右才提交并完成布局，
-      // 用 rAF 链排一次，失败再退避重试几次（消息多时展开可能要更多帧）。
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (!scrollToMsg(msgIdx)) {
-            setTimeout(() => {
-              if (!scrollToMsg(msgIdx)) {
-                console.warn(
-                  `[QueryDots] 展开分页后仍找不到 data-msg-idx=${msgIdx}（startIdx=${startIdx}）`
-                );
-              }
-            }, 120);
-          }
-        });
-      });
+      onNeedOlder(msgIdx); // 父组件一次展开到目标可见
+      // 等展开后 DOM 提交并完成布局再滚。轮询重试而不是固定 sleep，避免消息多时
+      // 还没渲染完就去查；查不到就继续等，直到超时。
+      //
+      // 用 setTimeout 而非 requestAnimationFrame：rAF 在后台标签页会被节流甚至
+      // 停摆，用户切走再切回来就会一直等不到；而且 jsdom 里没有帧循环，用 rAF
+      // 会让这条重试链在测试中永远不执行（等于没覆盖）。
+      let attempts = 0;
+      const tryScroll = () => {
+        // 已被更晚的点击取代 → 放弃本次重试，别去抢滚动
+        if (token !== clickTokenRef.current) return;
+        if (scrollToMsg(msgIdx)) return;
+        if (++attempts < 20) {
+          setTimeout(tryScroll, 50);
+        } else {
+          console.warn(
+            `[QueryDots] 展开分页后仍找不到 data-msg-idx=${msgIdx}（startIdx=${startIdx}）`
+          );
+        }
+      };
+      tryScroll();
       return;
     }
 

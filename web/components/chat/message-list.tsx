@@ -127,16 +127,39 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
     return () => observer.disconnect();
   }, [hasMore, needOlder, messages.length, onLoadOlder]);
 
-  // 圆点导航点到「尚未渲染的更早一屏」时展开分页。用与上滚触顶相同的步长，
-  // 保持两种展开方式行为一致（都从末尾往外扩 visibleCount）。
-  const handleDotsNeedOlder = useCallback(() => {
-    setVisibleCount((c) => Math.min(c + LOAD_MORE_COUNT, messages.length));
+  // 圆点导航点到「尚未渲染的更早一屏」时展开分页。
+  //
+  // 必须**一次展开到目标可见**，不能按 LOAD_MORE_COUNT 一屏一屏加：目标可能比
+  // startIdx 早好几屏（40 条消息点 idx=0 → 要连展开 3 次），而调用方的重试链只
+  // 等有限几帧，展开一屏后就放弃了,用户看到的还是「点了没反应」。
+  // 直接把 visibleCount 扩到「从 targetIdx 到末尾」即可让它进 DOM。
+  const handleDotsNeedOlder = useCallback((targetIdx: number) => {
+    setVisibleCount((c) => Math.max(c, Math.min(messages.length - targetIdx, messages.length)));
   }, [messages.length]);
 
   // 圆点触发的滚动要标记为程序滚动：否则 scroll 监听会把这次滚动当成用户手动上滑，
   // 解除 stickToBottom 锁定。
+  //
+  // 注意**不能只置位不复位**：跳到页面中部的圆点后 near=false，onScroll 里那个
+  // 「滚到接近底部才清 flag」的分支永远等不到，flag 会一直挂着，导致之后用户手动
+  // 上滑也解除不了 stickToBottom（onScroll 会直接 return），新消息/流式更新反复把
+  // 视图拽回底部。这里用定时兜底复位，不依赖是否滚到底。
+  const programmaticClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const markProgrammaticScroll = useCallback(() => {
     programmaticScrollRef.current = true;
+    if (programmaticClearTimerRef.current) clearTimeout(programmaticClearTimerRef.current);
+    // smooth 滚动通常数百毫秒内结束；留足时间后无条件复位,避免 flag 卡住。
+    programmaticClearTimerRef.current = setTimeout(() => {
+      programmaticScrollRef.current = false;
+      programmaticClearTimerRef.current = null;
+    }, 800);
+  }, []);
+
+  // 卸载时清掉兜底定时器
+  useEffect(() => {
+    return () => {
+      if (programmaticClearTimerRef.current) clearTimeout(programmaticClearTimerRef.current);
+    };
   }, []);
 
   const scrollToBottom = useCallback(() => {
