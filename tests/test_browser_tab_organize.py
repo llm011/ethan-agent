@@ -145,3 +145,42 @@ def test_organize_empty_ops_returns_error(monkeypatch):
 
     assert "error" in out
     assert len(hub.calls) == 0
+
+
+def test_organize_collapse_default_omitted(monkeypatch):
+    """不传 collapse 时不带该字段,由扩展侧按 auto 处理。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "group", "title": "Work", "tabs": [102]}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops))
+
+    _, params = hub.calls[0]
+    assert "collapse" not in params, "未显式传 collapse 时不应塞默认值"
+
+
+def test_organize_collapse_false_forwarded(monkeypatch):
+    """collapse=false 应透传,让扩展侧跳过自动折叠。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "group", "title": "Work", "tabs": [102]}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops, collapse=False))
+
+    _, params = hub.calls[0]
+    assert params["collapse"] is False
+
+
+def test_organize_collapse_true_forwarded(monkeypatch):
+    """collapse=true 应透传（强制折叠含活跃组）。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "group", "title": "Work", "tabs": [102]}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops, collapse=True))
+
+    _, params = hub.calls[0]
+    assert params["collapse"] is True

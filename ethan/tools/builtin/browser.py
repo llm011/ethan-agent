@@ -309,7 +309,11 @@ _HINTS = {
     "input_enter": "在输入框填入文本并回车（组合动作）。ok=true 表示成功。",
     "scroll_find": "边滚动边查找元素。found=true 表示已找到，scrolls 是滚动次数。",
     "click_vlm": "VLM 视觉点击。截图发给多模态 LLM 识别坐标后用 CDP mouse 点击。ok=true 表示成功，screenshot 是截图路径。",
-    "organize": "已应用 tab 整理操作。applied 字段说明实际执行了什么;skipped 是因 tab 消失等原因跳过的条目。",
+    "organize": (
+        "已应用 tab 整理操作。applied 字段说明实际执行了什么;skipped 是因 tab 消失等原因跳过的条目。"
+        "整理后会自动折叠涉及的 TabGroup(applied.collapsed),但**跳过用户当前活跃的那一组**"
+        "(applied.collapseSkipped)——那一组保持展开。"
+    ),
 }
 
 
@@ -790,11 +794,19 @@ class BrowserTabTool(_BrowserToolBase):
                 ),
                 "items": {"type": "object"},
             },
+            "collapse": {
+                "type": "boolean",
+                "description": (
+                    "organize 专用:整理完成后是否折叠本次涉及的 TabGroup。"
+                    "不传(默认)=自动折叠,但跳过包含当前活跃 tab 的组(不会把用户正在看的那组收起来);"
+                    "false=完全不折叠;true=强制全部折叠(含活跃组)。"
+                ),
+            },
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1, ops: list = None) -> str:
+    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1, ops: list = None, collapse: bool = None) -> str:
         self._authorize()
         try:
             # 提前拦缺参:只有 user_list/find_tab 是全局的,其余都要 session。
@@ -854,7 +866,11 @@ class BrowserTabTool(_BrowserToolBase):
                     return json.dumps({"error": "organize 需要 ops 参数（未传）"}, ensure_ascii=False)
                 if ops == []:
                     return json.dumps({"error": "organize 的 ops 数组为空，至少需要一个操作"}, ensure_ascii=False)
-                return json.dumps(await _call("tab_organize", {"ops": ops}), ensure_ascii=False)
+                # 不传 collapse → 扩展侧按 'auto' 处理（折叠但跳过活跃组）
+                payload = {"ops": ops}
+                if collapse is not None:
+                    payload["collapse"] = collapse
+                return json.dumps(await _call("tab_organize", payload), ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:
             return f"浏览器错误: {e}" + (" (可重新 snapshot 后重试)" if e.retryable else "")

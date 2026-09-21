@@ -159,8 +159,12 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
       closed: [],
       grouped: [],
       ungrouped: [],
+      collapsed: [],
+      collapseSkipped: [],
     };
     const skipped: { tabId: number; reason: string }[] = [];
+    // 本次 touch 到的所有 group，收尾时统一折叠（去重）
+    const touchedGroupIds = new Set<number>();
 
     for (const op of params.ops) {
       if (op.op === 'close') {
@@ -231,6 +235,7 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
         }
 
         applied.grouped.push({ title: op.title, groupId, tabs: tabIds });
+        touchedGroupIds.add(groupId);
       } else if (op.op === 'ungroup') {
         const validIds: number[] = [];
         for (const tabId of op.tabs) {
@@ -263,6 +268,9 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
           gid = groups[0]?.id;
         }
         if (gid == null) continue;
+        // group 已不存在 → 视为已经达到「没有这个组」的目标状态，静默跳过
+        const known = await queryGroups({});
+        if (!known.some(g => g.id === gid)) continue;
         const tabs = await queryTabs({ groupId: gid });
         const tabIds = tabs.map(t => t.id).filter((id): id is number => id != null);
         if (tabIds.length) {
@@ -272,10 +280,67 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
       }
     }
 
+    await this.collapseOrganizedGroups(touchedGroupIds, params.collapse, applied);
+
     return {
       organized: true,
       applied,
       ...(skipped.length ? { skipped } : {}),
     };
+  }
+
+  /**
+   * 折叠本次整理涉及的 TabGroup。
+   *
+   * 默认 `'auto'`：折所有本次动过的组，但跳过**包含当前活跃 tab 的组** ——
+   * 用户正在看的那一组被折起来会当场消失，属于干扰而不是整理。
+   * `true`/`false` 是强制开关（真要折当前组时才用），`'none'` 完全不折。
+   *
+   * 组可能在本轮被 Chrome 销毁（比如 tab 全被关掉），query 拿不到就跳过。
+   */
+  private async collapseOrganizedGroups(
+    groupIds: Set<number>,
+    mode: 'auto' | 'none' | boolean | undefined,
+    applied: BrowserTabOrganizeApplied,
+  ): Promise<void> {
+    if (mode === 'none' || mode === false || groupIds.size === 0) {
+      return;
+    }
+
+    const force = mode === true;
+    let groups: chrome.tabGroups.TabGroup[];
+    try {
+      groups = await queryGroups({});
+    } catch {
+      return; // tabGroups API 不可用，静默跳过
+    }
+    const byId = new Map(groups.map(g => [g.id, g]));
+
+    for (const groupId of groupIds) {
+      if (!byId.has(groupId)) {
+        continue; // 组已不存在（tab 被关光 / 被解散）
+      }
+      if (!force && (await this.groupHasActiveTab(groupId))) {
+        applied.collapseSkipped.push(groupId);
+        continue;
+      }
+      try {
+        await updateGroupFull(groupId, { collapsed: true });
+        applied.collapsed.push(groupId);
+      } catch {
+        // 折叠失败不影响整理结果本身，不向上抛
+      }
+    }
+  }
+
+  /** 该组里是否有用户当前正在看的 tab。 */
+  private async groupHasActiveTab(groupId: number): Promise<boolean> {
+    try {
+      const tabs = await queryTabs({ groupId });
+      return tabs.some(tab => tab.active === true);
+    } catch {
+      // 查不到就保守认为「有活跃 tab」，宁可少折一个组也不打断用户
+      return true;
+    }
   }
 }

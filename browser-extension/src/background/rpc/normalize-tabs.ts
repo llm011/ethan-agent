@@ -88,8 +88,20 @@ export function normalizeTabOrganizeParams(params: unknown): BrowserTabOrganizeP
   if (!Array.isArray(ops) || ops.length === 0) {
     throw createInvalidParamsError('tabs.organize requires a non-empty ops array');
   }
+  const collapse = p.collapse;
+  if (
+    collapse != null &&
+    collapse !== 'auto' &&
+    collapse !== 'none' &&
+    typeof collapse !== 'boolean'
+  ) {
+    throw createInvalidParamsError(
+      'tabs.organize collapse must be "auto", "none" or a boolean',
+    );
+  }
   return {
     ops: ops.map((raw, i) => normalizeOrganizeOp(raw, i)),
+    ...(collapse != null ? { collapse } : {}),
   };
 }
 
