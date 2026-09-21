@@ -114,3 +114,19 @@ export function normalizePositiveNumber(
   }
   return numberValue;
 }
+
+const TAB_GROUP_COLORS = new Set([
+  'grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange',
+]);
+
+export function normalizeTabGroupColor(
+  value: unknown,
+): string | undefined {
+  if (value == null) return undefined;
+  const s = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!s) return undefined;
+  if (!TAB_GROUP_COLORS.has(s)) {
+    throw createInvalidParamsError(`Invalid tab group color: ${String(value)}`);
+  }
+  return s;
+}

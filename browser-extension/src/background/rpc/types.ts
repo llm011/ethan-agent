@@ -61,6 +61,8 @@ import type {
   BrowserTabMoveResult,
   BrowserSessionUpdateParams,
   BrowserSessionUpdateResult,
+  BrowserTabOrganizeParams,
+  BrowserTabOrganizeResult,
 } from '../../shared';
 import { BROWSER_RPC_METHODS } from '../../shared';
 
@@ -103,6 +105,9 @@ export interface BrowserRequestDependencies {
   moveTab: (
     params: BrowserTabMoveParams,
   ) => Promise<BrowserTabMoveResult>;
+  organizeTabs: (
+    params: BrowserTabOrganizeParams,
+  ) => Promise<BrowserTabOrganizeResult>;
   updateSession: (
     params: BrowserSessionUpdateParams,
   ) => Promise<BrowserSessionUpdateResult>;
@@ -163,6 +168,7 @@ export const ALLOWED_METHODS = new Set<string>([
   BROWSER_RPC_METHODS.tabsAttachBatch,
   BROWSER_RPC_METHODS.tabsDetach,
   BROWSER_RPC_METHODS.tabsMove,
+  BROWSER_RPC_METHODS.tabsOrganize,
   BROWSER_RPC_METHODS.sessionsUpdate,
   BROWSER_RPC_METHODS.pagesSnapshot,
   BROWSER_RPC_METHODS.pagesClick,

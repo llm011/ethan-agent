@@ -11,6 +11,7 @@ import {
   normalizeTabDetachParams,
   normalizeTabMoveParams,
   normalizeTabOpenParams,
+  normalizeTabOrganizeParams,
 } from './normalize-tabs';
 
 export async function handleTabMethods(
@@ -85,6 +86,13 @@ export async function handleTabMethods(
     return createSuccessResponse(
       message,
       await deps.moveTab(normalizeTabMoveParams(message.params)),
+    );
+  }
+
+  if (message.method === BROWSER_RPC_METHODS.tabsOrganize) {
+    return createSuccessResponse(
+      message,
+      await deps.organizeTabs(normalizeTabOrganizeParams(message.params)),
     );
   }
 

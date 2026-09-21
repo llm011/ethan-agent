@@ -26,6 +26,7 @@ METHODS = {
     "tab_attach_batch": "tabs.attachBatch",
     "tab_detach": "tabs.detach",
     "tab_move": "tabs.move",
+    "tab_organize": "tabs.organize",
     # page
     "page_snapshot": "pages.snapshot",
     "page_click": "pages.click",

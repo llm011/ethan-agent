@@ -177,6 +177,19 @@ export function ungroupTabs(tabIds: number[]): Promise<void> {
   });
 }
 
+export function queryGroups(
+  filter: chrome.tabGroups.QueryInfo = {},
+): Promise<chrome.tabGroups.TabGroup[]> {
+  return new Promise((resolve, reject) => {
+    chrome.tabGroups.query(filter, groups => {
+      if (rejectWithRuntimeError(reject, 'Failed to query tab groups')) {
+        return;
+      }
+      resolve(groups);
+    });
+  });
+}
+
 export function moveTabToIndex(
   tabId: number,
   index: number,
