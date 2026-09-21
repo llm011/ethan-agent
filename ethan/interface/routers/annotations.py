@@ -59,6 +59,12 @@ class AnnotationStore:
                 )
                 """
             )
+            # batch_get_annotations 按 message_id IN (...) 查；没有索引就是全表扫描，
+            # 而它在前端每次加载会话/翻页/刷新时都会调一次，注解表一涨就慢。
+            await self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_annotations_message_id "
+                "ON annotations(message_id)"
+            )
             await self._db.commit()
 
     async def close(self) -> None:

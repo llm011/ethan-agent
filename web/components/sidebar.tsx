@@ -276,7 +276,13 @@ export function Sidebar() {
         });
         markActiveRead(incoming);
         if (data.active_sessions) {
-          setActiveSessions(new Set(data.active_sessions));
+          // 只在集合内容真的变了才换新 Set：否则每 3s 一次无条件换引用，
+          // 会让整个侧栏会话列表跟着重渲染一遍（activeSessions 参与每行渲染）。
+          setActiveSessions(prev => {
+            const next = new Set<string>(data.active_sessions);
+            if (prev.size === next.size && [...next].every(id => prev.has(id))) return prev;
+            return next;
+          });
         }
       } catch {}
     };

@@ -637,7 +637,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             }, false, ac.signal);
           } else {
             _setStreaming(false);
-            const fresh = await fetchSession(initialSessionId).catch(() => null);
+            // 只取一页：不带 limit 会拉回整个会话历史（含每条 tool_steps 的大字段），
+            // 长会话下这是「点进去要等很久」的主要来源之一。
+            const fresh = await fetchSessionPage(initialSessionId, { limit: MESSAGE_PAGE_SIZE }).catch(() => null);
             if (cancelled) return;
             if (fresh) {
               const freshMsgs = mapDetailMessages(fresh);

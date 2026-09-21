@@ -135,6 +135,8 @@ export async function consumeStream(
   writeMsgs([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel, id: placeholderId }]);
 
   let _rafId: number | null = null;
+  let _flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let _lastFlushAt = 0;
   const buildMsg = (extra?: Partial<Message>): Message => ({
     role: "assistant" as const,
     content: assistantContent,
@@ -159,12 +161,30 @@ export async function consumeStream(
       return next;
     });
   };
+  // 流式刷新的节流窗口。
+  //
+  // 以前是每个 rAF 刷一次（≈60fps）：每次 setMessages 都会重渲染整个 ChatView
+  // 及其子树（MessageList / markdown 重新解析 / 代码块重新高亮），长消息下
+  // 每帧的 markdown 重解析开销随内容增长，是「流式输出时整机发卡」的主因。
+  // 人眼对 60fps 与 ~20fps 的逐字输出几乎无感，但渲染次数降到 1/3。
+  const FLUSH_INTERVAL_MS = 50;
   const scheduleFlush = () => {
-    if (_rafId !== null) return;
-    _rafId = requestAnimationFrame(() => { _rafId = null; flushAssistant(); });
+    if (_flushTimer !== null || _rafId !== null) return;
+    const elapsed = Date.now() - _lastFlushAt;
+    if (elapsed >= FLUSH_INTERVAL_MS) {
+      _lastFlushAt = Date.now();
+      _rafId = requestAnimationFrame(() => { _rafId = null; flushAssistant(); });
+      return;
+    }
+    _flushTimer = setTimeout(() => {
+      _flushTimer = null;
+      _lastFlushAt = Date.now();
+      flushAssistant();
+    }, FLUSH_INTERVAL_MS - elapsed);
   };
   const cancelScheduledFlush = () => {
     if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
+    if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
   };
 
   try {
