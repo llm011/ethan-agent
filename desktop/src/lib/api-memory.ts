@@ -1,23 +1,23 @@
 /** Memory 相关类型和 API（Facts/Episodes/Procedures/Insights/Signals）。 */
 
-import { getApiUrl, headers  } from "./api-base";
+import { fetchWithTimeout, getApiUrl, headers } from "./api-base";
 
 // ── Facts ─────────────────────────────────────────────────────────
 
 export interface Fact { id: string; content: string; confidence: number; category: string; source: string; created_at: number; superseded_by: string | null; }
 
 export async function fetchFacts(): Promise<Fact[]> {
-  const res = await fetch(`${getApiUrl()}/memory/facts`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/facts`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(data => data.facts);
 }
 
 export async function deleteFact(factId: string): Promise<void> {
-  await fetch(`${getApiUrl()}/memory/facts/${factId}`, { method: "DELETE", headers: headers() });
+  await fetchWithTimeout(`${getApiUrl()}/memory/facts/${factId}`, { method: "DELETE", headers: headers() });
 }
 
 export async function updateFact(factId: string, content: string): Promise<void> {
-  await fetch(`${getApiUrl()}/memory/facts/${factId}`, {
+  await fetchWithTimeout(`${getApiUrl()}/memory/facts/${factId}`, {
     method: "PATCH",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
@@ -29,13 +29,13 @@ export async function updateFact(factId: string, content: string): Promise<void>
 export interface Episode { id: string; session_id: string; timestamp: number; summary: string; turn_count: number; keywords: string[]; model: string; }
 
 export async function fetchEpisodes(): Promise<Episode[]> {
-  const res = await fetch(`${getApiUrl()}/memory/episodes`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/episodes`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(data => data.episodes);
 }
 
 export async function deleteEpisode(id: string): Promise<void> {
-  await fetch(`${getApiUrl()}/memory/episodes/${id}`, { method: "DELETE", headers: headers() });
+  await fetchWithTimeout(`${getApiUrl()}/memory/episodes/${id}`, { method: "DELETE", headers: headers() });
 }
 
 // ── Procedures ────────────────────────────────────────────────────
@@ -49,13 +49,13 @@ export interface Procedure {
 }
 
 export async function fetchProcedures(): Promise<Procedure[]> {
-  const res = await fetch(`${getApiUrl()}/memory/procedures`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/procedures`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(d => d.procedures);
 }
 
 export async function deleteProcedure(id: string): Promise<void> {
-  await fetch(`${getApiUrl()}/memory/procedures/${id}`, { method: "DELETE", headers: headers() });
+  await fetchWithTimeout(`${getApiUrl()}/memory/procedures/${id}`, { method: "DELETE", headers: headers() });
 }
 
 // ── Insights (永久记忆) ───────────────────────────────────────────
@@ -74,13 +74,13 @@ export interface InsightsResponse {
 }
 
 export async function fetchInsights(limit = 20, offset = 0): Promise<InsightsResponse> {
-  const res = await fetch(`${getApiUrl()}/memory/insights?limit=${limit}&offset=${offset}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/insights?limit=${limit}&offset=${offset}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch insights");
   return res.json();
 }
 
 export async function fetchInsightsByDate(dateStr: string): Promise<Insight[]> {
-  const res = await fetch(`${getApiUrl()}/memory/insights/date/${dateStr}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/insights/date/${dateStr}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch insights by date");
   return res.json().then(d => d.items);
 }
@@ -100,19 +100,19 @@ export interface Signal {
 }
 
 export async function fetchTodaySignals(): Promise<Signal[]> {
-  const res = await fetch(`${getApiUrl()}/memory/signals/today`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/signals/today`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch today signals");
   return res.json().then(d => d.signals);
 }
 
 export async function fetchSignalsByDate(dateStr: string): Promise<Signal[]> {
-  const res = await fetch(`${getApiUrl()}/memory/signals/date/${dateStr}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/signals/date/${dateStr}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch signals by date");
   return res.json().then(d => d.signals);
 }
 
 export async function triggerConsolidation(): Promise<{ ok: boolean; added: number }> {
-  const res = await fetch(`${getApiUrl()}/memory/consolidate`, { method: "POST", headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/consolidate`, { method: "POST", headers: headers() });
   if (!res.ok) throw new Error("Failed to trigger consolidation");
   return res.json();
 }
@@ -218,7 +218,7 @@ export async function fetchStructuredMemoriesPage(params: {
   limit?: number;
   offset?: number;
 } = {}): Promise<StructuredMemoriesPage> {
-  const res = await fetch(`${getApiUrl()}/memory/records${recordParams(params)}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/records${recordParams(params)}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch structured memories");
   const data = await res.json();
   return {
@@ -247,7 +247,7 @@ export async function searchStructuredMemories(
   if (params.type) q.set("type", params.type);
   if (params.domain) q.set("domain", params.domain);
   if (params.status) q.set("status", params.status);
-  const res = await fetch(`${getApiUrl()}/memory/records/search?${q.toString()}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/records/search?${q.toString()}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to search structured memories");
   return res.json().then(data => data.items);
 }
@@ -262,7 +262,7 @@ export async function updateStructuredMemory(id: string, patch: StructuredMemory
     delete body.valid_until;
     body.clear_valid_until = true;
   }
-  const res = await fetch(`${getApiUrl()}/memory/records/${id}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/records/${id}`, {
     method: "PATCH",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -272,25 +272,25 @@ export async function updateStructuredMemory(id: string, patch: StructuredMemory
 }
 
 export async function forgetStructuredMemory(id: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/memory/records/${id}`, { method: "DELETE", headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/records/${id}`, { method: "DELETE", headers: headers() });
   if (!res.ok) throw new Error("Failed to forget structured memory");
 }
 
 export async function confirmStructuredCandidate(id: string): Promise<StructuredMemory | null> {
-  const res = await fetch(`${getApiUrl()}/memory/records/${id}/confirm`, { method: "POST", headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/records/${id}/confirm`, { method: "POST", headers: headers() });
   if (!res.ok) throw new Error("Failed to confirm memory candidate");
   return res.json().then(data => data.record ?? null);
 }
 
 export async function wakeStructuredMemory(id: string): Promise<StructuredMemory | null> {
-  const res = await fetch(`${getApiUrl()}/memory/records/${id}/wake`, { method: "POST", headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/records/${id}/wake`, { method: "POST", headers: headers() });
   if (!res.ok) throw new Error("Failed to wake dormant memory");
   return res.json().then(data => data.record ?? null);
 }
 
 export async function wakeScopeMemories(scopeType: string, scopeId: string): Promise<number> {
   const q = new URLSearchParams({ scope_type: scopeType, scope_id: scopeId });
-  const res = await fetch(`${getApiUrl()}/memory/records/wake-scope?${q.toString()}`, { method: "POST", headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/records/wake-scope?${q.toString()}`, { method: "POST", headers: headers() });
   if (!res.ok) throw new Error("Failed to wake dormant memories in scope");
   return res.json().then(data => data.woken ?? 0);
 }
@@ -321,7 +321,7 @@ export async function fetchDailySummariesPage(params: {
     ? `/memory/records/summaries/${params.date}`
     : "/memory/records/summaries";
   const suffix = q.toString() ? `?${q.toString()}` : "";
-  const res = await fetch(`${getApiUrl()}${path}${suffix}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}${path}${suffix}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch daily summaries");
   const data = await res.json();
   return {
@@ -341,7 +341,7 @@ export async function fetchDailySummaries(params: {
 
 export async function triggerStructuredConsolidation(targetDate?: string): Promise<{ ok: boolean; result: Record<string, unknown> }> {
   const suffix = targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : "";
-  const res = await fetch(`${getApiUrl()}/memory/records/consolidate${suffix}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/memory/records/consolidate${suffix}`, {
     method: "POST",
     headers: headers(),
   });

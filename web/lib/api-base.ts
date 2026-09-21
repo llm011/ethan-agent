@@ -55,8 +55,45 @@ export function assetUrl(relativePath: string): string {
   return url;
 }
 
+/**
+ * 带超时的 fetch。
+ *
+ * 浏览器对「连不上/半死」的 socket 不会很快报错，往往要等 OS 级 TCP 超时
+ * （30s~2min）才 reject。服务端挂掉时，所有 REST 调用都会这样挂住——
+ * 表现就是「点了菜单要等好久才出内容」，而加载态早就走完兜底定时器了，
+ * 底下那个 fetch 其实还在悬着。
+ *
+ * 这里给每个请求加一个硬超时，超时即 abort 并抛错，让 UI 能尽快走到失败分支。
+ *
+ * 默认 15s：比 /health 的 3s 宽松得多（长任务类接口确实可能需要十几秒），
+ * 但远小于 TCP 超时。调用方已自带 signal（如流式对话的中断）时不额外超时。
+ */
+export const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
+
+export async function fetchWithTimeout(
+  input: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+  const { timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, signal: external, ...rest } = init;
+  if (external) {
+    return fetch(input, { ...rest, signal: external });
+  }
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...rest, signal: ctrl.signal });
+  } catch (err) {
+    if (ctrl.signal.aborted) {
+      throw new Error(`请求超时（${Math.round(timeoutMs / 1000)}s）`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(to);
+  }
+}
+
 export async function verifyAuth(token: string): Promise<boolean> {
-  const res = await fetch(`${API_URL}/auth`, {
+  const res = await fetchWithTimeout(`${API_URL}/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
@@ -66,7 +103,7 @@ export async function verifyAuth(token: string): Promise<boolean> {
 
 /** 响应浏览器清理确认卡片：action="close" 关闭 tab group，action="keep" 保留。 */
 export async function respondBrowserCleanup(requestId: string, action: "close" | "keep"): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API_URL}/browser/cleanup/${encodeURIComponent(requestId)}`, {
+  const res = await fetchWithTimeout(`${API_URL}/browser/cleanup/${encodeURIComponent(requestId)}`, {
     method: "POST",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ action }),
@@ -84,7 +121,7 @@ export interface ModelEntry {
 }
 
 export async function fetchModels(): Promise<ModelEntry[]> {
-  const res = await fetch(`${API_URL}/models`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/models`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch models");
   const data = await res.json();
   return data.models;
@@ -99,14 +136,14 @@ export interface ModeEntry {
 }
 
 export async function fetchModes(): Promise<ModeEntry[]> {
-  const res = await fetch(`${API_URL}/modes`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/modes`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch modes");
   const data = await res.json();
   return data.modes;
 }
 
 export async function addModel(m: ModelEntry): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`${API_URL}/models`, {
+  const res = await fetchWithTimeout(`${API_URL}/models`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify(m),
   });
@@ -116,14 +153,14 @@ export async function addModel(m: ModelEntry): Promise<{ ok: boolean; error?: st
 export async function deleteModel(provider: string, modelId: string): Promise<{ ok: boolean; error?: string }> {
   // model id 可能含 "/"（如 trae/glm-5.3-flash），走 query 参数而不是路径段
   const params = new URLSearchParams({ provider, id: modelId });
-  const res = await fetch(`${API_URL}/models?${params.toString()}`, {
+  const res = await fetchWithTimeout(`${API_URL}/models?${params.toString()}`, {
     method: "DELETE", headers: headers(),
   });
   return res.json();
 }
 
 export async function addModelsBatch(models: ModelEntry[]): Promise<{ ok: boolean; added: number; skipped: { id: string; provider: string; reason: string }[]; error?: string }> {
-  const res = await fetch(`${API_URL}/models/batch`, {
+  const res = await fetchWithTimeout(`${API_URL}/models/batch`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ models }),
   });
@@ -131,7 +168,7 @@ export async function addModelsBatch(models: ModelEntry[]): Promise<{ ok: boolea
 }
 
 export async function deleteModelsBatch(items: { provider: string; id: string }[]): Promise<{ ok: boolean; deleted: number; missing?: number; error?: string }> {
-  const res = await fetch(`${API_URL}/models/delete-batch`, {
+  const res = await fetchWithTimeout(`${API_URL}/models/delete-batch`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ items }),
   });
@@ -139,7 +176,7 @@ export async function deleteModelsBatch(items: { provider: string; id: string }[
 }
 
 export async function reorderModels(items: { provider: string; id: string }[]): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`${API_URL}/models/reorder`, {
+  const res = await fetchWithTimeout(`${API_URL}/models/reorder`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ items }),
   });
@@ -147,7 +184,7 @@ export async function reorderModels(items: { provider: string; id: string }[]): 
 }
 
 export async function discoverModels(provider: string): Promise<{ ok: boolean; models?: (ModelEntry & { exists?: boolean })[]; error?: string; url?: string }> {
-  const res = await fetch(`${API_URL}/models/discover`, {
+  const res = await fetchWithTimeout(`${API_URL}/models/discover`, {
     method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ provider }),
   });
@@ -155,7 +192,7 @@ export async function discoverModels(provider: string): Promise<{ ok: boolean; m
 }
 
 export async function respondConsent(requestId: string, allowed: boolean, message?: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API_URL}/consent/${encodeURIComponent(requestId)}`, {
+  const res = await fetchWithTimeout(`${API_URL}/consent/${encodeURIComponent(requestId)}`, {
     method: "POST",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ allowed, message: message || "" }),
@@ -164,7 +201,7 @@ export async function respondConsent(requestId: string, allowed: boolean, messag
 }
 
 export async function respondAskUser(requestId: string, value: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API_URL}/ask-user/${encodeURIComponent(requestId)}`, {
+  const res = await fetchWithTimeout(`${API_URL}/ask-user/${encodeURIComponent(requestId)}`, {
     method: "POST",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ value }),
@@ -174,7 +211,7 @@ export async function respondAskUser(requestId: string, value: string): Promise<
 
 /** 响应 wait_for_user 等待卡片：POST 用户的确认/取消/文本输入。 */
 export async function respondWaitForUser(requestId: string, value: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API_URL}/wait-for-user/${encodeURIComponent(requestId)}`, {
+  const res = await fetchWithTimeout(`${API_URL}/wait-for-user/${encodeURIComponent(requestId)}`, {
     method: "POST",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ value }),
@@ -188,7 +225,7 @@ export async function respondWaitForUser(requestId: string, value: string): Prom
 
 /** Tool UI resources: 按 ui:// URI 获取工具 UI 模板 HTML（前端缓存，模板只拉一次）。 */
 export async function fetchUiResource(uri: string): Promise<{ text: string; _meta?: unknown }> {
-  const res = await fetch(`${API_URL}/ui-resources/read?uri=${encodeURIComponent(uri)}`, {
+  const res = await fetchWithTimeout(`${API_URL}/ui-resources/read?uri=${encodeURIComponent(uri)}`, {
     headers: headers(),
   });
   if (!res.ok) throw new Error(`Failed to fetch UI resource: ${uri}`);
@@ -204,7 +241,7 @@ export interface ServerHealthInfo {
 }
 export async function fetchHealth(): Promise<ServerHealthInfo> {
   try {
-    const res = await fetch(`${API_URL}/health`);
+    const res = await fetchWithTimeout(`${API_URL}/health`);
     const data = await res.json();
     return { version: data.version ?? null, agent_name: data.agent_name ?? null };
   } catch {

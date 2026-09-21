@@ -16,6 +16,7 @@ export type ServerStatus = "ok" | "down" | "checking";
 export interface ServerHealth {
   status: ServerStatus;
   version: string | null;
+  agent_name: string | null; // 左栏标题用（config.defaults.agent_name）
   latencyMs: number | null;
   lastCheck: number | null; // Date.now() 时间戳（ms）
 }
@@ -27,6 +28,7 @@ const FETCH_TIMEOUT_MS = 3_000;
 let _state: ServerHealth = {
   status: "checking",
   version: null,
+  agent_name: null,
   latencyMs: null,
   lastCheck: null,
 };
@@ -53,6 +55,7 @@ async function checkOnce(): Promise<void> {
       _state = {
         status: "ok",
         version: data.version ?? null,
+        agent_name: data.agent_name ?? null,
         latencyMs: latency,
         lastCheck: Date.now(),
       };
@@ -60,6 +63,7 @@ async function checkOnce(): Promise<void> {
       _state = {
         status: "down",
         version: null,
+        agent_name: null,
         latencyMs: null,
         lastCheck: Date.now(),
       };
@@ -68,6 +72,7 @@ async function checkOnce(): Promise<void> {
     _state = {
       status: "down",
       version: null,
+      agent_name: null,
       latencyMs: null,
       lastCheck: Date.now(),
     };

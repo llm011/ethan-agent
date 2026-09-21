@@ -1,6 +1,6 @@
 /** 消息标注（阅读模式高亮/划线/批注）。 */
 
-import { API_URL, headers } from "./api-base";
+import { API_URL, fetchWithTimeout, headers } from "./api-base";
 
 export type AnnotationType = "highlight" | "underline" | "strike" | "comment" | "bookmark";
 export type AnnotationColor = "yellow" | "blue" | "green" | "pink" | null;
@@ -27,7 +27,7 @@ export interface AnnotationCreatePayload {
 }
 
 export async function getAnnotations(messageId: number): Promise<Annotation[]> {
-  const res = await fetch(`${API_URL}/annotations/${messageId}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/annotations/${messageId}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch annotations");
   return (await res.json()).annotations;
 }
@@ -35,13 +35,13 @@ export async function getAnnotations(messageId: number): Promise<Annotation[]> {
 /** 一次取多个 message 的标注，返回 { "<messageId>": Annotation[] }。 */
 export async function getAnnotationsBatch(messageIds: number[]): Promise<Record<string, Annotation[]>> {
   if (messageIds.length === 0) return {};
-  const res = await fetch(`${API_URL}/annotations/batch?ids=${messageIds.join(",")}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/annotations/batch?ids=${messageIds.join(",")}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch annotations");
   return res.json();
 }
 
 export async function createAnnotation(payload: AnnotationCreatePayload): Promise<number> {
-  const res = await fetch(`${API_URL}/annotations`, {
+  const res = await fetchWithTimeout(`${API_URL}/annotations`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify(payload),
@@ -51,7 +51,7 @@ export async function createAnnotation(payload: AnnotationCreatePayload): Promis
 }
 
 export async function deleteAnnotation(annoId: number): Promise<void> {
-  const res = await fetch(`${API_URL}/annotations/${annoId}`, {
+  const res = await fetchWithTimeout(`${API_URL}/annotations/${annoId}`, {
     method: "DELETE",
     headers: headers(),
   });
@@ -60,7 +60,7 @@ export async function deleteAnnotation(annoId: number): Promise<void> {
 
 /** 更新标注偏移（正文编辑后按 quote 重定位）。 */
 export async function updateAnnotationOffset(annoId: number, start: number, end: number): Promise<void> {
-  const res = await fetch(`${API_URL}/annotations/${annoId}`, {
+  const res = await fetchWithTimeout(`${API_URL}/annotations/${annoId}`, {
     method: "PATCH",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ start, end }),
