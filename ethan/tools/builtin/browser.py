@@ -850,8 +850,10 @@ class BrowserTabTool(_BrowserToolBase):
                 return json.dumps(await _call("tab_move", {"sessionId": session, "tabId": tab, "index": index},
                                               browser_session_id=session), ensure_ascii=False)
             if action == "organize":
-                if not ops:
-                    return json.dumps({"error": "organize 需要 ops 参数"}, ensure_ascii=False)
+                if ops is None:
+                    return json.dumps({"error": "organize 需要 ops 参数（未传）"}, ensure_ascii=False)
+                if ops == []:
+                    return json.dumps({"error": "organize 的 ops 数组为空，至少需要一个操作"}, ensure_ascii=False)
                 return json.dumps(await _call("tab_organize", {"ops": ops}), ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:

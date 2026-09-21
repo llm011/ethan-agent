@@ -14,7 +14,8 @@ import type {
   BrowserTabOrganizeResult,
   BrowserTabOrganizeApplied,
 } from '../../shared';
-import { createSessionNotFoundError } from './errors';
+import { createSessionNotFoundError, BrowserExtensionRpcError } from './errors';
+import { BROWSER_RPC_ERROR_CODE } from '../../shared';
 import { BrowserSessionStoreTabs } from './store-tabs';
 import { getTabId, toSessionTab } from './utils';
 import { TAB_GROUP_ID_NONE } from './constants';
@@ -174,10 +175,9 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
         }
         if (toClose.length) {
           await removeTabs(toClose);
-          for (const tabId of toClose) {
-            applied.closed.push(tabId);
-            await this.handleTabRemoved(tabId);
-          }
+          applied.closed.push(...toClose);
+          // 批量关闭后只调一次 handleTabRemoved 让 session 账本自愈，避免 N 次全量 reconcile
+          await this.handleTabRemoved(toClose[0]);
         }
       } else if (op.op === 'group') {
         const validTabs: chrome.tabs.Tab[] = [];
@@ -209,12 +209,18 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
         if (op.groupId != null) {
           groupId = op.groupId;
           await groupTabs(tabIds, groupId);
+          if (op.color) {
+            await updateGroupFull(groupId, { color: op.color as chrome.tabGroups.ColorEnum });
+          }
         } else {
           // Search for existing group by title in the target window
           const existing = await queryGroups({ title: op.title, windowId: targetWindowId });
           if (existing.length) {
             groupId = existing[0].id;
             await groupTabs(tabIds, groupId);
+            if (op.color) {
+              await updateGroupFull(groupId, { color: op.color as chrome.tabGroups.ColorEnum });
+            }
           } else {
             groupId = await groupTabs(tabIds);
             await updateGroupFull(groupId, {
@@ -222,9 +228,6 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
               ...(op.color ? { color: op.color as chrome.tabGroups.ColorEnum } : {}),
             });
           }
-        }
-        if (op.color) {
-          await updateGroupFull(groupId, { color: op.color as chrome.tabGroups.ColorEnum });
         }
 
         applied.grouped.push({ title: op.title, groupId, tabs: tabIds });
@@ -250,6 +253,13 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
         let gid: number | undefined = ungroup_op.groupId;
         if (gid == null && ungroup_op.title) {
           const groups = await queryGroups({ title: ungroup_op.title });
+          if (groups.length > 1) {
+            // 多个窗口里存在同名组，无法确定目标，要求用 groupId 精确指定
+            throw new BrowserExtensionRpcError(
+              BROWSER_RPC_ERROR_CODE.invalidParams,
+              `ungroup_all: title "${ungroup_op.title}" matches ${groups.length} groups across windows; use groupId to specify which one`,
+            );
+          }
           gid = groups[0]?.id;
         }
         if (gid == null) continue;
