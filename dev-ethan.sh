@@ -2,6 +2,8 @@
 # 在干净 Docker 环境中测试 ethan（模拟新用户）
 set -e
 
+# dev 专用镜像：在生产镜像基础上装 vim/less/bat/jq/wget/gh 等调试工具，CMD 是 bash
+# （见 deploy/Dockerfile.dev）。生产镜像 deploy/Dockerfile 的 CMD 是 serve，交互体验差。
 IMAGE="ethan-dev"
 DOCKERFILE="deploy/Dockerfile.dev"
 WITH_CONFIG=false
@@ -24,7 +26,7 @@ needs_build() {
   fi
   img_ts=$(docker image inspect "$IMAGE" --format '{{.Created}}' 2>/dev/null)
   img_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${img_ts%%.*}" "+%s" 2>/dev/null || echo 0)
-  for f in "$DOCKERFILE" deploy/Dockerfile pyproject.toml uv.lock; do
+  for f in "$DOCKERFILE" pyproject.toml uv.lock pnpm-lock.yaml; do
     [ -f "$f" ] && [ "$(stat -f %m "$f")" -gt "$img_epoch" ] && return 0
   done
   return 1
@@ -44,7 +46,9 @@ fi
 # 确保本地 ethan/web_dist 存在（volume 挂载会覆盖镜像内产物）
 if [ -n "${ETHAN_PORT:-}" ] && [ ! -d "$(pwd)/ethan/web_dist" ]; then
   echo "📦 本地缺少 ethan/web_dist，从镜像中提取..."
-  docker run --rm -v "$(pwd)/ethan/web_dist_tmp:/out" "$IMAGE"     bash -c "cp -r /app/ethan/web_dist/* /out/ 2>/dev/null || echo 'web_dist not in image'"
+  # 注意用 -v 挂载：镜像里前端产物在 /app/web_dist（ethan/ 之外），由 WEB_DIST_PATH 指过去
+  docker run --rm -v "$(pwd)/ethan/web_dist_tmp:/out" "$IMAGE" \
+    bash -c "cp -r /app/web_dist/. /out/ 2>/dev/null || echo 'web_dist not in image'"
   if [ -d "$(pwd)/ethan/web_dist_tmp" ] && [ "$(ls -A "$(pwd)/ethan/web_dist_tmp" 2>/dev/null)" ]; then
     mv "$(pwd)/ethan/web_dist_tmp" "$(pwd)/ethan/web_dist"
   else

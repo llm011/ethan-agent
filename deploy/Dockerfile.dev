@@ -1,0 +1,96 @@
+# Ethan Agent — 开发/调试镜像（含 Web UI）
+# 在正式镜像基础上增加常用工具（vim、less、ll 等）
+
+# ── Stage 1: 构建 Web UI（静态导出） ──────────────────────────
+# 与 deploy/Dockerfile 保持同一套 workspace 构建方式（本镜像不参与 CI，仅本地调试用）
+FROM node:22-alpine AS web-builder
+
+WORKDIR /build
+# Workspace 模式：根目录安装会自动链接 packages/shared → web/node_modules
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY web/package.json ./web/
+COPY packages/shared/package.json ./packages/shared/
+# 与生产镜像一致固定 pnpm 大版本，避免 latest 漂移（详见 deploy/Dockerfile 注释）
+RUN npm install -g pnpm@11.24.0 && pnpm install --frozen-lockfile --filter web... --filter "@ethan/shared"
+
+COPY web/ ./web/
+COPY packages/shared/ ./packages/shared/
+ENV NEXT_TELEMETRY_DISABLED=1
+# export 模式：产出纯静态文件，由 FastAPI 直接 serve
+ENV NEXT_OUTPUT=export
+# 同生产镜像：pnpm 11 的 runDepsStatusCheck 在 workspace 子目录下会误判依赖过期
+RUN cd web && pnpm --config.verify-deps-before-run=false run build
+
+# ── Stage 2: Python + 调试工具 ────────────────────────────────
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 可选 apt 镜像源（与 deploy/Dockerfile 一致）：国内网络构建时传
+# --build-arg APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+ARG APT_MIRROR=
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+      sed -i "s|deb.debian.org|$APT_MIRROR|g" /etc/apt/sources.list 2>/dev/null || true; \
+    fi
+
+# 系统依赖 + 开发调试工具
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc make \
+    ripgrep fd-find \
+    curl git ca-certificates \
+    vim-tiny less tree bat \
+    jq wget unzip \
+    && ln -s /usr/bin/fdfind /usr/local/bin/fd \
+    && ln -s /usr/bin/batcat /usr/local/bin/bat \
+    && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI（gh）：官方 apt 仓库，自动适配架构（amd64/arm64）
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# shell 便利设置：ll / la / cat 高亮
+RUN echo 'alias ll="ls -alF --color=auto"' >> /root/.bashrc \
+    && echo 'alias la="ls -A --color=auto"' >> /root/.bashrc \
+    && echo 'alias vi="vim.tiny"' >> /root/.bashrc \
+    && echo 'alias vim="vim.tiny"' >> /root/.bashrc \
+    && echo 'alias cat="bat --plain --paging=never 2>/dev/null || command cat"' >> /root/.bashrc \
+    && echo 'export PS1="\[\e[36m\]ethan-dev\[\e[0m\]:\w# "' >> /root/.bashrc
+
+# 安装 uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# 先复制依赖文件，利用 Docker 层缓存
+COPY pyproject.toml uv.lock ./
+
+# 安装 Python 依赖（不安装项目本身）
+RUN uv sync --frozen --no-dev --no-install-project
+
+# 复制源码和元数据文件
+COPY ethan/ ./ethan/
+COPY README.md README_CN.md ./
+
+# 从 Stage 1 拷入 Web UI 静态产物。
+# 放 /app/web_dist（ethan/ 之外），与生产镜像一致：dev-ethan.sh 在 ETHAN_PORT 模式下
+# 会挂载本地 ethan/ 覆盖 /app/ethan，放包内会被挂载盖掉。配合 WEB_DIST_PATH 指过去。
+COPY --from=web-builder /build/web/out ./web_dist
+
+# 安装项目本身（带 lark extra，与生产镜像一致）
+RUN uv sync --frozen --no-dev --extra lark
+
+# venv bin 入 PATH：ethan 命令直接可用
+ENV PATH="/app/.venv/bin:$PATH"
+# 告诉 FastAPI 前端静态文件位置（默认找包内 ethan/web_dist，这里外置了）
+ENV WEB_DIST_PATH=/app/web_dist
+
+VOLUME /root/.ethan
+EXPOSE 8900
+
+CMD ["bash"]
