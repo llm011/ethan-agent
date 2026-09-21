@@ -2,9 +2,10 @@
 # 在干净 Docker 环境中测试 ethan（模拟新用户）
 set -e
 
-# 与 CI / 生产同一份镜像定义（多阶段：Node 编译 web → Python 运行时 serve）
+# dev 专用镜像：在生产镜像基础上装 vim/less/bat/jq/wget/gh 等调试工具，CMD 是 bash
+# （见 deploy/Dockerfile.dev）。生产镜像 deploy/Dockerfile 的 CMD 是 serve，交互体验差。
 IMAGE="ethan-dev"
-DOCKERFILE="deploy/Dockerfile"
+DOCKERFILE="deploy/Dockerfile.dev"
 WITH_CONFIG=false
 VERBOSE=false
 
@@ -46,8 +47,8 @@ fi
 if [ -n "${ETHAN_PORT:-}" ] && [ ! -d "$(pwd)/ethan/web_dist" ]; then
   echo "📦 本地缺少 ethan/web_dist，从镜像中提取..."
   # 注意用 -v 挂载：镜像里前端产物在 /app/web_dist（ethan/ 之外），由 WEB_DIST_PATH 指过去
-  docker run --rm --entrypoint bash -v "$(pwd)/ethan/web_dist_tmp:/out" "$IMAGE" \
-    -c "cp -r /app/web_dist/. /out/ 2>/dev/null || echo 'web_dist not in image'"
+  docker run --rm -v "$(pwd)/ethan/web_dist_tmp:/out" "$IMAGE" \
+    bash -c "cp -r /app/web_dist/. /out/ 2>/dev/null || echo 'web_dist not in image'"
   if [ -d "$(pwd)/ethan/web_dist_tmp" ] && [ "$(ls -A "$(pwd)/ethan/web_dist_tmp" 2>/dev/null)" ]; then
     mv "$(pwd)/ethan/web_dist_tmp" "$(pwd)/ethan/web_dist"
   else

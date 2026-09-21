@@ -104,7 +104,7 @@ python3 ~/.ethan/skills/flomo/flomo.py write --content "快速记一笔 #闪念/
 仅当 `flomo.py` 脚本不可用（文件缺失 / Python 环境异常 / 反复失败）时才走浏览器。
 
 ### 浏览器前置条件
-- Chrome 已安装 ethan 扩展，用 **Web UI Token**（`ethan serve` 启动日志里打印，或 `~/.ethan/config.yaml` 的 `auth_token`）连上服务（默认 8900）。连上后日志显示 `browser ws: extension connected`。
+- Chrome 已安装 ethan 扩展，用 **Web UI Token**（`ethan serve` 启动日志里打印，或 `~/.ethan/config.yaml` 的 `network.auth_token`）连上服务（默认 8900）。连上后日志显示 `browser ws: extension connected`。
 - 本机浏览器已登录 flomo —— 扩展复用你的登录会话，**所有浏览器操作均无需任何 api_key / token**。
 - 若页面跳转到登录页：告知用户在浏览器重新登录 `https://v.flomoapp.com/mine/`，不要用 api_key 兜底。
 
