@@ -170,3 +170,24 @@ flowchart LR
 - `handleTabRemoved(tabId)`(由 `chrome.tabs.onRemoved` 触发)清理 session 内被关闭的 tab。
 
 > 因为状态真源在扩展,ethan 服务端不做镜像;服务端只维护"ethan 会话 ↔ browser session"的归属映射(见[会话/并发/安全](session-security.md))。这一职责切分让服务端无状态、可随时重启,而浏览器状态始终以 Chrome 实际的 TabGroup 为准。
+
+### 6.1 `tabs.organize`:与 session 解耦的 tab 整理
+
+`sessions.*` 管的是「一个 session 一个 TabGroup」,而日常整理 tab(关掉一批、把若干 tab 分进命名组、解散组)跟 session 无关。`tabs.organize` 专做后者,并且**完全不带 session 参数**——它只碰调用方在 `ops` 里点名的 tab:
+
+| op | 语义 |
+|---|---|
+| `close` | 关掉 `tabs`;已消失的 tab 记入 `skipped`,不报错(已是目标状态) |
+| `group` | 把 `tabs` 收进 `title` 指定的组;`groupId` 有就直接用,否则按 title 复用已有组,都没有则新建 |
+| `ungroup` | 把 `tabs` 移出所在组 |
+| `ungroup_all` | 按 `groupId` 或 `title` 整组解散 |
+
+`organize` 建的组**不加** `Ethan · ` 前缀(那是 session 管的组),也不写进 session 账本;关掉 tab 后调 `handleTabRemoved` 让 session 账本自愈。
+
+**整理后自动折叠(默认)**:`params.collapse` 控制本次涉及的 TabGroup 是否折叠。
+
+- `'auto'`(默认,不传即此值):折叠所有本次涉及的组,但**跳过包含当前活跃 tab 的组**——折叠用户正在用的那一组会把它当场收起来,打断操作。跳过的组 id 记入 `applied.collapseSkipped`。
+- `'none'` / `false`:完全不折叠。
+- `true`:强制全折,包括活跃组。
+
+`applied.collapsed` 是实际折叠成功的组 id 列表。折叠用 `chrome.tabGroups.update(groupId, {collapsed: true})`;组在此期间被用户删掉时静默跳过。
