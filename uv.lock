@@ -509,7 +509,7 @@ wheels = [
 
 [[package]]
 name = "ethan-agent"
-version = "0.5.295"
+version = "0.5.296"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
