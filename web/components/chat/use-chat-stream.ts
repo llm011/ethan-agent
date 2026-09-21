@@ -136,7 +136,6 @@ export async function consumeStream(
 
   let _rafId: number | null = null;
   let _flushTimer: ReturnType<typeof setTimeout> | null = null;
-  let _lastFlushAt = 0;
   const buildMsg = (extra?: Partial<Message>): Message => ({
     role: "assistant" as const,
     content: assistantContent,
@@ -168,6 +167,8 @@ export async function consumeStream(
   // 每帧的 markdown 重解析开销随内容增长，是「流式输出时整机发卡」的主因。
   // 人眼对 60fps 与 ~20fps 的逐字输出几乎无感，但渲染次数降到 1/3。
   const FLUSH_INTERVAL_MS = 50;
+  let _lastFlushAt = 0;
+
   const scheduleFlush = () => {
     if (_flushTimer !== null || _rafId !== null) return;
     const elapsed = Date.now() - _lastFlushAt;
@@ -579,7 +580,8 @@ export async function consumeStream(
     }
   }
 
-  cancelScheduledFlush();
+  // 先落定稿再取消：反过来会留下一个「读到旧闭包状态、在定稿之后才执行」的定时 flush，
+  // 把刚写好的定稿覆盖掉（表现为最后一条消息偶尔回退到中途状态）。
   writeMsgs(prev => {
     const msgs = [...prev];
     const last = msgs[msgs.length - 1];
@@ -626,6 +628,7 @@ export async function consumeStream(
       error: lastError || undefined,
     }];
   });
+  cancelScheduledFlush();
   setBgPolling(null);
   setStopping(false);
   setStreaming(false);

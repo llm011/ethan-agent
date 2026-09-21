@@ -665,9 +665,13 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             const fresh = await fetchSessionPage(initialSessionId, { limit: MESSAGE_PAGE_SIZE }).catch(() => null);
             if (cancelled) return;
             if (fresh) {
-              writeSessionCache(initialSessionId, fresh);
+              // 用 merge 而非 writeSessionCache：这只拿到一页，直接覆盖会把全量缓存
+              // 降级成残页（离线打开长会话只剩 30 条，更早历史永久不可达）。
+              mergeSessionPageIntoCache(initialSessionId, fresh);
               const freshMsgs = mapDetailMessages(fresh);
-              setMessages(freshMsgs);
+              // 只替换尾部、保住已翻出来的更早历史（同上：整表替换会丢历史且滚不回来）。
+              setMessages(prev => replaceTailKeepOlder(prev, freshMsgs));
+              setHasOlder(fresh.has_more ?? freshMsgs.length >= MESSAGE_PAGE_SIZE);
               fetchAnnotationsFor(freshMsgs);
             }
           }

@@ -643,7 +643,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             if (cancelled) return;
             if (fresh) {
               const freshMsgs = mapDetailMessages(fresh);
-              setMessages(freshMsgs);
+              // 只替换尾部、保住已翻出来的更早历史：这里拿到的只是一页，
+              // 整表替换会把用户上滚加载过的消息全部丢掉（且 hasOlder 变 false 后
+              // 再也滚不回来）。与其它刷新路径保持一致。
+              setMessages(prev => replaceTailKeepOlder(prev, freshMsgs));
+              setHasOlder(fresh.has_more ?? freshMsgs.length >= MESSAGE_PAGE_SIZE);
               fetchAnnotationsFor(freshMsgs);
             }
           }

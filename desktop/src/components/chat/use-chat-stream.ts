@@ -170,15 +170,7 @@ export async function consumeStream(
   const FLUSH_INTERVAL_MS = 50;
   let _lastFlushAt = 0;
 
-  const scheduleFlush = (opts?: { force?: boolean }) => {
-    // 定稿（done/error/stopped）必须立即落地，不能被节流吞掉
-    if (opts?.force) {
-      if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
-      if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-      _lastFlushAt = Date.now();
-      flushAssistant();
-      return;
-    }
+  const scheduleFlush = () => {
     if (_flushTimer !== null || _rafId !== null) return;
     const elapsed = Date.now() - _lastFlushAt;
     if (elapsed >= FLUSH_INTERVAL_MS) {
@@ -601,7 +593,8 @@ export async function consumeStream(
     }
   }
 
-  cancelScheduledFlush();
+  // 先落定稿再取消：反过来会留下一个「读到旧闭包状态、在定稿之后才执行」的定时 flush，
+  // 把刚写好的定稿覆盖掉（表现为最后一条消息偶尔回退到中途状态）。
   writeMsgs(prev => {
     const msgs = [...prev];
     const last = msgs[msgs.length - 1];
@@ -646,6 +639,7 @@ export async function consumeStream(
       error: lastError || undefined,
     }];
   });
+  cancelScheduledFlush();
   setBgPolling(null);
   setConsentRequest(null);
   setCleanupConfirm(null);
