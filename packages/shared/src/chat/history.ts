@@ -148,9 +148,12 @@ export const MESSAGE_PAGE_SIZE = 30;
  * 规则：
  * - `page` 视为权威的最新一页（含定稿后的真实 id）
  * - `prev` 中比「这一页最旧那条」还旧的，原样带到前面
- * - `prev` 中**完全没有 id** 的（本地乐观插入的 user 消息）保留在最前：它没有 id
- *   可比，按「数字 id 且更旧」过滤会被静默吞掉 —— 表现为刚发出去的消息在回填后
- *   凭空消失。与 prependOlderMessages 的约定一致（无 id 视为本地消息，永远保留）。
+ * - `prev` 中**完全没有 id** 的（本地乐观插入的 user 消息）：只在 `page` 里没有它时
+ *   才保留。它没有 id 可比，无条件丢弃会让刚发出去的消息在回填后凭空消失；但也不能
+ *   无条件保留 —— 调用方通常先用 mergeMissingUserMessages 把它补进了 page 的末尾
+ *   （见 use-chat-stream 的重连分支），此时再保留一份就会**渲染成两个气泡**，且这份
+ *   会被插到更早的历史前面，顺序也是错的。判据用「role + content」而非 id，因为
+ *   这种消息本来就没有 id 可用（与 prependOlderMessages 的约定一致）。
  * - `tmp:` 占位气泡（流式中的 assistant）**不保留**：它的定稿版本一定在 `page` 里
  *   （这正是本函数的使用场景——流结束/重连后拉最新一页核对），留着会变成重复气泡。
  * - 重叠区间用 page 的版本（更权威，且 id 已提升为真实数字）
@@ -163,17 +166,39 @@ export function replaceTailKeepOlder<M extends IdentifiedMessage>(
   if (page.length === 0) return prev;
   const oldestPageId = page.find((m) => typeof m.id === "number")?.id;
   if (typeof oldestPageId !== "number") return page;
+  // page 里已带的内容，用来判断「无 id 的本地消息是不是已经被补进来了」。
+  // 只收无 id 的那部分：有 id 的按 id 判，内容相同的两条有 id 消息（用户连发两次
+  // 同样的 query）不应互相顶掉。
+  // IdentifiedMessage 不保证有 content（各端消息类型不同），按需读、缺失时退回空串。
+  const contentOf = (m: IdentifiedMessage): string => {
+    const c = (m as { content?: unknown }).content;
+    return typeof c === "string" ? c : "";
+  };
+  const pageLocalKeys = new Set(
+    page
+      .filter((m) => m.id == null)
+      .map((m) => `${m.role}\u0000${contentOf(m)}`),
+  );
+
+  // 比 page 更旧的：拼在 page **前面**
   const carried: M[] = [];
+  // 无 id 且 page 里没有的：拼在 page **后面**（它是用户刚发的那条，最新）
+  const localTail: M[] = [];
   for (const m of prev) {
     if (m.id == null) {
-      // 本地乐观插入的消息（没有 id）：page 里不含它，丢了就再也回不来
-      carried.push(m);
+      // 本地乐观插入的消息（没有 id）。调用方一般已经用 mergeMissingUserMessages
+      // 把它补进了 page 末尾，此时 page 里有一份等价的，再留一份就是重复气泡。
+      // 确实不在 page 里（后端没落库）才保留，且必须放**最后** —— 它是用户刚发的
+      // 那条，比 page 里的任何一条都新；拼进 carried 会被排到更早的历史前面。
+      const key = `${m.role}\u0000${contentOf(m)}`;
+      if (!pageLocalKeys.has(key)) localTail.push(m);
       continue;
     }
     if (typeof m.id === "number" && m.id < oldestPageId) carried.push(m);
     // 其余情况（tmp: 占位气泡、比 page 更新的消息）交给 page —— page 是权威的最新一页
   }
-  return carried.length > 0 ? [...carried, ...page] : page;
+  if (carried.length === 0 && localTail.length === 0) return page;
+  return [...carried, ...page, ...localTail];
 }
 
 /**

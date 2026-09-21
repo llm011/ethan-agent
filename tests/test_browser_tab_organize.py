@@ -211,3 +211,22 @@ def test_organize_collapse_auto_string_forwarded(monkeypatch):
 
     _, params = hub.calls[0]
     assert params["collapse"] == "auto"
+
+
+def test_organize_collapse_quoted_bool_forwarded(monkeypatch):
+    """schema 同时声明了 string 类型,客户端可能发 "true"/"false" 字符串。
+
+    工具侧原样透传(不在这里做类型判断),由扩展侧的 normalizeTabOrganizeParams
+    归一成布尔 —— 那一侧同样接受 "true"/"false"（见 browser-extension 的
+    normalize-tabs 单测）。这里只钉住「工具不会把它丢掉或改写成别的值」。
+    """
+    for raw in ("true", "false"):
+        set_session_id("e1")
+        hub = _FakeHub(ORGANIZE_RESULT)
+        _patch(monkeypatch, hub, SessionMap())
+
+        ops = [{"op": "group", "title": "Work", "tabs": [102]}]
+        asyncio.run(BrowserTabTool().run(action="organize", ops=ops, collapse=raw))
+
+        _, params = hub.calls[0]
+        assert params["collapse"] == raw, f"{raw!r} 应原样透传到扩展侧"

@@ -183,7 +183,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
         setProviderForm(providerData);
         setChannels(channelData);
         setModelList(models);
-        setProviderPresets(presetsData.presets);
+        setProviderPresets(presetsData);
         const initial: Record<string, Record<string, string>> = {};
         for (const ch of channelData) initial[ch.id] = { ...ch.config };
         setChannelForms(initial);

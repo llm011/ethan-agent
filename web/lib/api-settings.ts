@@ -69,10 +69,15 @@ export async function updateProviderSettings(patch: ProviderSettings): Promise<v
   });
 }
 
-export async function fetchProviderPresets(): Promise<{ presets: ProviderPreset[] }> {
+export async function fetchProviderPresets(): Promise<ProviderPreset[]> {
   const res = await fetchWithTimeout(`${API_URL}/settings/providers/presets`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch provider presets");
-  return res.json();
+  // 后端返回的是 {"presets": [...]} 这个信封。这里必须拆开再返回：调用方
+  // settings-view.tsx 直接拿结果当数组用（setProviderPresets(...) + .length > 0
+  // 的门禁）。早前这一端原样返回信封，调用方又写的是 presetsData.presets，
+  // 于是拿到 undefined，整个「从预设填充」区块静默不渲染。
+  const data = await res.json();
+  return data.presets;
 }
 
 export async function deleteProvider(key: string): Promise<void> {

@@ -189,5 +189,6 @@ flowchart LR
 - `'auto'`(默认,不传即此值):折叠所有本次涉及的组,但**跳过包含当前活跃 tab 的组**——折叠用户正在用的那一组会把它当场收起来,打断操作。跳过的组 id 记入 `applied.collapseSkipped`。
 - `'none'` / `false`:完全不折叠。
 - `true`:强制全折,包括活跃组。
+- `'true'` / `'false'`(带引号的字符串):等价于布尔 —— 工具的 schema 同时声明了 `string` 类型,按 schema 去掉引号的客户端可能发字符串形式,这里归一成布尔而不是报非法参数。
 
-`applied.collapsed` 是实际折叠成功的组 id 列表。折叠用 `chrome.tabGroups.update(groupId, {collapsed: true})`;组在此期间被用户删掉时静默跳过。
+`applied.collapsed` 是实际折叠成功的组 id 列表。折叠用 `chrome.tabGroups.update(groupId, {collapsed: true})`;组在此期间被用户删掉时静默跳过(既不记 collapsed 也不记 failed)。`chrome.tabGroups.query` 整体失败(API 不可用)时,本次涉及的组全部记入 `applied.collapseFailed`,避免调用方误以为「都折好了」。
