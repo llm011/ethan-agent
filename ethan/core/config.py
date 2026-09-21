@@ -108,6 +108,7 @@ class RoutingConfig(BaseModel):
         "schedule_create", "schedule_list", "schedule_remove", "schedule_pause",
         "decide",  # Adaptive Planning 的决策出口（虚拟工具，agent loop 拦截不执行）
         "ui_card",
+        "browser_client",  # 多浏览器连接时的客户端选择入口，必须随浏览器工具一起广播
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
     # ui_card 纳入 fast 档：短的结构化请求（对比/排行/统计/时间轴等）通常走 fast 档，
     # 若不在此广播，模型连工具都不可见 → A2UI 卡片几乎不触发。纳入后两档都能渲染卡片。
@@ -129,7 +130,7 @@ class RoutingConfig(BaseModel):
         "decide",  # Adaptive Planning 的决策出口（虚拟工具，agent loop 拦截不执行）
         "set_secret", "get_secret", "list_secrets",
         "skill_create", "install_skill",
-        "browser_session", "browser_tab", "browser_page",
+        "browser_session", "browser_tab", "browser_page", "browser_client",
         "ui_card",
         "desktop_notify",  # 桌面通知：高频且明确，full 档直接可见，避免模型在 Docker/无头环境绕路用 shell
         # deliver_file 不进 base_tools：它会把 home 下任意文件推成聊天里的文件卡片（对外
