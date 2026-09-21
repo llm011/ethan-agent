@@ -74,6 +74,15 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
     else zoomOut();
   }, [zoomIn, zoomOut]);
 
+  // 夹取平移量：放大后拖动最多把图拖到边缘，不会整张拖出视野
+  const clampPan = useCallback((x: number, y: number, z: number) => {
+    const maxPan = Math.max(0, (z - 1) * 300);
+    return {
+      x: Math.max(-maxPan, Math.min(maxPan, x)),
+      y: Math.max(-maxPan, Math.min(maxPan, y)),
+    };
+  }, []);
+
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (zoom <= 1) return;
     e.preventDefault();
@@ -85,8 +94,8 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
     if (!dragRef.current) return;
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
-    setPan({ x: dragRef.current.panX + dx, y: dragRef.current.panY + dy });
-  }, []);
+    setPan(clampPan(dragRef.current.panX + dx, dragRef.current.panY + dy, zoom));
+  }, [clampPan, zoom]);
 
   const handlePointerUp = useCallback(() => {
     dragRef.current = null;
@@ -120,7 +129,7 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-none w-screen h-screen p-0 bg-black/95 rounded-none border-none ring-0"
+        className="max-w-none sm:max-w-none w-screen h-screen p-0 gap-0 bg-black/95 rounded-none border-none ring-0"
         onClick={(e) => {
           if (e.target === e.currentTarget) onOpenChange(false);
         }}

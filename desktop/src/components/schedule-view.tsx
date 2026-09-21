@@ -23,7 +23,7 @@ import {
 } from "@ethan/shared/ui/dialog";
 import { Input } from "@ethan/shared/ui/input";
 import { Textarea } from "@ethan/shared/ui/textarea";
-import { MdEditor } from "@/components/md-editor";
+import { MdEditor } from "@ethan/shared/components/md-editor";
 import { HeaderFillet } from "@/components/header-fillet";
 
 // all 模式截断展示的时间窗：今天 + 未来 2 天；更远期的折叠进「还有 N 个…点击展开」

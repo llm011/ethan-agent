@@ -212,8 +212,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
   const preview = usePreview();
   const previewOpen = !!preview.file;
-  const panelWidthRef = useRef(getStoredPanelSize());
+  // useRef 的参数每次渲染都会求值：原先传 getStoredPanelSize() 等于每帧读一次
+  // localStorage（ChatView 流式期间每几十毫秒重渲染一次），纯属浪费。
+  // ref 是拖动过程中的累加基准，初始值要与面板实际宽度一致，否则第一次拖动会跳变；
+  // 这里用已惰性求值过的 state 值同步（只在首帧需要，后续由 handleResizeEnd 维护）。
   const [panelWidth, setPanelWidth] = useState(() => getStoredPanelSize());
+  const panelWidthRef = useRef(panelWidth);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleResize = useCallback((deltaX: number) => {
@@ -656,12 +660,23 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             }, false, resumeAc.signal);
           } else {
             _setStreaming(false);
-            const fresh = await fetchSession(initialSessionId).catch(() => null);
+            // 只取一页：不带 limit 会拉回整个会话历史（含每条 tool_steps 的大字段），
+            // 长会话下这是「点进去要等很久」的主要来源之一。
+            const fresh = await fetchSessionPage(initialSessionId, { limit: MESSAGE_PAGE_SIZE }).catch(() => null);
             if (cancelled) return;
             if (fresh) {
-              writeSessionCache(initialSessionId, fresh);
+              // 用 merge 而非 writeSessionCache：这只拿到一页，直接覆盖会把全量缓存
+              // 降级成残页（离线打开长会话只剩 30 条，更早历史永久不可达）。
+              mergeSessionPageIntoCache(initialSessionId, fresh);
               const freshMsgs = mapDetailMessages(fresh);
-              setMessages(freshMsgs);
+              // 只替换尾部、保住已翻出来的更早历史（同上：整表替换会丢历史且滚不回来）。
+              setMessages(prev => replaceTailKeepOlder(prev, freshMsgs));
+              // 这一页的 has_more 说的是「它的最旧一条之上还有没有」，与本地已加载
+              // 到哪无关：用户可能已上滚翻过好几页（replaceTailKeepOlder 刚把它们保住），
+              // 此时用 has_more=false 覆盖会把 hasOlder 压成 false，用户滚到已加载的
+              // 最旧一条后就再也触发不了继续上滚。所以这条刷新路径只在成功回填到
+              // 「后端确实还有更早」时才把它置 true，绝不用它把 true 压成 false。
+              if (fresh.has_more) setHasOlder(true);
               fetchAnnotationsFor(freshMsgs);
             }
           }

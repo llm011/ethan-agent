@@ -167,12 +167,14 @@ export const markdownComponents: Components = {
 // 标注偏移（基于渲染后纯文本）在两边才能对齐。
 export const MarkdownContent = forwardRef<
   HTMLDivElement,
-  { content: string; className?: string; variant?: "bubble" | "share" }
->(({ content, className, variant = "bubble" }, ref) => {
+  { content: string; className?: string; variant?: "bubble" | "share"; streaming?: boolean }
+>(({ content, className, variant = "bubble", streaming = false }, ref) => {
   // markdown 中 <img> 点击放大所需的内部状态
   const [lightboxImages, setLightboxImages] = useState<LightboxImage[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  // 流式期间用于「延后解析」的 content 快照：见下方 parsed 的说明
+  const [deferredContent, setDeferredContent] = useState(content);
 
   // 合并默认 components 与 img 处理；img 点击打开 Lightbox 显示大图
   const components = useMemo<Components>(() => ({
@@ -195,14 +197,26 @@ export const MarkdownContent = forwardRef<
     },
   }), []);
 
-  // 缓存 markdown 解析结果：content 不变时不重新解析（react-markdown 解析是同步阻塞主线程的昂贵操作）
+  // 流式期间把解析节流到 ~8fps：react-markdown 是同步全文重解析，开销随正文长度增长，
+  // 之前每个刷新帧都重解析一次，长回复时几乎吃满主线程。定稿（streaming=false）时
+  // 立即跟上最新 content，保证最终渲染完全一致。
+  useEffect(() => {
+    if (!streaming) {
+      setDeferredContent(content);
+      return;
+    }
+    const t = setTimeout(() => setDeferredContent(content), 120);
+    return () => clearTimeout(t);
+  }, [content, streaming]);
+
+  // 缓存 markdown 解析结果：解析用的 content 不变时不重新解析（react-markdown 解析是同步阻塞主线程的昂贵操作）
   const parsed = useMemo(
     () => (
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath as never]} components={components}>
-        {fixBold(content)}
+        {fixBold(deferredContent)}
       </ReactMarkdown>
     ),
-    [content, components],
+    [deferredContent, components],
   );
 
   return (

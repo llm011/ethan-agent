@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ModelSelect } from "@ethan/shared/ui/model-select";
 import { uploadFile, type ModeEntry } from "@/lib/api";
 import type { Quote, PendingFile } from "@ethan/shared/chat/types";
-import { MdEditor } from "@/components/md-editor";
+import { MdEditor } from "@ethan/shared/components/md-editor";
 import { QueuedMessages } from "./queued-messages";
 import type { QueuedMessage } from "./use-input-store";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";

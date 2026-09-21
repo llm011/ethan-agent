@@ -135,6 +135,7 @@ export async function consumeStream(
   writeMsgs([...baseMessages, { role: "assistant", content: "", created_at: Date.now() / 1000, model: finalModel, id: placeholderId }]);
 
   let _rafId: number | null = null;
+  let _flushTimer: ReturnType<typeof setTimeout> | null = null;
   const buildMsg = (extra?: Partial<Message>): Message => ({
     role: "assistant" as const,
     content: assistantContent,
@@ -159,12 +160,32 @@ export async function consumeStream(
       return next;
     });
   };
+  // 流式刷新的节流窗口。
+  //
+  // 以前是每个 rAF 刷一次（≈60fps）：每次 setMessages 都会重渲染整个 ChatView
+  // 及其子树（MessageList / markdown 重新解析 / 代码块重新高亮），长消息下
+  // 每帧的 markdown 重解析开销随内容增长，是「流式输出时整机发卡」的主因。
+  // 人眼对 60fps 与 ~20fps 的逐字输出几乎无感，但渲染次数降到 1/3。
+  const FLUSH_INTERVAL_MS = 50;
+  let _lastFlushAt = 0;
+
   const scheduleFlush = () => {
-    if (_rafId !== null) return;
-    _rafId = requestAnimationFrame(() => { _rafId = null; flushAssistant(); });
+    if (_flushTimer !== null || _rafId !== null) return;
+    const elapsed = Date.now() - _lastFlushAt;
+    if (elapsed >= FLUSH_INTERVAL_MS) {
+      _lastFlushAt = Date.now();
+      _rafId = requestAnimationFrame(() => { _rafId = null; flushAssistant(); });
+      return;
+    }
+    _flushTimer = setTimeout(() => {
+      _flushTimer = null;
+      _lastFlushAt = Date.now();
+      flushAssistant();
+    }, FLUSH_INTERVAL_MS - elapsed);
   };
   const cancelScheduledFlush = () => {
     if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
+    if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
   };
 
   try {
@@ -411,7 +432,9 @@ export async function consumeStream(
       return;
     }
     const errMsg = err instanceof Error ? err.message : "";
-    const isNetworkDrop = /load failed|network|connection|SSE connection dropped/i.test(errMsg);
+    // 超时也要走重连：断网时 socket 半死，fetchWithTimeout 会抛「请求超时（Ns）」，
+    // 若不算作掉线就会直接判失败，白白丢掉后面的已生成内容。
+    const isNetworkDrop = /load failed|network|connection|SSE connection dropped|请求超时/i.test(errMsg);
     if (isNetworkDrop && activeSession) {
       // SSE 静默断开 — 尝试重连活跃 run，失败再拉最终结果
       try {
@@ -559,7 +582,8 @@ export async function consumeStream(
     }
   }
 
-  cancelScheduledFlush();
+  // 先落定稿再取消：反过来会留下一个「读到旧闭包状态、在定稿之后才执行」的定时 flush，
+  // 把刚写好的定稿覆盖掉（表现为最后一条消息偶尔回退到中途状态）。
   writeMsgs(prev => {
     const msgs = [...prev];
     const last = msgs[msgs.length - 1];
@@ -606,6 +630,7 @@ export async function consumeStream(
       error: lastError || undefined,
     }];
   });
+  cancelScheduledFlush();
   setBgPolling(null);
   setStopping(false);
   setStreaming(false);

@@ -1,6 +1,6 @@
 /** Chat streaming 相关类型和 API。 */
 
-import { API_URL, headers } from "./api-base";
+import { API_URL, fetchWithTimeout, headers } from "./api-base";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -56,7 +56,7 @@ export async function* resumeFromMessage(
   // 沿用当前窗口选中的模型，避免 resume 回退到默认模型
   const query = model ? `?model=${encodeURIComponent(model)}` : "";
   try {
-    res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/resume/${encodeURIComponent(messageId)}${query}`, {
+    res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/resume/${encodeURIComponent(messageId)}${query}`, {
       method: "POST",
       headers: headers(),
     });
@@ -85,7 +85,7 @@ export async function* streamChat(
   const { quote = null, mode = "", btw = false, review = false, autoConsent = false, signal } = options ?? {};
   let res: Response;
   try {
-    res = await fetch(`${API_URL}/chat`, {
+    res = await fetchWithTimeout(`${API_URL}/chat`, {
       method: "POST",
       headers: headers(),
       signal,
@@ -123,7 +123,7 @@ async function friendlyHttpError(res: Response): Promise<string> {
 /** 重连一个仍在进行的生成：刷新页面后调此函数，回放缓冲 + 继续实时。
  *  无活跃 run 时后端返回 204，这里返回 null，调用方走普通 fetchSession。 */
 export async function streamResume(sessionId: string, signal?: AbortSignal): Promise<AsyncGenerator<StreamChunk> | null> {
-  const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stream`, {
+  const res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stream`, {
     headers: headers(),
     signal,
   });
@@ -133,7 +133,7 @@ export async function streamResume(sessionId: string, signal?: AbortSignal): Pro
 
 /** 停止某 session 进行中的生成；已生成内容会被保存并标记 [已停止]。 */
 export async function stopGeneration(sessionId: string): Promise<{ ok: boolean; stopped: boolean }> {
-  const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stop`, {
+  const res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stop`, {
     method: "POST",
     headers: headers(),
   });
@@ -155,7 +155,7 @@ export async function setAutoConsent(
   sessionId: string,
   enabled: boolean,
 ): Promise<{ ok: boolean; enabled: boolean; applied: boolean; reason?: string }> {
-  const res = await fetch(`${API_URL}/chat/auto-consent`, {
+  const res = await fetchWithTimeout(`${API_URL}/chat/auto-consent`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ session_id: sessionId, enabled }),
@@ -166,7 +166,7 @@ export async function setAutoConsent(
 
 /** 取消单个工具调用（不影响整轮生成）。被取消的工具回灌为「用户已取消」。 */
 export async function cancelToolCall(sessionId: string, toolCallId: string): Promise<{ ok: boolean; cancelled: boolean }> {
-  const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/tool/${encodeURIComponent(toolCallId)}/cancel`, {
+  const res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/tool/${encodeURIComponent(toolCallId)}/cancel`, {
     method: "POST",
     headers: headers(),
   });
@@ -178,7 +178,7 @@ export async function cancelToolCall(sessionId: string, toolCallId: string): Pro
  *  信息会插入到下一轮调模型前的 working 列表末尾（prompt 结尾）。
  *  无活跃 run（已结束）时后端返回 409，这里抛错由调用方提示。 */
 export async function injectMessage(sessionId: string, content: string): Promise<{ ok: boolean; queued: boolean; id?: string }> {
-  const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/inject`, {
+  const res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/inject`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ content }),
@@ -202,7 +202,7 @@ export async function injectMessage(sessionId: string, content: string): Promise
 /** 删除一条尚未被消费的「补充信息」（待处理区点 ×）。
  *  已消费的不受影响（仍在工具时间线的 injected 信息里）。 */
 export async function deleteInjectedMessage(sessionId: string, injId: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API_URL}/chat/${encodeURIComponent(sessionId)}/inject/${encodeURIComponent(injId)}`, {
+  const res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/inject/${encodeURIComponent(injId)}`, {
     method: "DELETE",
     headers: headers(),
   });

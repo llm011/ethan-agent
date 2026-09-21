@@ -243,6 +243,10 @@ export function Sidebar() {
 
   // 本地服务存活状态：单例轮询 /api/health（同时拿 version），与 ChatHeader 共享
   const health = useServerHealth();
+  // 轮询 effect 依赖数组刻意不含 health（否则每次状态变化都重建定时器），
+  // 用 ref 读取最新状态即可。
+  const healthRef = useRef(health);
+  healthRef.current = health;
 
   // 左上角版本号：优先用 Tauri 应用自身版本（来自 tauri.conf.json，与 release tag 同步），
   // 后端版本（health.version）保留给 server-status-badge 的 hover 诊断用。
@@ -263,6 +267,10 @@ export function Sidebar() {
     let timer: ReturnType<typeof setInterval> | null = null;
     const poll = async () => {
       if (sessionSearch.trim() || document.hidden) return;
+      // 服务不可用时不轮询：3s 一次的死连接请求会不断堆积，
+      // 和用户点击会话后那次详情请求抢同一条半死链路，越等越慢。
+      // health 已由单例轮询探活，恢复后这里自然继续。
+      if (healthRef.current.status === "down") return;
       try {
         const data = await fetchPoll(true, true);
         const incoming = data.sessions as SessionInfo[];
@@ -273,7 +281,13 @@ export function Sidebar() {
         });
         markActiveRead(incoming);
         if (data.active_sessions) {
-          setActiveSessions(new Set(data.active_sessions));
+          // 只在集合内容真的变了才换新 Set：否则每 3s 一次无条件换引用，
+          // 会让整个侧栏会话列表跟着重渲染一遍（activeSessions 参与每行渲染）。
+          setActiveSessions(prev => {
+            const next = new Set<string>(data.active_sessions);
+            if (prev.size === next.size && [...next].every(id => prev.has(id))) return prev;
+            return next;
+          });
         }
       } catch {}
     };

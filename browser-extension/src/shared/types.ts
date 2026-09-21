@@ -550,12 +550,29 @@ export type BrowserTabOrganizeOp =
 
 export interface BrowserTabOrganizeParams {
   ops: BrowserTabOrganizeOp[];
+  /**
+   * 整理完成后是否折叠受影响的 TabGroup。默认 'auto'。
+   *
+   * 'auto' 折叠所有本次涉及的组,但**跳过包含当前活跃 tab 的组** ——
+   * 折叠用户正在用的那一组会把它当场收起来,打断操作。
+   * 'none' 完全不折,true/false 为强制全折/全不折。
+   */
+  collapse?: 'auto' | 'none' | boolean;
 }
 
 export interface BrowserTabOrganizeApplied {
   closed: number[];
   grouped: { title: string; groupId: number; tabs: number[] }[];
   ungrouped: number[];
+  /** 实际折叠成功的组。 */
+  collapsed: number[];
+  /**
+   * 有意没折的组，且原因是**可预期的**：'auto' 模式下含活跃 tab。
+   * 与 collapseFailed 分开，调用方才能区分「按设计没折」和「折失败了」。
+   */
+  collapseSkipped: number[];
+  /** 尝试折叠但失败的组（组已消失、tabGroups API 报错）。 */
+  collapseFailed: number[];
 }
 
 export interface BrowserTabOrganizeResult {

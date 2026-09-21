@@ -120,7 +120,11 @@ export function updateGroup(groupId: number, title: string): Promise<void> {
 
 export function updateGroupFull(
   groupId: number,
-  props: { title?: string; color?: chrome.tabGroups.ColorEnum },
+  props: {
+    title?: string;
+    color?: chrome.tabGroups.ColorEnum;
+    collapsed?: boolean;
+  },
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     chrome.tabGroups.update(groupId, props, () => {

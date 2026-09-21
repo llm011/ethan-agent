@@ -32,7 +32,6 @@ import {
   renameSession,
   regenSessionTitle,
   createSession,
-  fetchHealth,
   fetchModes,
   pinSession,
   unpinSession,
@@ -40,6 +39,7 @@ import {
   markSessionRead,
   type ModeEntry,
 } from "@/lib/api";
+import { useServerHealth } from "@/lib/use-server-health";
 import { hasUnread, withReadMark } from "@ethan/shared/lib/unread";
 import { activeSessionIdFromPathname } from "@ethan/shared/lib/routes";
 import { UnreadDot } from "@ethan/shared/components/unread-dot";
@@ -127,7 +127,6 @@ export function Sidebar() {
     return localStorage.getItem("ethan_sidebar_extension_expanded") !== "0";
   });
   const [schedules, setSchedules] = useState<any[]>([]);
-  const [health, setHealth] = useState<{version: string | null; agent_name: string | null}>({version: null, agent_name: null});
   const [modes, setModes] = useState<ModeEntry[]>([]);
   const [lastSeenSchedule, setLastSeenSchedule] = useState(0);
   // 客户端挂载后再读 localStorage，避免 SSR/CSR 初始值不一致导致 hydration mismatch
@@ -245,10 +244,13 @@ export function Sidebar() {
     fetchSchedules().then(setSchedules).catch(() => {});
   }, [sidebarSection]);
 
-  // 获取版本号 + agent_name（挂载时一次）
-  useEffect(() => {
-    fetchHealth().then(setHealth);
-  }, []);
+  // 版本号 / agent_name / 存活状态都由 useServerHealth 单例轮询统一提供，
+  // 不再单独 fetchHealth（重复请求同一个 /health）。
+  const health = useServerHealth();
+  // 下面的轮询 effect 依赖数组刻意不含 health（否则每次状态变化都重建定时器），
+  // 用 ref 读取最新状态即可。
+  const healthRef = useRef(health);
+  healthRef.current = health;
 
   // 获取对话模式表（挂载时一次），用于左栏会话的模式标识
   useEffect(() => {
@@ -260,6 +262,10 @@ export function Sidebar() {
     let timer: ReturnType<typeof setInterval> | null = null;
     const poll = async () => {
       if (sessionSearch.trim() || document.hidden) return;
+      // 服务不可用时不轮询：3s 一次的死连接请求会不断堆积，
+      // 和用户点击会话后那次详情请求抢同一条半死链路，越等越慢。
+      // health 已由单例轮询探活，恢复后这里自然继续。
+      if (healthRef.current.status === "down") return;
       try {
         const data = await fetchPoll(true, true);
         const incoming = data.sessions as SessionInfo[];
@@ -270,7 +276,13 @@ export function Sidebar() {
         });
         markActiveRead(incoming);
         if (data.active_sessions) {
-          setActiveSessions(new Set(data.active_sessions));
+          // 只在集合内容真的变了才换新 Set：否则每 3s 一次无条件换引用，
+          // 会让整个侧栏会话列表跟着重渲染一遍（activeSessions 参与每行渲染）。
+          setActiveSessions(prev => {
+            const next = new Set<string>(data.active_sessions);
+            if (prev.size === next.size && [...next].every(id => prev.has(id))) return prev;
+            return next;
+          });
         }
       } catch {}
     };

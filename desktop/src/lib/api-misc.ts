@@ -1,6 +1,6 @@
 /** 杂项 API（Schedule/BackgroundTasks/Knowledge/Poll/Logs/Skills/Onboarding/Channels/Docs/APIKeys）。 */
 
-import { getApiUrl, headers  } from "./api-base";
+import { fetchWithTimeout, getApiUrl, headers } from "./api-base";
 import { bustCache } from "./local-cache";
 import type { SessionInfo } from "./api-sessions";
 
@@ -24,13 +24,13 @@ export interface ScheduleJob {
 }
 
 export async function fetchSchedules(): Promise<ScheduleJob[]> {
-  const res = await fetch(`${getApiUrl()}/schedule`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(data => data.jobs.map((j: any) => ({ ...j, name: j.title || j.name || j.id })));
 }
 
 export async function deleteSchedule(jobId: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/schedule/${jobId}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/${jobId}`, {
     method: "DELETE",
     headers: headers()
   });
@@ -38,7 +38,7 @@ export async function deleteSchedule(jobId: string): Promise<void> {
 }
 
 export async function patchSchedule(jobId: string, state: "paused" | "active"): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/schedule/${jobId}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/${jobId}`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ state })
@@ -47,7 +47,7 @@ export async function patchSchedule(jobId: string, state: "paused" | "active"): 
 }
 
 export async function renameSchedule(jobId: string, name: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/schedule/${jobId}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/${jobId}`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ title: name })
@@ -56,7 +56,7 @@ export async function renameSchedule(jobId: string, name: string): Promise<void>
 }
 
 export async function updateSchedulePrompt(jobId: string, prompt: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/schedule/${jobId}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/${jobId}`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ prompt })
@@ -65,7 +65,7 @@ export async function updateSchedulePrompt(jobId: string, prompt: string): Promi
 }
 
 export async function updateScheduleCron(jobId: string, cron: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/schedule/${jobId}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/${jobId}`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ cron })
@@ -83,7 +83,7 @@ export interface ScheduleUpdate {
 }
 
 export async function updateSchedule(jobId: string, patch: ScheduleUpdate): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/schedule/${jobId}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/${jobId}`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify(patch)
@@ -95,7 +95,7 @@ export async function updateSchedule(jobId: string, patch: ScheduleUpdate): Prom
 }
 
 export async function triggerSchedule(jobId: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/schedule/${jobId}/trigger`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/${jobId}/trigger`, {
     method: "POST",
     headers: headers(),
   });
@@ -131,13 +131,13 @@ export interface AgendaData {
 }
 
 export async function fetchAgenda(): Promise<AgendaData> {
-  const res = await fetch(`${getApiUrl()}/agenda`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/agenda`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
 
 export async function createAgendaEvent(item: { title: string; when: string; repeat?: AgendaRepeat; weekdays?: number[]; note?: string }): Promise<AgendaEvent> {
-  const res = await fetch(`${getApiUrl()}/agenda`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/agenda`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify(item),
@@ -150,7 +150,7 @@ export async function createAgendaEvent(item: { title: string; when: string; rep
 }
 
 export async function updateAgendaEvent(id: string, patch: Partial<{ title: string; when: string; repeat: AgendaRepeat; weekdays: number[]; note: string; completion: AgendaCompletion }>): Promise<AgendaEvent> {
-  const res = await fetch(`${getApiUrl()}/agenda/${encodeURIComponent(id)}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/agenda/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify(patch),
@@ -163,17 +163,17 @@ export async function updateAgendaEvent(id: string, patch: Partial<{ title: stri
 }
 
 export async function completeAgendaEvent(id: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/agenda/${encodeURIComponent(id)}/complete`, { method: "POST", headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/agenda/${encodeURIComponent(id)}/complete`, { method: "POST", headers: headers() });
   if (!res.ok) throw new Error("Failed");
 }
 
 export async function deleteAgendaEvent(id: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/agenda/${encodeURIComponent(id)}`, { method: "DELETE", headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/agenda/${encodeURIComponent(id)}`, { method: "DELETE", headers: headers() });
   if (!res.ok) throw new Error("Failed");
 }
 
 export async function setAgendaEnabled(enabled: boolean): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/agenda/enabled`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/agenda/enabled`, {
     method: "PUT",
     headers: headers(),
     body: JSON.stringify({ enabled }),
@@ -209,13 +209,13 @@ export interface TimelineStatus {
 }
 
 export async function fetchTimelineStatus(): Promise<TimelineStatus[]> {
-  const res = await fetch(`${getApiUrl()}/schedule/timeline-status`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/timeline-status`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(d => d.timelines);
 }
 
 export async function syncTimelines(): Promise<{ ok: boolean; added: number; removed: number; updated: number; kept: number }> {
-  const res = await fetch(`${getApiUrl()}/schedule/sync-timelines`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/sync-timelines`, {
     method: "POST",
     headers: headers(),
   });
@@ -224,7 +224,7 @@ export async function syncTimelines(): Promise<{ ok: boolean; added: number; rem
 }
 
 export async function timelineLifecycle(timelineId: string, action: "skip_phase" | "advance_phase" | "pause" | "resume" | "cleanup"): Promise<Record<string, any>> {
-  const res = await fetch(`${getApiUrl()}/schedule/timeline/${encodeURIComponent(timelineId)}/${action}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/schedule/timeline/${encodeURIComponent(timelineId)}/${action}`, {
     method: "POST",
     headers: headers(),
   });
@@ -244,13 +244,13 @@ export interface BackgroundTask {
 }
 
 export async function fetchBackgroundTasks(): Promise<BackgroundTask[]> {
-  const res = await fetch(`${getApiUrl()}/background-tasks`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/background-tasks`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(data => data.tasks);
 }
 
 export async function stopBackgroundTask(taskId: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/background-tasks/${encodeURIComponent(taskId)}/stop`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/background-tasks/${encodeURIComponent(taskId)}/stop`, {
     method: "POST",
     headers: headers(),
   });
@@ -269,7 +269,7 @@ export interface KnowledgeItem {
 
 export async function searchKnowledge(q: string, limit = 10, semantic = true): Promise<KnowledgeItem[]> {
   const params = new URLSearchParams({ q, limit: String(limit), semantic: String(semantic) });
-  const res = await fetch(`${getApiUrl()}/knowledge/search?${params}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/knowledge/search?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(d => d.results);
 }
@@ -279,13 +279,13 @@ export async function fetchKnowledge(query?: string, mode: "keyword" | "semantic
   if (query) params.set("q", query);
   if (query && mode !== "keyword") params.set("mode", mode);
   const url = params.toString() ? `${getApiUrl()}/knowledge?${params}` : `${getApiUrl()}/knowledge`;
-  const res = await fetch(url, { headers: headers() });
+  const res = await fetchWithTimeout(url, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(data => data.items);
 }
 
 export async function addKnowledge(item: { title: string; content: string; created_at?: number; tags: string[] }): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/knowledge`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/knowledge`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify(item)
@@ -294,7 +294,7 @@ export async function addKnowledge(item: { title: string; content: string; creat
 }
 
 export async function updateKnowledge(source: string, item: { title: string; content: string; tags: string[] }): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/knowledge/${encodeURIComponent(source)}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/knowledge/${encodeURIComponent(source)}`, {
     method: "PUT",
     headers: headers(),
     body: JSON.stringify(item),
@@ -303,7 +303,7 @@ export async function updateKnowledge(source: string, item: { title: string; con
 }
 
 export async function deleteKnowledge(source: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/knowledge/${encodeURIComponent(source)}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/knowledge/${encodeURIComponent(source)}`, {
     method: "DELETE",
     headers: headers()
   });
@@ -322,7 +322,7 @@ export async function fetchPoll(hideHeartbeat?: boolean, hideScheduled?: boolean
   if (hideHeartbeat) params.set("hide_heartbeat", "true");
   if (hideScheduled) params.set("hide_scheduled", "true");
   const qs = params.toString();
-  const res = await fetch(`${getApiUrl()}/poll${qs ? `?${qs}` : ""}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/poll${qs ? `?${qs}` : ""}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
@@ -332,7 +332,7 @@ export async function fetchPoll(hideHeartbeat?: boolean, hideScheduled?: boolean
 export async function fetchLogs(type: "backend" | "frontend" = "backend", lines: number = 500, q?: string): Promise<string> {
   const params = new URLSearchParams({ type, lines: String(lines) });
   if (q) params.set("q", q);
-  const res = await fetch(`${getApiUrl()}/logs?${params}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/logs?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch logs");
   const data = await res.json();
   return data.content || "";
@@ -348,19 +348,19 @@ export interface SkillInfo {
 }
 
 export async function fetchSkills(): Promise<SkillInfo[]> {
-  const res = await fetch(`${getApiUrl()}/skills`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/skills`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch skills");
   return res.json().then(data => data.skills);
 }
 
 export async function fetchSkill(name: string): Promise<SkillInfo> {
-  const res = await fetch(`${getApiUrl()}/skills/${encodeURIComponent(name)}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/skills/${encodeURIComponent(name)}`, { headers: headers() });
   if (!res.ok) throw new Error("Skill not found");
   return res.json();
 }
 
 export async function saveSkill(skill: SkillInfo): Promise<{ name: string }> {
-  const res = await fetch(`${getApiUrl()}/skills`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/skills`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify(skill)
@@ -370,7 +370,7 @@ export async function saveSkill(skill: SkillInfo): Promise<{ name: string }> {
 }
 
 export async function deleteSkill(name: string): Promise<{ ok: boolean; removed?: string[]; error?: string }> {
-  const res = await fetch(`${getApiUrl()}/skills/${encodeURIComponent(name)}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/skills/${encodeURIComponent(name)}`, {
     method: "DELETE",
     headers: headers(),
   });
@@ -410,13 +410,13 @@ export interface SkillContextResult {
 }
 
 export async function fetchSkillContext(): Promise<SkillContextResult> {
-  const res = await fetch(`${getApiUrl()}/skill-context`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/skill-context`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch skill context");
   return res.json();
 }
 
 export async function updateSkillCategory(skillName: string, category: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/skill-context`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/skill-context`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ skill_name: skillName, category }),
@@ -432,13 +432,13 @@ export interface OnboardingStatus {
 }
 
 export async function fetchOnboardingStatus(): Promise<OnboardingStatus> {
-  const res = await fetch(`${getApiUrl()}/onboarding/status`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/onboarding/status`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch onboarding status");
   return res.json();
 }
 
 export async function completeOnboarding(agent_name: string, user_info: string): Promise<{ ok: boolean; agent_name: string }> {
-  const res = await fetch(`${getApiUrl()}/onboarding/complete`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/onboarding/complete`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ agent_name, user_info }),
@@ -460,13 +460,13 @@ export interface ChannelInfo {
 }
 
 export async function fetchChannels(): Promise<ChannelInfo[]> {
-  const res = await fetch(`${getApiUrl()}/channels`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/channels`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(d => d.channels);
 }
 
 export async function patchChannel(channelId: string, config: Record<string, string>): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/channels`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/channels`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ channel_id: channelId, config }),
@@ -486,13 +486,13 @@ export interface LarkDepsStatus {
 }
 
 export async function fetchLarkDepsStatus(): Promise<LarkDepsStatus> {
-  const res = await fetch(`${getApiUrl()}/channels/lark/deps-status`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/channels/lark/deps-status`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
 
 export async function installLarkDeps(): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/channels/lark/install-deps`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/channels/lark/install-deps`, {
     method: "POST",
     headers: headers(),
   });
@@ -507,18 +507,18 @@ const STATIC_DOCS_BASE = "";
 export interface DocMeta { slug: string; title: string; filename: string; }
 
 export async function fetchDocsList(): Promise<DocMeta[]> {
-  const res = await fetch(`${getApiUrl()}/docs`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/docs`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(d => d.docs);
 }
 
 export async function fetchDoc(slug: string): Promise<{ slug: string; content: string }> {
   if (STATIC_DOCS_BASE) {
-    const res = await fetch(`${STATIC_DOCS_BASE}/${slug}.json`);
+    const res = await fetchWithTimeout(`${STATIC_DOCS_BASE}/${slug}.json`);
     if (!res.ok) throw new Error("Failed");
     return res.json();
   }
-  const res = await fetch(`${getApiUrl()}/docs/${slug}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/docs/${slug}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
@@ -549,13 +549,13 @@ export interface APIKeyCreated extends APIKeyInfo {
 }
 
 export async function fetchAPIKeys(): Promise<APIKeyInfo[]> {
-  const res = await fetch(`${getApiUrl()}/api-keys`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/api-keys`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json().then(d => d.keys);
 }
 
 export async function createAPIKey(name: string): Promise<APIKeyCreated> {
-  const res = await fetch(`${getApiUrl()}/api-keys`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/api-keys`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ name }),
@@ -565,7 +565,7 @@ export async function createAPIKey(name: string): Promise<APIKeyCreated> {
 }
 
 export async function deleteAPIKey(keyId: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/api-keys/${keyId}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/api-keys/${keyId}`, {
     method: "DELETE",
     headers: headers(),
   });

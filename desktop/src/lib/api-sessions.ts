@@ -1,6 +1,6 @@
 /** Session 相关类型和 API。 */
 
-import { getApiUrl, getAuthToken, headers  } from "./api-base";
+import { fetchWithTimeout, getApiUrl, getAuthToken, headers, LLM_TASK_TIMEOUT_MS } from "./api-base";
 import { deleteSessionCache } from "./session-cache";
 
 export interface SessionInfo {
@@ -72,7 +72,7 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
   if (hideBackground) params.set("hide_background", "true");
   if (titlePrefixes) params.set("title_prefixes", titlePrefixes);
   if (hasImages) params.set("has_images", "true");
-  const res = await fetch(`${getApiUrl()}/sessions?${params}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions?${params}`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch sessions");
   const data = await res.json();
   const sessions = data.sessions as SessionInfo[];
@@ -82,7 +82,7 @@ export async function fetchSessions(limit = 50, offset = 0, q?: string, source?:
 
 /** 标记会话已读：未读水位推进到 updated_at（消除红点）。返回是否有实际推进。 */
 export async function markSessionRead(id: string): Promise<boolean> {
-  const res = await fetch(`${getApiUrl()}/sessions/${id}/read`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}/read`, {
     method: "POST",
     headers: headers(),
   });
@@ -92,7 +92,7 @@ export async function markSessionRead(id: string): Promise<boolean> {
 }
 
 export async function renameSession(id: string, title: string): Promise<void> {
-  await fetch(`${getApiUrl()}/sessions/${id}`, {
+  await fetchWithTimeout(`${getApiUrl()}/sessions/${id}`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ title }),
@@ -100,7 +100,7 @@ export async function renameSession(id: string, title: string): Promise<void> {
 }
 
 export async function pinSession(id: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/sessions/${id}/pin`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}/pin`, {
     method: "POST",
     headers: headers(),
   });
@@ -108,7 +108,7 @@ export async function pinSession(id: string): Promise<void> {
 }
 
 export async function unpinSession(id: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/sessions/${id}/pin`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}/pin`, {
     method: "DELETE",
     headers: headers(),
   });
@@ -116,16 +116,17 @@ export async function unpinSession(id: string): Promise<void> {
 }
 
 export async function fetchPinnedSessions(): Promise<SessionInfo[]> {
-  const res = await fetch(`${getApiUrl()}/sessions/pinned`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/pinned`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch pinned sessions");
   const data = await res.json();
   return data.sessions as SessionInfo[];
 }
 
 export async function regenSessionTitle(id: string): Promise<string | null> {
-  const res = await fetch(`${getApiUrl()}/sessions/${id}/regen-title`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}/regen-title`, {
     method: "POST",
     headers: headers(),
+    timeoutMs: LLM_TASK_TIMEOUT_MS,
   });
   if (!res.ok) return null;
   const data = await res.json();
@@ -133,7 +134,7 @@ export async function regenSessionTitle(id: string): Promise<string | null> {
 }
 
 export async function updateSessionMode(id: string, mode: string): Promise<void> {
-  await fetch(`${getApiUrl()}/sessions/${id}`, {
+  await fetchWithTimeout(`${getApiUrl()}/sessions/${id}`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ mode }),
@@ -143,7 +144,7 @@ export async function updateSessionMode(id: string, mode: string): Promise<void>
 /** 将会话绑定的模型写回后端，用于「点击重名候选 → 持久化到当前会话」场景。
  *  PATCH /sessions/{id} 接受 { model }，与 updateSessionMode 复用同一端点。 */
 export async function updateSessionModel(id: string, model: string): Promise<void> {
-  await fetch(`${getApiUrl()}/sessions/${id}`, {
+  await fetchWithTimeout(`${getApiUrl()}/sessions/${id}`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ model }),
@@ -156,7 +157,7 @@ export async function createSession(model?: string, mode?: string, source?: stri
   if (mode) params.append("mode", mode);
   if (source) params.append("source", source);
   const qs = params.toString();
-  const res = await fetch(`${getApiUrl()}/sessions${qs ? `?${qs}` : ""}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions${qs ? `?${qs}` : ""}`, {
     method: "POST",
     headers: headers(),
   });
@@ -181,19 +182,19 @@ export async function fetchSessionPage(
   if (opts.limit != null) params.set("limit", String(opts.limit));
   if (opts.before != null) params.set("before", String(opts.before));
   const qs = params.toString();
-  const res = await fetch(`${getApiUrl()}/sessions/${id}${qs ? `?${qs}` : ""}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}${qs ? `?${qs}` : ""}`, { headers: headers() });
   if (!res.ok) throw new Error("Session not found");
   return res.json();
 }
 
 export async function fetchSession(id: string): Promise<SessionDetail> {
-  const res = await fetch(`${getApiUrl()}/sessions/${id}`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}`, { headers: headers() });
   if (!res.ok) throw new Error("Session not found");
   return res.json();
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  await fetch(`${getApiUrl()}/sessions/${id}`, { method: "DELETE", headers: headers() });
+  await fetchWithTimeout(`${getApiUrl()}/sessions/${id}`, { method: "DELETE", headers: headers() });
   // 清本地会话缓存，避免离线/重开时已删会话仍可读出（与 web 的 IndexedDB 清理对齐）
   deleteSessionCache(id);
 }
@@ -202,7 +203,7 @@ export async function deleteSession(id: string): Promise<void> {
 export async function deleteSessionsBatch(
   ids: string[]
 ): Promise<{ deleted: number; missing: number }> {
-  const res = await fetch(`${getApiUrl()}/sessions/delete-batch`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/delete-batch`, {
     method: "POST",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),
@@ -218,7 +219,7 @@ export async function toggleDoneSessionsBatch(
   ids: string[],
   done: boolean
 ): Promise<{ updated: number; missing: number; skipped: number }> {
-  const res = await fetch(`${getApiUrl()}/sessions/toggle-done-batch`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/toggle-done-batch`, {
     method: "POST",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ ids, done }),
@@ -229,13 +230,13 @@ export async function toggleDoneSessionsBatch(
 }
 
 export async function deleteMessage(sessionId: string, messageId: number): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE", headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}`, { method: "DELETE", headers: headers() });
   if (!res.ok) throw new Error("Delete message failed");
 }
 
 /** 编辑消息正文（阅读模式编辑）。后续对话上下文使用编辑后的版本。 */
 export async function updateMessage(sessionId: string, messageId: number, content: string): Promise<void> {
-  const res = await fetch(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}`, {
     method: "PATCH",
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
@@ -244,7 +245,7 @@ export async function updateMessage(sessionId: string, messageId: number, conten
 }
 
 export async function fetchMessageIntermediate(sessionId: string, messageId: number): Promise<string> {
-  const res = await fetch(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}/intermediate`, { headers: headers() });
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}/intermediate`, { headers: headers() });
   if (!res.ok) {
     let detail = "过程记录加载失败";
     try {
@@ -257,9 +258,10 @@ export async function fetchMessageIntermediate(sessionId: string, messageId: num
 }
 
 export async function compactSession(id: string): Promise<{ ok: boolean; summary: string }> {
-  const res = await fetch(`${getApiUrl()}/sessions/${id}/compact`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}/compact`, {
     method: "POST",
     headers: headers(),
+    timeoutMs: LLM_TASK_TIMEOUT_MS,
   });
   if (!res.ok) throw new Error("Compact failed");
   return res.json();
@@ -267,16 +269,17 @@ export async function compactSession(id: string): Promise<{ ok: boolean; summary
 
 // 生成当前会话的总结（只读，不修改历史）
 export async function summarySession(id: string): Promise<{ ok: boolean; summary: string }> {
-  const res = await fetch(`${getApiUrl()}/sessions/${id}/summary`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}/summary`, {
     method: "POST",
     headers: headers(),
+    timeoutMs: LLM_TASK_TIMEOUT_MS,
   });
   if (!res.ok) throw new Error("Summary failed");
   return res.json();
 }
 
 export async function cleanupTrivialSessions(): Promise<{ deleted: number; deleted_ids: string[] }> {
-  const res = await fetch(`${getApiUrl()}/sessions/cleanup-trivial`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/cleanup-trivial`, {
     method: "POST",
     headers: headers(),
   });
@@ -290,7 +293,7 @@ export async function uploadFile(file: File): Promise<{ path: string; filename: 
   const h: HeadersInit = {};
   const token = getAuthToken();
   if (token) h["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${getApiUrl()}/upload`, { method: "POST", headers: h, body: form });
+  const res = await fetchWithTimeout(`${getApiUrl()}/upload`, { method: "POST", headers: h, body: form });
   if (!res.ok) throw new Error("Upload failed");
   return res.json();
 }
@@ -304,7 +307,7 @@ export async function fetchToolRaw(
 ): Promise<{ args?: string; result?: string }> {
   const params = new URLSearchParams({ index: String(index), field });
   if (toolCallId) params.set("tool_call_id", toolCallId);
-  const res = await fetch(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}/tool-raw?${params}`, {
+  const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${sessionId}/messages/${messageId}/tool-raw?${params}`, {
     headers: headers(),
   });
   if (!res.ok) throw new Error(`Failed to fetch tool raw: ${res.status}`);

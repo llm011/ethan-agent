@@ -26,7 +26,7 @@ import {
 } from "@ethan/shared/ui/dialog";
 import { Input } from "@ethan/shared/ui/input";
 import { Textarea } from "@ethan/shared/ui/textarea";
-import { MdEditor } from "@/components/md-editor";
+import { MdEditor } from "@ethan/shared/components/md-editor";
 
 // all 模式截断展示的时间窗：今天 + 未来 2 天；更远期的折叠进「还有 N 个…点击展开」
 const ALL_VIEW_FUTURE_DAYS = 2;

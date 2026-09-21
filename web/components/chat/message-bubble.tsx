@@ -508,7 +508,7 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 </div>
               </details>
             ) : null}
-            <MarkdownContent ref={contentRef} content={msg.content} />
+            <MarkdownContent ref={contentRef} content={msg.content} streaming={isStreaming && isLast} />
             {msg.cards && msg.cards.length > 0 && (
               <CardRenderer cards={msg.cards} sessionId={sessionId} />
             )}

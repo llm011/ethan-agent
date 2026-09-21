@@ -1,6 +1,6 @@
 /** Settings 相关类型和 API（Agent/Provider/System/Profile/ToolTiers/FastRules）。 */
 
-import { API_URL, headers } from "./api-base";
+import { API_URL, fetchWithTimeout, headers } from "./api-base";
 
 // ── Agent Settings ────────────────────────────────────────────────
 
@@ -22,13 +22,13 @@ export interface AgentSettings {
 }
 
 export async function fetchAgentSettings(): Promise<AgentSettings> {
-  const res = await fetch(`${API_URL}/settings/agent`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/settings/agent`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch settings");
   return res.json();
 }
 
 export async function updateAgentSettings(patch: Partial<AgentSettings>): Promise<void> {
-  await fetch(`${API_URL}/settings/agent`, {
+  await fetchWithTimeout(`${API_URL}/settings/agent`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify(patch),
@@ -56,34 +56,39 @@ export interface ProviderPreset {
 }
 
 export async function fetchProviderSettings(): Promise<ProviderSettings> {
-  const res = await fetch(`${API_URL}/settings/providers`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/settings/providers`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch provider settings");
   return res.json();
 }
 
 export async function updateProviderSettings(patch: ProviderSettings): Promise<void> {
-  await fetch(`${API_URL}/settings/providers`, {
+  await fetchWithTimeout(`${API_URL}/settings/providers`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify(patch),
   });
 }
 
-export async function fetchProviderPresets(): Promise<{ presets: ProviderPreset[] }> {
-  const res = await fetch(`${API_URL}/settings/providers/presets`, { headers: headers() });
+export async function fetchProviderPresets(): Promise<ProviderPreset[]> {
+  const res = await fetchWithTimeout(`${API_URL}/settings/providers/presets`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch provider presets");
-  return res.json();
+  // 后端返回的是 {"presets": [...]} 这个信封。这里必须拆开再返回：调用方
+  // settings-view.tsx 直接拿结果当数组用（setProviderPresets(...) + .length > 0
+  // 的门禁）。早前这一端原样返回信封，调用方又写的是 presetsData.presets，
+  // 于是拿到 undefined，整个「从预设填充」区块静默不渲染。
+  const data = await res.json();
+  return data.presets;
 }
 
 export async function deleteProvider(key: string): Promise<void> {
-  await fetch(`${API_URL}/settings/providers/${encodeURIComponent(key)}`, {
+  await fetchWithTimeout(`${API_URL}/settings/providers/${encodeURIComponent(key)}`, {
     method: "DELETE",
     headers: headers(),
   });
 }
 
 export async function renameProvider(oldKey: string, newKey: string): Promise<void> {
-  const res = await fetch(`${API_URL}/settings/providers/${encodeURIComponent(oldKey)}/rename`, {
+  const res = await fetchWithTimeout(`${API_URL}/settings/providers/${encodeURIComponent(oldKey)}/rename`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ new_key: newKey }),
@@ -103,13 +108,13 @@ export interface SystemSettings {
 }
 
 export async function fetchSystemSettings(): Promise<SystemSettings> {
-  const res = await fetch(`${API_URL}/settings/system`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/settings/system`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch system settings");
   return res.json();
 }
 
 export async function updateSystemSettings(patch: Partial<SystemSettings>): Promise<void> {
-  await fetch(`${API_URL}/settings/system`, {
+  await fetchWithTimeout(`${API_URL}/settings/system`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify(patch),
@@ -119,13 +124,13 @@ export async function updateSystemSettings(patch: Partial<SystemSettings>): Prom
 // ── User Profile (我的画像) ───────────────────────────────────────
 
 export async function fetchUserProfile(): Promise<string> {
-  const res = await fetch(`${API_URL}/settings/profile`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/settings/profile`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch user profile");
   return (await res.json()).content;
 }
 
 export async function updateUserProfile(content: string): Promise<void> {
-  await fetch(`${API_URL}/settings/profile`, {
+  await fetchWithTimeout(`${API_URL}/settings/profile`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify({ content }),
@@ -152,7 +157,7 @@ export interface SystemPromptPreview {
 }
 
 export async function fetchSystemPromptPreview(): Promise<SystemPromptPreview> {
-  const res = await fetch(`${API_URL}/system-prompt-preview`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/system-prompt-preview`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
@@ -185,7 +190,7 @@ export interface ToolTiers {
 }
 
 export async function fetchToolTiers(): Promise<ToolTiers> {
-  const res = await fetch(`${API_URL}/tool-tiers`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/tool-tiers`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
@@ -211,19 +216,19 @@ export interface FastRuleOptions {
 }
 
 export async function fetchFastRules(): Promise<FastRules> {
-  const res = await fetch(`${API_URL}/fast-rules`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/fast-rules`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
 
 export async function fetchFastRuleOptions(): Promise<FastRuleOptions> {
-  const res = await fetch(`${API_URL}/fast-rules/options`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/fast-rules/options`, { headers: headers() });
   if (!res.ok) throw new Error("Failed");
   return res.json();
 }
 
 export async function updateFastRules(patch: Partial<FastRules>): Promise<void> {
-  await fetch(`${API_URL}/fast-rules`, {
+  await fetchWithTimeout(`${API_URL}/fast-rules`, {
     method: "PATCH",
     headers: headers(),
     body: JSON.stringify(patch),
@@ -253,14 +258,14 @@ export interface PluginInfo {
 }
 
 export async function fetchPlugins(): Promise<PluginInfo[]> {
-  const res = await fetch(`${API_URL}/plugins`, { headers: headers() });
+  const res = await fetchWithTimeout(`${API_URL}/plugins`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch plugins");
   const data = await res.json();
   return data.plugins;
 }
 
 export async function addPlugin(name: string, values: Record<string, string> = {}): Promise<{ ok: boolean; message: string; restart_required: boolean }> {
-  const res = await fetch(`${API_URL}/plugins/${encodeURIComponent(name)}`, {
+  const res = await fetchWithTimeout(`${API_URL}/plugins/${encodeURIComponent(name)}`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ values }),
@@ -270,7 +275,7 @@ export async function addPlugin(name: string, values: Record<string, string> = {
 }
 
 export async function removePlugin(name: string): Promise<{ ok: boolean; message: string; restart_required: boolean }> {
-  const res = await fetch(`${API_URL}/plugins/${encodeURIComponent(name)}`, {
+  const res = await fetchWithTimeout(`${API_URL}/plugins/${encodeURIComponent(name)}`, {
     method: "DELETE",
     headers: headers(),
   });
@@ -279,7 +284,7 @@ export async function removePlugin(name: string): Promise<{ ok: boolean; message
 }
 
 export async function restartServer(): Promise<{ ok: boolean; message: string }> {
-  const res = await fetch(`${API_URL}/server/restart`, {
+  const res = await fetchWithTimeout(`${API_URL}/server/restart`, {
     method: "POST",
     headers: headers(),
   });

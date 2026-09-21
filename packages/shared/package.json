@@ -31,10 +31,12 @@
     "class-variance-authority": ">=0.7",
     "@a2ui/web_core": ">=0.10",
     "@a2ui/markdown-it": ">=0.0.4",
-    "mermaid": ">=11"
+    "mermaid": ">=11",
+    "@a2ui/react": ">=0.10"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/react": ">=18"
+    "@a2ui/react": "^0.10.1",
+    "@types/react": ">=18",
+    "typescript": "^5.0.0"
   }
 }

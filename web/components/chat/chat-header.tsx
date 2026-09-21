@@ -9,6 +9,7 @@ import { HeaderFillet } from "@/components/header-fillet";
 import { fmtTokens } from "@/lib/utils";
 import { formatTrigger, formatNextRun } from "@/lib/utils";
 import { ThemePicker } from "./theme-picker";
+import { ServerStatusBadge } from "@/components/server-status-badge";
 import type { Usage } from "@ethan/shared/chat/types";
 
 interface ChatHeaderProps {
@@ -22,11 +23,12 @@ interface ChatHeaderProps {
   onTogglePin?: () => void;
 }
 
-const SOURCE_LABEL: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", heartbeat: "心跳" };
+const SOURCE_LABEL: Record<string, string> = { lark: "飞书", repl: "命令行", web: "Web", desktop: "桌面端", heartbeat: "心跳" };
 const SOURCE_COLOR: Record<string, string> = {
   lark: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
   repl: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
   web: "bg-green-500/15 text-green-600 dark:text-green-400",
+  desktop: "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400",
   heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
 };
 
@@ -138,6 +140,8 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedA
         )}
 
         <ThemePicker className={usage.input > 0 ? "ml-2" : "ml-auto"} />
+        {/* 服务存活指示：与桌面端一致，Web 端此前有这个组件却一直没挂上（死文件）。 */}
+        <ServerStatusBadge variant="compact" className="ml-2" />
       </div>
 
       {scheduleBanner}

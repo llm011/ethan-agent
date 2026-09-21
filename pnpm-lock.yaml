@@ -210,6 +210,9 @@ importers:
         specifier: '>=2'
         version: 3.6.0
     devDependencies:
+      '@a2ui/react':
+        specifier: ^0.10.1
+        version: 0.10.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(zod@3.25.76)
       '@types/react':
         specifier: '>=18'
         version: 19.2.17

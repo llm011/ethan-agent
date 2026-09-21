@@ -216,6 +216,25 @@ describe("replaceTailKeepOlder", () => {
     expect(out.map((x) => x.id)).toEqual([1, 2]);
     expect(out.some((x) => isTempId(x.id))).toBe(false);
   });
+
+  it("无 id 的本地乐观消息，page 里没有时要留住（否则发出去的消息凭空消失）", () => {
+    // 后端没落库这条 query：page 里完全没有它
+    const prev = [m(1, "user"), m(2, "assistant"), { role: "user", content: "b" } as M];
+    const page = [m(1, "user"), m(2, "assistant")];
+    const out = replaceTailKeepOlder(prev, page);
+    expect(out.map((x) => x.content)).toEqual(["c1", "c2", "b"]);
+    expect(out.filter((x) => x.content === "b").length).toBe(1);
+  });
+
+  it("无 id 的本地乐观消息已被调用方补进 page 时不能再来一份（避免两个气泡）", () => {
+    // 调用方先跑 mergeMissingUserMessages：它把缺失的 user 消息**追加到 page 末尾**
+    const prev = [m(1, "user"), m(2, "assistant"), { role: "user", content: "b" } as M];
+    const page = [m(1, "user"), m(2, "assistant"), { role: "user", content: "b" } as M];
+    const out = replaceTailKeepOlder(prev, page);
+    // 一份，且必须在末尾 —— 不能被提到更早的历史前面去
+    expect(out.filter((x) => x.content === "b").length).toBe(1);
+    expect(out.map((x) => x.content)).toEqual(["c1", "c2", "b"]);
+  });
 });
 
 describe("mergeOlderMessagesIntoCache", () => {

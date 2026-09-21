@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, Download } from "lucide-react";
 import { usePreview } from "./preview-context";
-import { getApiUrl, getAuthToken } from "@/lib/api-base";
+import { fetchWithTimeout, getApiUrl, getAuthToken } from "@/lib/api-base";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
 import { MarkdownContent } from "@/components/chat/markdown";
 
@@ -25,7 +25,7 @@ async function fetchFileContent(path: string, sessionId?: string | null): Promis
   const sidQ = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
   const sigQ = s ? `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}` : "";
   const url = `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}${sidQ}${sigQ}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`Failed to fetch file: ${res.status}`);
   return res.text();
 }

@@ -88,8 +88,29 @@ export function normalizeTabOrganizeParams(params: unknown): BrowserTabOrganizeP
   if (!Array.isArray(ops) || ops.length === 0) {
     throw createInvalidParamsError('tabs.organize requires a non-empty ops array');
   }
+  // collapse 接受 boolean 与 "auto"/"none"；另外把 "true"/"false" 这两个字符串也
+  // 归一成布尔 —— 工具的 schema 同时声明了 string 类型，按 schema 去掉引号的客户端
+  // 完全可能发字符串 "true"，早前会被这里判为非法参数（schema 说合法、扩展说非法）。
+  const rawCollapse = p.collapse;
+  let collapse: 'auto' | 'none' | boolean | undefined;
+  if (rawCollapse == null) {
+    collapse = undefined;
+  } else if (typeof rawCollapse === 'boolean') {
+    collapse = rawCollapse;
+  } else if (rawCollapse === 'auto' || rawCollapse === 'none') {
+    collapse = rawCollapse;
+  } else if (rawCollapse === 'true') {
+    collapse = true;
+  } else if (rawCollapse === 'false') {
+    collapse = false;
+  } else {
+    throw createInvalidParamsError(
+      'tabs.organize collapse must be "auto", "none", "true", "false" or a boolean',
+    );
+  }
   return {
     ops: ops.map((raw, i) => normalizeOrganizeOp(raw, i)),
+    ...(collapse !== undefined ? { collapse } : {}),
   };
 }
 
