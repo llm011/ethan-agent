@@ -169,10 +169,12 @@ export async function fetchPinnedSessions(): Promise<SessionInfo[]> {
   return data.sessions as SessionInfo[];
 }
 
-export async function createSession(model?: string, mode?: string): Promise<{ id: string; title: string; model: string; mode?: string }> {
+export async function createSession(model?: string, mode?: string, source?: string): Promise<{ id: string; title: string; model: string; mode?: string; source?: string }> {
   const params = new URLSearchParams();
   if (model) params.append("model", model);
   if (mode) params.append("mode", mode);
+  // source 用于标记会话来源，桌面端传 "desktop"，Web 端留空由后端判定为 web。
+  if (source) params.append("source", source);
   const qs = params.toString();
   const res = await fetchWithTimeout(`${API_URL}/sessions${qs ? `?${qs}` : ""}`, {
     method: "POST",

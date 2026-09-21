@@ -8,12 +8,14 @@ export function MdEditor({
   value = "",
   onChange,
   placeholder,
+  defaultMode = "preview",
 }: {
   value?: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  defaultMode?: "edit" | "preview" | "split";
 }) {
-  const [mode, setMode] = useState<"edit" | "preview" | "split">("preview");
+  const [mode, setMode] = useState<"edit" | "preview" | "split">(defaultMode);
 
   return (
     <div className="flex flex-col flex-1 min-h-[400px] border border-border rounded-lg overflow-hidden">
@@ -32,7 +34,10 @@ export function MdEditor({
             {m === "edit" ? "编辑" : m === "split" ? "分栏" : "预览"}
           </button>
         ))}
-        <span className="ml-auto text-xs text-muted-foreground">{value.length} 字符</span>
+        {/* mr-7：聊天输入框展开态会在容器右上角绝对定位一个「收起」按钮（chat-input.tsx
+            的 Minimize2，top-2 right-2），正好压在这一行右端。留出右边距让开它，
+            否则「N 字符」会和按钮叠在一起。 */}
+        <span className="ml-auto text-xs text-muted-foreground mr-7">{value.length} 字符</span>
       </div>
 
       {/* Editor area */}

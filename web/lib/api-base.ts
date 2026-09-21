@@ -248,3 +248,10 @@ export async function fetchHealth(): Promise<ServerHealthInfo> {
     return { version: null, agent_name: null };
   }
 }
+
+/** 获取后端版本号（与 PyPI 版本一致，来自 ethan.__version__）。
+ * 与桌面端保持同名同签名，供 /version 命令使用。 */
+export async function fetchVersion(): Promise<string | null> {
+  const info = await fetchHealth();
+  return info.version;
+}

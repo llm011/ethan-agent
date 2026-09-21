@@ -7,7 +7,7 @@ import {
   compactSession,
   summarySession,
   stopGeneration,
-  fetchHealth,
+  fetchVersion,
 } from "@/lib/api";
 import type { Message, Usage, Quote, PendingFile } from "@ethan/shared/chat/types";
 
@@ -22,6 +22,8 @@ export interface HandleCommandActions {
   selectedModel: string;
   mode: string;
   activeSession: string | null;
+  /** 路由跳转（Next App Router 的 router.replace）。/new 用它把 URL 切到新会话。 */
+  navigate: (to: string, opts?: { replace?: boolean }) => void;
 }
 
 // 处理 /command 命令。返回 true 表示已拦截处理，调用方无需继续。
@@ -32,7 +34,7 @@ export async function handleCommand(
   const {
     setMessages, setActiveSession, setSessionTitle,
     setSessionUsage, setPendingFiles, setQuote, setStreaming,
-    selectedModel, mode, activeSession,
+    selectedModel, mode, activeSession, navigate,
   } = actions;
 
   const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
@@ -49,7 +51,10 @@ export async function handleCommand(
     setSessionUsage({ input: 0, output: 0, cache: 0 });
     setPendingFiles([]);
     setQuote(null);
-    window.history.replaceState(null, "", `/chat/${s.id}/`);
+    // 用 router 导航而不是 window.history.replaceState —— 后者绕过了 App Router，
+    // 让 router 内部 state 与真实 URL 失步（桌面端踩过同一个坑：之后 navigate("/chat/new")
+    // 会因失步而失效）。replace 语义与原来的 replaceState 等价。
+    navigate(`/chat/${s.id}`, { replace: true });
     return true;
   }
   if (cmd === "help") {
@@ -133,8 +138,8 @@ export async function handleCommand(
     return true;
   }
   if (cmd === "version") {
-    const h = await fetchHealth();
-    pushAssistant(h.version ? `📌 Ethan Agent v${h.version}` : "⚠️ 无法获取版本号。");
+    const v = await fetchVersion();
+    pushAssistant(v ? `📌 Ethan Agent v${v}` : "⚠️ 无法获取版本号。");
     return true;
   }
   // 未知命令

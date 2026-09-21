@@ -910,6 +910,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setMessages, setActiveSession: setActiveSessionBoth, setSessionTitle,
         setSessionUsage, setPendingFiles, setQuote, setStreaming: _setStreaming,
         selectedModel, mode, activeSession,
+        navigate: (to, opts) => (opts?.replace ? router.replace(to) : router.push(to)),
       });
       return;
     }
