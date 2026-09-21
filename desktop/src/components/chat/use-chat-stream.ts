@@ -445,7 +445,9 @@ export async function consumeStream(
       return { failed: false };
     }
     const errMsg = err instanceof Error ? err.message : "";
-    const isNetworkDrop = /load failed|network|connection|SSE connection dropped/i.test(errMsg);
+    // 超时也要走重连：断网时 socket 半死，fetchWithTimeout 会抛「请求超时（Ns）」，
+    // 若不算作掉线就会直接判失败，白白丢掉后面的已生成内容。
+    const isNetworkDrop = /load failed|network|connection|SSE connection dropped|请求超时/i.test(errMsg);
     if (isNetworkDrop && activeSession) {
       // WebKit 网络中断 / SSE 静默断开 — 尝试重连活跃 run，失败再拉最终结果
       try {

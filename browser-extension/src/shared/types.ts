@@ -564,9 +564,15 @@ export interface BrowserTabOrganizeApplied {
   closed: number[];
   grouped: { title: string; groupId: number; tabs: number[] }[];
   ungrouped: number[];
+  /** 实际折叠成功的组。 */
   collapsed: number[];
-  /** 'auto' 模式下因包含活跃 tab 而被跳过折叠的组。 */
+  /**
+   * 有意没折的组，且原因是**可预期的**：'auto' 模式下含活跃 tab。
+   * 与 collapseFailed 分开，调用方才能区分「按设计没折」和「折失败了」。
+   */
   collapseSkipped: number[];
+  /** 尝试折叠但失败的组（组已消失、tabGroups API 报错）。 */
+  collapseFailed: number[];
 }
 
 export interface BrowserTabOrganizeResult {

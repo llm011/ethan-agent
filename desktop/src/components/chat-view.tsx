@@ -671,7 +671,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               const freshMsgs = mapDetailMessages(fresh);
               // 只替换尾部、保住已翻出来的更早历史（同上：整表替换会丢历史且滚不回来）。
               setMessages(prev => replaceTailKeepOlder(prev, freshMsgs));
-              setHasOlder(fresh.has_more ?? freshMsgs.length >= MESSAGE_PAGE_SIZE);
+              // 这一页的 has_more 说的是「它的最旧一条之上还有没有」，与本地已加载
+              // 到哪无关：用户可能已上滚翻过好几页（replaceTailKeepOlder 刚把它们保住），
+              // 此时用 has_more=false 覆盖会把 hasOlder 压成 false，用户滚到已加载的
+              // 最旧一条后就再也触发不了继续上滚。所以这条刷新路径只在成功回填到
+              // 「后端确实还有更早」时才把它置 true，绝不用它把 true 压成 false。
+              if (fresh.has_more) setHasOlder(true);
               fetchAnnotationsFor(freshMsgs);
             }
           }

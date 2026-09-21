@@ -1,6 +1,6 @@
 /** Session 相关类型和 API。 */
 
-import { fetchWithTimeout, getApiUrl, getAuthToken, headers } from "./api-base";
+import { fetchWithTimeout, getApiUrl, getAuthToken, headers, LLM_TASK_TIMEOUT_MS } from "./api-base";
 import { deleteSessionCache } from "./session-cache";
 
 export interface SessionInfo {
@@ -126,6 +126,7 @@ export async function regenSessionTitle(id: string): Promise<string | null> {
   const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}/regen-title`, {
     method: "POST",
     headers: headers(),
+    timeoutMs: LLM_TASK_TIMEOUT_MS,
   });
   if (!res.ok) return null;
   const data = await res.json();
@@ -260,6 +261,7 @@ export async function compactSession(id: string): Promise<{ ok: boolean; summary
   const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}/compact`, {
     method: "POST",
     headers: headers(),
+    timeoutMs: LLM_TASK_TIMEOUT_MS,
   });
   if (!res.ok) throw new Error("Compact failed");
   return res.json();
@@ -270,6 +272,7 @@ export async function summarySession(id: string): Promise<{ ok: boolean; summary
   const res = await fetchWithTimeout(`${getApiUrl()}/sessions/${id}/summary`, {
     method: "POST",
     headers: headers(),
+    timeoutMs: LLM_TASK_TIMEOUT_MS,
   });
   if (!res.ok) throw new Error("Summary failed");
   return res.json();

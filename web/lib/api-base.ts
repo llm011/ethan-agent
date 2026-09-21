@@ -70,25 +70,49 @@ export function assetUrl(relativePath: string): string {
  */
 export const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 
+/** 触发后端跑完整轮 LLM 的接口的超时上限。
+ *
+ * 沉淀（structured consolidation）、做梦 insight、compact、summary、regen-title
+ * 都要等一次真实模型调用返回，实测 20~60s 很常见。给它们远大于默认 15s 的上限，
+ * 否则前端会在服务端仍正常执行时先 abort，报一个假的失败。
+ */
+export const LLM_TASK_TIMEOUT_MS = 10 * 60_000;
+
 export async function fetchWithTimeout(
   input: string,
   init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<Response> {
   const { timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, signal: external, ...rest } = init;
-  if (external) {
-    return fetch(input, { ...rest, signal: external });
-  }
+
+  // 调用方自带 signal（如流式对话的中断）时，两者要**同时**生效而不能二选一：
+  // 早前这里是 `if (external) return fetch(...)`，等于把超时整个丢掉 —— 于是
+  // 最需要超时的流式路径（后端挂掉时 socket 半死）反而会一直悬着。用
+  // AbortSignal.any 组合，谁先触发都生效；兼容不支持 any 的旧环境。
   const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), timeoutMs);
+  const timer = setTimeout(() => ctrl.abort(new Error("timeout")), timeoutMs);
+  let signal: AbortSignal = ctrl.signal;
+  if (external) {
+    // AbortSignal.any 在部分 TS lib / 目标环境里没有类型与实现，做特性探测而非直调。
+    const anyFn = (AbortSignal as unknown as {
+      any?: (signals: AbortSignal[]) => AbortSignal;
+    }).any;
+    signal = typeof anyFn === "function"
+      ? anyFn([external, ctrl.signal])
+      : ctrl.signal;
+  }
+
   try {
-    return await fetch(input, { ...rest, signal: ctrl.signal });
+    return await fetch(input, { ...rest, signal });
   } catch (err) {
+    // 外部主动中断优先按原样抛出（AbortError），交给调用方的 abort 分支处理；
+    // 只有「不是外部中断、而我们自己超时了」才改写成超时错误。
+    if (external?.aborted) throw err;
     if (ctrl.signal.aborted) {
       throw new Error(`请求超时（${Math.round(timeoutMs / 1000)}s）`);
     }
     throw err;
   } finally {
-    clearTimeout(to);
+    clearTimeout(timer);
   }
 }
 

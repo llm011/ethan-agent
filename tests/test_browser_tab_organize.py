@@ -184,3 +184,30 @@ def test_organize_collapse_true_forwarded(monkeypatch):
 
     _, params = hub.calls[0]
     assert params["collapse"] is True
+
+
+
+def test_organize_collapse_string_forwarded(monkeypatch):
+    """'auto'/'none' 字符串要能透传（schema 只声明 boolean 时模型表达不出来）。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "ungroup_all", "title": "Work"}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops, collapse="none"))
+
+    _, params = hub.calls[0]
+    assert params["collapse"] == "none"
+
+
+def test_organize_collapse_auto_string_forwarded(monkeypatch):
+    """显式传 'auto' 与不传等价，但应当原样透传而不是被丢掉。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "ungroup_all", "title": "Work"}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops, collapse="auto"))
+
+    _, params = hub.calls[0]
+    assert params["collapse"] == "auto"

@@ -1,10 +1,7 @@
 /** Memory 相关类型和 API（Facts/Episodes/Procedures/Insights/Signals）。 */
 
-import { API_URL, fetchWithTimeout, headers } from "./api-base";
+import { API_URL, LLM_TASK_TIMEOUT_MS, fetchWithTimeout, headers } from "./api-base";
 
-// 沉淀类接口后端要跑完整轮 LLM（结构化复评 + 做梦 insight）才返回，实测 20~60s 常见，
-// 给一个远大于默认 15s 的上限，避免前端先 abort 误报失败（服务端其实仍在正常执行）。
-const CONSOLIDATION_TIMEOUT_MS = 10 * 60_000;
 
 // ── Facts ─────────────────────────────────────────────────────────
 
@@ -118,7 +115,7 @@ export async function fetchSignalsByDate(dateStr: string): Promise<Signal[]> {
 export async function triggerConsolidation(): Promise<{ ok: boolean; added: number }> {
   // 后端 await 整个「结构化复评 + 做梦 insight」流程才返回，LLM 密集、常需 20~60s，
   // 用默认 15s 会提前 abort（服务端仍在跑），前端误报失败。
-  const res = await fetchWithTimeout(`${API_URL}/memory/consolidate`, { method: "POST", headers: headers(), timeoutMs: CONSOLIDATION_TIMEOUT_MS });
+  const res = await fetchWithTimeout(`${API_URL}/memory/consolidate`, { method: "POST", headers: headers(), timeoutMs: LLM_TASK_TIMEOUT_MS });
   if (!res.ok) throw new Error("Failed to trigger consolidation");
   return res.json();
 }
@@ -351,7 +348,7 @@ export async function triggerStructuredConsolidation(targetDate?: string): Promi
     method: "POST",
     headers: headers(),
     // 同 triggerConsolidation：LLM 密集的长任务，用默认 15s 会误报失败
-    timeoutMs: CONSOLIDATION_TIMEOUT_MS,
+    timeoutMs: LLM_TASK_TIMEOUT_MS,
   });
   if (!res.ok) throw new Error("Failed to trigger structured consolidation");
   return res.json();

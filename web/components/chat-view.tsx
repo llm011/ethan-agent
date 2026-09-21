@@ -647,7 +647,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               // 整表替换会把用户上滚加载过的消息全部丢掉（且 hasOlder 变 false 后
               // 再也滚不回来）。与其它刷新路径保持一致。
               setMessages(prev => replaceTailKeepOlder(prev, freshMsgs));
-              setHasOlder(fresh.has_more ?? freshMsgs.length >= MESSAGE_PAGE_SIZE);
+              // 这一页的 has_more 说的是「它的最旧一条之上还有没有」，与本地已加载
+              // 到哪无关：用户可能已上滚翻过好几页（replaceTailKeepOlder 刚把它们保住），
+              // 此时用 has_more=false 覆盖会把 hasOlder 压成 false，用户滚到已加载的
+              // 最旧一条后就再也触发不了继续上滚。所以这条刷新路径只在成功回填到
+              // 「后端确实还有更早」时才把它置 true，绝不用它把 true 压成 false。
+              if (fresh.has_more) setHasOlder(true);
               fetchAnnotationsFor(freshMsgs);
             }
           }
@@ -698,7 +703,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     if (!prompt) return;
     const timer = setTimeout(() => {
       try { sessionStorage.removeItem("ethan:pending-prompt"); } catch {}
-      if (fromUrl) window.history.replaceState(null, "", window.location.pathname);
+      // 清掉 URL 里的 ?q=。用 router 导航而不是 window.history.replaceState：
+      // 后者只改地址栏、不更新 router，router 的 search 会停在 ?q=...，与真实 URL 失步。
+      // replace:true 不产生额外历史项，行为与原 replaceState 等价。
+      if (fromUrl) router.replace(window.location.pathname, { scroll: false });
       handleSendRef.current(prompt);
     }, 50);
     return () => clearTimeout(timer);
@@ -948,7 +956,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
             renameSession(s.id, pTitle).catch(() => { /* PATCH 失败静默忽略，后端稍后会补 */ });
           }
           justFinishedRef.current = s.id;
-          window.history.replaceState(null, "", `/chat/${s.id}/`);
+          // 用 router 导航（replace 语义）而不是 window.history.replaceState：
+          // App Router 的 history 由 router 内部维护，直接改 URL 会让 router 的
+          // location 与真实 URL 失步 —— 之后点「+」navigate 到它以为自己已在的位置，
+          // 就成了空操作（桌面端踩过同一个坑，见 chat-commands.ts 的 /new）。
+          router.replace(`/chat/${s.id}/`, { scroll: false });
         } catch (e) {
           // createSession 失败（网络抖动 / 后端 500 / model 参数非法）时给用户明确反馈，
           // 否则 Promise rejection 被静默吞掉，用户只看到"点了没反应"

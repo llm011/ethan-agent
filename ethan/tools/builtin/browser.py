@@ -312,7 +312,7 @@ _HINTS = {
     "organize": (
         "已应用 tab 整理操作。applied 字段说明实际执行了什么;skipped 是因 tab 消失等原因跳过的条目。"
         "整理后会自动折叠涉及的 TabGroup(applied.collapsed),但**跳过用户当前活跃的那一组**"
-        "(applied.collapseSkipped)——那一组保持展开。"
+        "(applied.collapseSkipped)——那一组保持展开。折叠失败的组在 applied.collapseFailed。"
     ),
 }
 
@@ -795,18 +795,22 @@ class BrowserTabTool(_BrowserToolBase):
                 "items": {"type": "object"},
             },
             "collapse": {
-                "type": "boolean",
+                # "auto"/"none" 字符串与布尔都合法(扩展侧同样接受),
+                # 只声明 boolean 会让模型无法表达 auto/none 这两个语义。
+                "type": ["boolean", "string"],
+                "enum": [True, False, "auto", "none"],
                 "description": (
                     "organize 专用:整理完成后是否折叠本次涉及的 TabGroup。"
-                    "不传(默认)=自动折叠,但跳过包含当前活跃 tab 的组(不会把用户正在看的那组收起来);"
-                    "false=完全不折叠;true=强制全部折叠(含活跃组)。"
+                    "不传或 'auto'(默认)=自动折叠,但跳过包含当前活跃 tab 的组"
+                    "(不会把用户正在看的那组收起来);"
+                    "'none' 或 false=完全不折叠;true=强制全部折叠(含活跃组)。"
                 ),
             },
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1, ops: list = None, collapse: bool = None) -> str:
+    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1, ops: list = None, collapse: bool | str = None) -> str:
         self._authorize()
         try:
             # 提前拦缺参:只有 user_list/find_tab 是全局的,其余都要 session。
@@ -866,7 +870,8 @@ class BrowserTabTool(_BrowserToolBase):
                     return json.dumps({"error": "organize 需要 ops 参数（未传）"}, ensure_ascii=False)
                 if ops == []:
                     return json.dumps({"error": "organize 的 ops 数组为空，至少需要一个操作"}, ensure_ascii=False)
-                # 不传 collapse → 扩展侧按 'auto' 处理（折叠但跳过活跃组）
+                # 不传 collapse → 扩展侧按 'auto' 处理（折叠但跳过活跃组）。
+                # 传字符串时原样透传（'auto'/'none'），布尔同理。
                 payload = {"ops": ops}
                 if collapse is not None:
                     payload["collapse"] = collapse

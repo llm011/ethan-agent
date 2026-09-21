@@ -161,6 +161,7 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
       ungrouped: [],
       collapsed: [],
       collapseSkipped: [],
+      collapseFailed: [],
     };
     const skipped: { tabId: number; reason: string }[] = [];
     // 本次 touch 到的所有 group，收尾时统一折叠（去重）
@@ -312,13 +313,16 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
     try {
       groups = await queryGroups({});
     } catch {
-      return; // tabGroups API 不可用，静默跳过
+      // tabGroups API 不可用：整批都当作失败记录下来，别让调用方以为「都折好了」
+      for (const groupId of groupIds) applied.collapseFailed.push(groupId);
+      return;
     }
     const byId = new Map(groups.map(g => [g.id, g]));
 
     for (const groupId of groupIds) {
       if (!byId.has(groupId)) {
-        continue; // 组已不存在（tab 被关光 / 被解散）
+        // 组已不存在（tab 被关光 / 被解散）：这不算折叠失败，也不该折 —— 两边都不记。
+        continue;
       }
       if (!force && (await this.groupHasActiveTab(groupId))) {
         applied.collapseSkipped.push(groupId);
@@ -328,7 +332,9 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
         await updateGroupFull(groupId, { collapsed: true });
         applied.collapsed.push(groupId);
       } catch {
-        // 折叠失败不影响整理结果本身，不向上抛
+        // 折叠失败不影响整理结果本身，不向上抛；但要记进 collapseFailed，
+        // 否则调用方无法区分「没折因为活跃组」/「折失败了」。
+        applied.collapseFailed.push(groupId);
       }
     }
   }

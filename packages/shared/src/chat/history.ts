@@ -116,12 +116,18 @@ export function prependOlderMessages<M extends IdentifiedMessage>(current: M[], 
 /**
  * 翻页后判断「还有没有更早的」。
  *
+ * 目前只有单测在用它 —— 两个 chat-view 都内联成 `has_more ?? len >= PAGE` 了。
+ * 保留是因为它把「后端没给 has_more 时怎么兜底」这条规则写清楚了；接入前请先
+ * 读下面的失败分支语义。
+ *
  * 不能只看 `messages.length`：去重会把重叠部分吃掉，若那页全是重复的，
  * 长度没涨但确实已经翻到了会话开头。所以以「这一页是否拿到满页」为准 ——
  * 后端返回不足一页就说明到头了。
  */
 export function hasOlderAfterLoad<M>(older: M[] | null, pageSize: number, serverHint?: boolean): boolean {
-  // 请求失败：保持调用方原有判断，不要因为一次失败就以为到头了
+  // 请求失败（older == null）：返回 false 表示「没拿到更早的历史」。
+  // 注意别把它当成「已经到头」—— 调用方若据此把 hasOlder 置 false，一次网络失败
+  // 就会让用户再也滚不上去。正确做法是失败时保留调用方原有的 hasOlder 判断。
   if (older == null) return false;
   // 后端给了明确答案就以它为准（去重后长度会失真，只有后端知道还剩多少）
   if (serverHint === false) return false;
@@ -142,6 +148,11 @@ export const MESSAGE_PAGE_SIZE = 30;
  * 规则：
  * - `page` 视为权威的最新一页（含定稿后的真实 id）
  * - `prev` 中比「这一页最旧那条」还旧的，原样带到前面
+ * - `prev` 中**完全没有 id** 的（本地乐观插入的 user 消息）保留在最前：它没有 id
+ *   可比，按「数字 id 且更旧」过滤会被静默吞掉 —— 表现为刚发出去的消息在回填后
+ *   凭空消失。与 prependOlderMessages 的约定一致（无 id 视为本地消息，永远保留）。
+ * - `tmp:` 占位气泡（流式中的 assistant）**不保留**：它的定稿版本一定在 `page` 里
+ *   （这正是本函数的使用场景——流结束/重连后拉最新一页核对），留着会变成重复气泡。
  * - 重叠区间用 page 的版本（更权威，且 id 已提升为真实数字）
  * - page 为空时不改动（调用方通常也不该走到这，但保持安全）
  */
@@ -152,9 +163,16 @@ export function replaceTailKeepOlder<M extends IdentifiedMessage>(
   if (page.length === 0) return prev;
   const oldestPageId = page.find((m) => typeof m.id === "number")?.id;
   if (typeof oldestPageId !== "number") return page;
-  const carried = prev.filter(
-    (m) => typeof m.id === "number" && (m.id as number) < oldestPageId,
-  );
+  const carried: M[] = [];
+  for (const m of prev) {
+    if (m.id == null) {
+      // 本地乐观插入的消息（没有 id）：page 里不含它，丢了就再也回不来
+      carried.push(m);
+      continue;
+    }
+    if (typeof m.id === "number" && m.id < oldestPageId) carried.push(m);
+    // 其余情况（tmp: 占位气泡、比 page 更新的消息）交给 page —— page 是权威的最新一页
+  }
   return carried.length > 0 ? [...carried, ...page] : page;
 }
 
