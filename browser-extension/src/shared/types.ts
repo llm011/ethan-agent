@@ -537,6 +537,33 @@ export interface BrowserPageEvalResult extends BrowserPageBaseResult {
   result: unknown;
 }
 
+// ── Tab Organize ──────────────────────────────────────────────────────────────
+
+export type BrowserTabGroupColor =
+  | 'grey' | 'blue' | 'red' | 'yellow' | 'green' | 'pink' | 'purple' | 'cyan' | 'orange';
+
+export type BrowserTabOrganizeOp =
+  | { op: 'close'; tabs: number[] }
+  | { op: 'group'; title: string; tabs: number[]; color?: BrowserTabGroupColor; groupId?: number }
+  | { op: 'ungroup'; tabs: number[] }
+  | { op: 'ungroup_all'; groupId?: number; title?: string };
+
+export interface BrowserTabOrganizeParams {
+  ops: BrowserTabOrganizeOp[];
+}
+
+export interface BrowserTabOrganizeApplied {
+  closed: number[];
+  grouped: { title: string; groupId: number; tabs: number[] }[];
+  ungrouped: number[];
+}
+
+export interface BrowserTabOrganizeResult {
+  organized: true;
+  applied: BrowserTabOrganizeApplied;
+  skipped?: { tabId: number; reason: string }[];
+}
+
 export interface BrowserExtensionTab {
   id?: number;
   windowId?: number;

@@ -249,6 +249,7 @@ async function dispatch(message: unknown): Promise<unknown | null> {
     attachBatchTabs: params => sessionStore.attachBatchTabs(params),
     detachTab: params => sessionStore.detachTab(params),
     moveTab: params => sessionStore.moveTab(params),
+    organizeTabs: params => sessionStore.organizeTabs(params),
     updateSession: params => sessionStore.updateSession(params),
     pageSnapshot: withOverlay('snapshot', params => pageController.snapshot(params)),
     pageClick: withOverlay('click', params => pageController.click(params)),

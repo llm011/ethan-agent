@@ -309,6 +309,7 @@ _HINTS = {
     "input_enter": "在输入框填入文本并回车（组合动作）。ok=true 表示成功。",
     "scroll_find": "边滚动边查找元素。found=true 表示已找到，scrolls 是滚动次数。",
     "click_vlm": "VLM 视觉点击。截图发给多模态 LLM 识别坐标后用 CDP mouse 点击。ok=true 表示成功，screenshot 是截图路径。",
+    "organize": "已应用 tab 整理操作。applied 字段说明实际执行了什么;skipped 是因 tab 消失等原因跳过的条目。",
 }
 
 
@@ -770,24 +771,36 @@ class BrowserTabTool(_BrowserToolBase):
     parameters = {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["open", "list", "user_list", "find_tab", "attach", "attach_batch", "active", "activate", "close", "detach", "move"]},
+            "action": {"type": "string", "enum": ["open", "list", "user_list", "find_tab", "attach", "attach_batch", "active", "activate", "close", "detach", "move", "organize"]},
             "session": {"type": "string", "description": "目标 session_id(除 user_list/find_tab 外必填;从 browser_session(action='list') 取)"},
             "tab": {"type": "string", "description": "目标 tab_id(attach/activate/close;从 browser_tab(action='user_list'/'list') 结果取 tabId)"},
             "url": {"type": "string", "description": "open 时打开的 URL;find_tab 时按域名或 URL 前缀匹配"},
             "active_only": {"type": "boolean", "description": "find_tab 专用:true=只返回用户当前活动的 tab,忽略 url"},
             "tabs": {"type": "array", "items": {"type": "string"}, "description": "attach_batch 时的 tab_id 列表"},
             "index": {"type": "integer", "description": "move 时的目标位置索引"},
+            "ops": {
+                "type": "array",
+                "description": (
+                    "organize 专用。每个元素是一个操作:"
+                    '{"op":"close","tabs":[tabId,...]} 关闭这些 tab;'
+                    '{"op":"group","title":"组名","tabs":[tabId,...],"color":"blue","groupId":N} 把这些 tab 放进指定组(groupId 或 title 找到已有组;都没提供则新建);'
+                    '{"op":"ungroup","tabs":[tabId,...]} 把这些 tab 移出所属组;'
+                    '{"op":"ungroup_all","groupId":N} 解散整个组(groupId 或 title 指定)。'
+                    "op 顺序应用;tab 已消失则跳过(不报错)。"
+                ),
+                "items": {"type": "object"},
+            },
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1) -> str:
+    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1, ops: list = None) -> str:
         self._authorize()
         try:
             # 提前拦缺参:只有 user_list/find_tab 是全局的,其余都要 session。
             # 不拦的话会一路走到 _require_owned_or_recover,过去那里报的是
             # 「不属于当前对话」,把「漏传参数」误导成「归属出错」。
-            if action not in ("user_list", "find_tab") and not session:
+            if action not in ("user_list", "find_tab", "organize") and not session:
                 return self._missing_session(action)
             if action == "open":
                 return json.dumps(await _call("tab_open", {"sessionId": session, "url": url},
@@ -836,6 +849,10 @@ class BrowserTabTool(_BrowserToolBase):
             if action == "move":
                 return json.dumps(await _call("tab_move", {"sessionId": session, "tabId": tab, "index": index},
                                               browser_session_id=session), ensure_ascii=False)
+            if action == "organize":
+                if not ops:
+                    return json.dumps({"error": "organize 需要 ops 参数"}, ensure_ascii=False)
+                return json.dumps(await _call("tab_organize", {"ops": ops}), ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:
             return f"浏览器错误: {e}" + (" (可重新 snapshot 后重试)" if e.retryable else "")

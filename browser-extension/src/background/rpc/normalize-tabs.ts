@@ -6,6 +6,9 @@ import type {
   BrowserTabDetachParams,
   BrowserTabMoveParams,
   BrowserTabOpenParams,
+  BrowserTabOrganizeParams,
+  BrowserTabOrganizeOp,
+  BrowserTabGroupColor,
 } from '../../shared';
 import {
   createInvalidParamsError,
@@ -13,6 +16,7 @@ import {
   normalizeHttpUrl,
   normalizeNumber,
   normalizeSessionId,
+  normalizeTabGroupColor,
   normalizeTabId,
 } from './params-helpers';
 
@@ -76,4 +80,60 @@ export function normalizeTabMoveParams(params: unknown): BrowserTabMoveParams {
     tabId: normalizeTabId(nextParams.tabId, 'tabs.move'),
     index: normalizeNumber(nextParams.index, 'index', 'tabs.move'),
   };
+}
+
+export function normalizeTabOrganizeParams(params: unknown): BrowserTabOrganizeParams {
+  const p = ensureObjectParams(params, 'Invalid tabs.organize params');
+  const ops = p.ops;
+  if (!Array.isArray(ops) || ops.length === 0) {
+    throw createInvalidParamsError('tabs.organize requires a non-empty ops array');
+  }
+  return {
+    ops: ops.map((raw, i) => normalizeOrganizeOp(raw, i)),
+  };
+}
+
+function normalizeOrganizeOp(raw: unknown, idx: number): BrowserTabOrganizeOp {
+  const p = ensureObjectParams(raw, `Invalid tabs.organize ops[${idx}]`);
+  const op = p.op;
+  if (op === 'close') {
+    const tabs = p.tabs;
+    if (!Array.isArray(tabs) || tabs.length === 0) {
+      throw createInvalidParamsError(`tabs.organize ops[${idx}].close requires non-empty tabs`);
+    }
+    return { op: 'close', tabs: tabs.map((id, j) => normalizeTabId(id, `ops[${idx}].tabs[${j}]`)) };
+  }
+  if (op === 'group') {
+    const title = typeof p.title === 'string' ? p.title.trim() : '';
+    if (!title) throw createInvalidParamsError(`tabs.organize ops[${idx}].group requires title`);
+    const tabs = p.tabs;
+    if (!Array.isArray(tabs) || tabs.length === 0) {
+      throw createInvalidParamsError(`tabs.organize ops[${idx}].group requires non-empty tabs`);
+    }
+    return {
+      op: 'group',
+      title,
+      tabs: tabs.map((id, j) => normalizeTabId(id, `ops[${idx}].tabs[${j}]`)),
+      ...(p.color != null ? { color: normalizeTabGroupColor(p.color) as BrowserTabGroupColor } : {}),
+      ...(p.groupId != null ? { groupId: normalizeNumber(p.groupId, 'groupId', `ops[${idx}]`) } : {}),
+    };
+  }
+  if (op === 'ungroup') {
+    const tabs = p.tabs;
+    if (!Array.isArray(tabs) || tabs.length === 0) {
+      throw createInvalidParamsError(`tabs.organize ops[${idx}].ungroup requires non-empty tabs`);
+    }
+    return { op: 'ungroup', tabs: tabs.map((id, j) => normalizeTabId(id, `ops[${idx}].tabs[${j}]`)) };
+  }
+  if (op === 'ungroup_all') {
+    if (p.groupId == null && !p.title) {
+      throw createInvalidParamsError(`tabs.organize ops[${idx}].ungroup_all requires groupId or title`);
+    }
+    return {
+      op: 'ungroup_all',
+      ...(p.groupId != null ? { groupId: normalizeNumber(p.groupId, 'groupId', `ops[${idx}]`) } : {}),
+      ...(typeof p.title === 'string' && p.title.trim() ? { title: p.title.trim() } : {}),
+    };
+  }
+  throw createInvalidParamsError(`tabs.organize ops[${idx}]: unknown op "${String(op)}"`);
 }

@@ -74,6 +74,7 @@ export const BROWSER_RPC_METHODS = {
   tabsAttachBatch: 'tabs.attachBatch',
   tabsDetach: 'tabs.detach',
   tabsMove: 'tabs.move',
+  tabsOrganize: 'tabs.organize',
   pagesSnapshot: 'pages.snapshot',
   pagesClick: 'pages.click',
   pagesFill: 'pages.fill',
