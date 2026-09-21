@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dedupeSurfaceIds } from "@/components/chat/a2ui-dedupe";
+import { dedupeSurfaceIds } from "@ethan/shared/chat/a2ui-dedupe";
 
 type Msg = Record<string, unknown>;
 const create = (sid: string): Msg => ({ createSurface: { surfaceId: sid } });
