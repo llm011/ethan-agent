@@ -148,12 +148,13 @@ export const MESSAGE_PAGE_SIZE = 30;
  * 规则：
  * - `page` 视为权威的最新一页（含定稿后的真实 id）
  * - `prev` 中比「这一页最旧那条」还旧的，原样带到前面
- * - `prev` 中**完全没有 id** 的（本地乐观插入的 user 消息）：只在 `page` 里没有它时
- *   才保留。它没有 id 可比，无条件丢弃会让刚发出去的消息在回填后凭空消失；但也不能
- *   无条件保留 —— 调用方通常先用 mergeMissingUserMessages 把它补进了 page 的末尾
- *   （见 use-chat-stream 的重连分支），此时再保留一份就会**渲染成两个气泡**，且这份
- *   会被插到更早的历史前面，顺序也是错的。判据用「role + content」而非 id，因为
- *   这种消息本来就没有 id 可用（与 prependOlderMessages 的约定一致）。
+ * - `prev` 中**完全没有 id** 的（本地乐观插入的 user 消息）：与 `page` 里同 role+content
+ *   的条目**按出现次数对账**，page 里不够数才保留。它没有 id 可比，无条件丢弃会让
+ *   刚发出去的消息在回填后凭空消失；但也不能无条件保留 —— 后端通常已经落库了同一
+ *   条（那条**有 id**），再留一份就会**渲染成两个气泡**（新会话首轮跑完时最常见的
+ *   现象），且这份会被插到更早的历史前面，顺序也是错的。判据必须是「内容 + 次数」
+ *   而非 id：这种消息没有 id 可用（与 prependOlderMessages 的约定一致），而只看
+ *   page 里「无 id」的部分会漏掉有 id 的后端消息，等于永远匹配不上。
  * - `tmp:` 占位气泡（流式中的 assistant）**不保留**：它的定稿版本一定在 `page` 里
  *   （这正是本函数的使用场景——流结束/重连后拉最新一页核对），留着会变成重复气泡。
  * - 重叠区间用 page 的版本（更权威，且 id 已提升为真实数字）
@@ -167,31 +168,59 @@ export function replaceTailKeepOlder<M extends IdentifiedMessage>(
   const oldestPageId = page.find((m) => typeof m.id === "number")?.id;
   if (typeof oldestPageId !== "number") return page;
   // page 里已带的内容，用来判断「无 id 的本地消息是不是已经被补进来了」。
-  // 只收无 id 的那部分：有 id 的按 id 判，内容相同的两条有 id 消息（用户连发两次
-  // 同样的 query）不应互相顶掉。
-  // IdentifiedMessage 不保证有 content（各端消息类型不同），按需读、缺失时退回空串。
+  //
+  // 用「内容 → 出现次数」而不是「内容集合」：本地那条乐观消息没有 id，只能按内容
+  // 认亲，而**后端落库的那条是有 id 的**。早前只看 page 里「无 id」的部分，就永远
+  // 匹配不上有 id 的后端消息，于是本地那条被当成「后端没落库」保留下来 —— 表现为
+  // 新会话首轮回复结束后，用户的 query 又重复出现一条（刷新就没，因为重新拉的历史
+  // 里只有后端那份）。
+  //
+  // 连发两条完全相同的 query 时，page 里会出现两次同样的 key，计数各自算出 1、2，
+  // 与本地两条一一对应，谁也不会被多留一份。
+  //
+  // 但配额要先扣掉「prev 里有 id、且能在 page 里按 id 对上」的那些 —— 它们本来就由
+  // page 代表，不能占掉留给无 id 乐观消息的名额。否则「连发两条相同的 query、后端只
+  // 落了一条」时，page 的 1 条额度会被有 id 的那条吃掉，无 id 的那条明明没落库却被
+  // 判成「已存在」而不补，用户那条 query 就从界面上消失了。
   const contentOf = (m: IdentifiedMessage): string => {
     const c = (m as { content?: unknown }).content;
     return typeof c === "string" ? c : "";
   };
-  const pageLocalKeys = new Set(
-    page
-      .filter((m) => m.id == null)
-      .map((m) => `${m.role}\u0000${contentOf(m)}`),
-  );
+  const keyOf = (m: IdentifiedMessage): string => `${m.role}\u0000${contentOf(m)}`;
+  const pageIds = new Set(page.map((m) => m.id));
+  const pageContentCounts = new Map<string, number>();
+  for (const m of page) {
+    const key = keyOf(m);
+    pageContentCounts.set(key, (pageContentCounts.get(key) ?? 0) + 1);
+  }
+  // 扣掉 prev 里「有 id 且 page 里也有这个 id」的条数，剩下的才是无 id 消息的额度
+  const claimedByPersisted = new Map<string, number>();
+  for (const m of prev) {
+    if (m.id == null || !pageIds.has(m.id)) continue;
+    const key = keyOf(m);
+    claimedByPersisted.set(key, (claimedByPersisted.get(key) ?? 0) + 1);
+  }
 
   // 比 page 更旧的：拼在 page **前面**
   const carried: M[] = [];
   // 无 id 且 page 里没有的：拼在 page **后面**（它是用户刚发的那条，最新）
   const localTail: M[] = [];
+  // 本地无 id 消息按内容累计到第几次，用来跟 page 的同内容条数对账
+  const localSeen = new Map<string, number>();
   for (const m of prev) {
     if (m.id == null) {
       // 本地乐观插入的消息（没有 id）。调用方一般已经用 mergeMissingUserMessages
       // 把它补进了 page 末尾，此时 page 里有一份等价的，再留一份就是重复气泡。
       // 确实不在 page 里（后端没落库）才保留，且必须放**最后** —— 它是用户刚发的
       // 那条，比 page 里的任何一条都新；拼进 carried 会被排到更早的历史前面。
-      const key = `${m.role}\u0000${contentOf(m)}`;
-      if (!pageLocalKeys.has(key)) localTail.push(m);
+      //
+      // 只对**无 id 的本地消息**做这层对账：有 id 的本地消息按 id 判，内容相同的
+      // 两条有 id 消息（用户连发两次同样的 query）不应互相顶掉。
+      const key = keyOf(m);
+      const nth = (localSeen.get(key) ?? 0) + 1;
+      localSeen.set(key, nth);
+      const quota = (pageContentCounts.get(key) ?? 0) - (claimedByPersisted.get(key) ?? 0);
+      if (quota < nth) localTail.push(m);
       continue;
     }
     if (typeof m.id === "number" && m.id < oldestPageId) carried.push(m);
