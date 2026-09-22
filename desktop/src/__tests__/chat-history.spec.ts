@@ -235,6 +235,33 @@ describe("replaceTailKeepOlder", () => {
     expect(out.filter((x) => x.content === "b").length).toBe(1);
     expect(out.map((x) => x.content)).toEqual(["c1", "c2", "b"]);
   });
+
+  it("后端已落库（有 id）时，本地无 id 的乐观消息不能再来一份", () => {
+    // 新会话首轮的真实路径：本地是「乐观 user（无 id）+ 流式定稿的 assistant」，
+    // 后端拉回来的一页里那条 user **是有 id 的**（走的是落库那条，不是补进去的）。
+    // 按内容对账必须认得出它，否则就渲染成两个一样的气泡。
+    const prev = [
+      { role: "user", content: "hello" } as M,
+      m(2, "assistant", "hi there"),
+    ];
+    const page = [m(1, "user", "hello"), m(2, "assistant", "hi there")];
+    const out = replaceTailKeepOlder(prev, page);
+    expect(out.filter((x) => x.role === "user").length).toBe(1);
+    expect(out.map((x) => x.id)).toEqual([1, 2]);
+  });
+
+  it("连发两条相同 query：page 里落了一条时，只补缺的那条", () => {
+    const prev = [
+      m(1, "user", "same"),
+      m(2, "assistant", "a1"),
+      { role: "user", content: "same" } as M,
+      m(4, "assistant", "a2"),
+    ];
+    // 后端只落了第一条 "same"（第二条没落库）
+    const page = [m(1, "user", "same"), m(2, "assistant", "a1"), m(3, "assistant", "a2")];
+    const out = replaceTailKeepOlder(prev, page);
+    expect(out.filter((x) => x.content === "same").length).toBe(2);
+  });
 });
 
 describe("mergeOlderMessagesIntoCache", () => {
