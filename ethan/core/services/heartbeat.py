@@ -206,11 +206,26 @@ async def _run_heartbeat_md() -> None:
 
         # 按天聚合：一天只开一个 heartbeat session，所有心跳消息都往里面放
         store = await get_session_store()
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        hb_title = f"[心跳] {today_str} · 系统维护"
         hb_session = await store.find_today_session("heartbeat")
         if hb_session is None:
-            hb_session = await store.create(cfg.defaults.model, source="heartbeat")
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            await store.update_title(hb_session.id, f"[心跳] {today_str} · 系统维护")
+            # 标题随创建一起落库（单次事务）。不要 create 后再 update_title：
+            # 两次写之间进程若被打断（线上是 watchdog 每 ~10s 的重启风暴），
+            # 会留下 source=heartbeat 但 title=「新对话」的孤儿会话——
+            # 侧栏「心跳」分组按 title 前缀拉取，它永远落不进心跳 Tab，
+            # 只能掉进「最新对话」，且后续心跳复用同一条、标题再也补不回来。
+            hb_session = await store.create(cfg.defaults.model, source="heartbeat", title=hb_title)
+        elif not hb_session.title.startswith("[心跳]"):
+            # 自愈：当天会话已存在（source 命中）却丢了前缀——历史中断残留，
+            # 或早于本修复创建的孤儿。补回前缀，让它回到心跳分组。
+            # 这条正是 ETHA-13 线上那条 s_20260923_0028_5bc7 的成因。
+            logger.warning(
+                "[Heartbeat] Heal untitled heartbeat session %s (title=%r) -> %r",
+                hb_session.id, hb_session.title, hb_title,
+            )
+            await store.update_title(hb_session.id, hb_title)
+            hb_session.title = hb_title
 
         user_msg = Message(role="user", content=prompt)
         await store.save_message(hb_session.id, user_msg)

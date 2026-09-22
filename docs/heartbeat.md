@@ -62,7 +62,8 @@ _loop():
 1. 读取 heartbeat.md 完整内容作为 prompt（前缀 `[Heartbeat] 正在执行系统心跳任务：heartbeat.md`）
 2. 启动一个完整 Agent 实例（加载全量工具和 Skills）
 3. 用 `stream_chat()` 执行，完整记录工具步骤 / 思考过程 / token usage
-4. **每次心跳创建一个独立的 `[心跳] <时间戳>` Session**（如 `[心跳] 2026-06-21 12:33`），便于在 Web 会话列表里独立查看每次心跳的执行过程
+4. **按天聚合到一个 `[心跳] <日期> · 系统维护` Session**（如 `[心跳] 2026-09-23 · 系统维护`）：当天第一次心跳创建它，之后每次心跳都往同一条里追加，便于在 Web 侧栏的「心跳」分组里集中查看。
+   - 该标题**随创建一起落库**（`create(..., title=...)`），不要写成 create 后再 update_title。`[心跳]` 前缀是侧栏「心跳」分组唯一的识别依据（`/api/sessions?title_prefixes=[心跳]`）：两次写之间进程若被打断，会留下有 `source=heartbeat` 却没有前缀的孤儿会话——它永远落不进心跳 Tab，只能掉进「最新对话」。当天已有会话若因故丢了前缀，再次心跳会自动补回。
 5. 仅当 heartbeat.md 有实质内容时才执行（空文件不产生无意义 Session）
 
 heartbeat.md 是一个普通 Markdown 文件，所有内容都作为 prompt 发给 Agent，包括标题行。示例：
