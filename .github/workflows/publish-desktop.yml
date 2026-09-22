@@ -120,23 +120,26 @@ jobs:
           python3 -c "
           import json, re
           version = '$VERSION'
+          # Windows 默认 cp1252，读不了 UTF-8 中文注释（Cargo.toml 等），必须显式 utf-8
           # tauri.conf.json
           f = 'desktop/src-tauri/tauri.conf.json'
-          d = json.load(open(f))
+          d = json.load(open(f, encoding='utf-8'))
           d['version'] = version
-          json.dump(d, open(f, 'w'), indent=2, ensure_ascii=False)
-          open(f, 'a').write('\n')
+          with open(f, 'w', encoding='utf-8') as fh:
+              json.dump(d, fh, indent=2, ensure_ascii=False)
+              fh.write('\n')
           # package.json
           f = 'desktop/package.json'
-          d = json.load(open(f))
+          d = json.load(open(f, encoding='utf-8'))
           d['version'] = version
-          json.dump(d, open(f, 'w'), indent=2, ensure_ascii=False)
-          open(f, 'a').write('\n')
+          with open(f, 'w', encoding='utf-8') as fh:
+              json.dump(d, fh, indent=2, ensure_ascii=False)
+              fh.write('\n')
           # Cargo.toml：只替换 [package] 下第一行 version（首个出现的 version = \"...\")
           f = 'desktop/src-tauri/Cargo.toml'
-          content = open(f).read()
+          content = open(f, encoding='utf-8').read()
           content = re.sub(r'^version = \".*?\"', f'version = \"{version}\"', content, count=1, flags=re.MULTILINE)
-          open(f, 'w').write(content)
+          open(f, 'w', encoding='utf-8').write(content)
           print('Verified:', [l for l in content.splitlines() if l.startswith('version')][:1])
           "
 
