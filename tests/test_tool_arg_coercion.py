@@ -56,3 +56,21 @@ def test_missing_or_composite_schema_untouched():
     assert _coerce_by_schema("608", {}) == "608"
     assert _coerce_by_schema("608", {"anyOf": [{"type": "integer"}, {"type": "string"}]}) == "608"
     assert _coerce_by_schema("608", None) == "608"
+
+
+def test_union_type_array_does_not_crash():
+    """回归：type 是数组（JSON Schema 联合类型）时不能抛 unhashable。
+
+    browser_tab 的 collapse 声明 `"type": ["boolean", "string"]`，早前
+    `t not in _JSON_TYPES` 对这个 list 求 hash 直接 TypeError，被吞成
+    「Tool error: unhashable type: 'list'」——organize 只要附带 collapse 就整轮失败。
+    """
+    # 联合类型不做猜测，原样返回（与 anyOf/oneOf 同理）
+    assert _coerce_by_schema("auto", {"type": ["boolean", "string"]}) == "auto"
+    assert _coerce_by_schema("true", {"type": ["boolean", "string"]}) == "true"
+    assert _coerce_by_schema("none", {"type": ["boolean", "string"]}) == "none"
+    # 非字符串值本来就不过这里，但也别被联合类型绊倒
+    assert _coerce_by_schema(True, {"type": ["boolean", "string"]}) is True
+    # 空数组 / 未知类型的数组也一样安全
+    assert _coerce_by_schema("x", {"type": []}) == "x"
+    assert _coerce_by_schema("x", {"type": ["nope"]}) == "x"
