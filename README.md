@@ -56,7 +56,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 | Feature | Status | How to enable |
 |---|---|---|
 | 苏念 companion mode | built-in | `/mode 苏念` or toggle in chat UI — nothing to install |
-| Default skills (channels, lark-im, deepwiki, article-to-video, use-browser, agent-browser, dev-browser, …) | built-in | auto-copied on first run |
+| Default skills (channels, lark-im, deepwiki, article-to-video, use-browser, agent-browser, dev-browser, tab-declutter, …) | built-in | auto-copied on first run |
 | Memory system, scheduler, tools, web UI | built-in | works after `ethan serve` starts |
 | Semantic router (smarter skill matching) | built-in | auto-downloads BGE model on first use (~24MB) — `ethan router pull` to pre-fetch |
 | Tavily web search | optional plugin | `ethan plugin add tavily` (needs API key) |
@@ -455,7 +455,7 @@ Agent proactively writes to all layers mid-conversation via `memory_write`, `pro
 
 ## Skills
 
-Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, article-to-video, use-browser, agent-browser, dev-browser) are automatically copied there from the package.
+Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, article-to-video, use-browser, agent-browser, dev-browser, tab-declutter, …) are automatically copied there from the package.
 
 Both directory format (`<name>/SKILL.md` + `references/`) and legacy single-file `.md` format are supported. When a directory-format skill is matched, its `references/*.md` filenames plus a one-line summary are listed in the injected context so the model knows which detail docs exist — use `skill_read(name=..., file="references/<name>.md")` to pull the full content on demand (pull-based, not bulk-injected).
 

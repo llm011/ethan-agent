@@ -270,65 +270,19 @@ browser_tab(action="close", session=SID, tab=TAB_ID)
 
 ### Tab 整理（批量分组/移出/排序/清理）
 
-**核心原则：整理 ≠ 关闭。** 用户要求"整理 tab"时，目标是把散乱的标签归类分组，而不是关掉它们。
+**这一节只管「单个 tab 的常规操作」**（open / list / activate / close / move / detach）。**批量整理、清无用、按业务主题分组、解散组，统一走 `tab-declutter` 技能**，不要在本节自己发挥一套规则——两套规则会打架。
 
-#### 绝对禁止
+两条硬约束仍然适用：
 
-- **❌ 不要关闭已创建的 tab group（session）** —— 分组是整理的最终产出，不是临时容器。创建的分组必须保留给用户
-- **❌ 不要关闭用户正在浏览的有内容的标签** —— 除非明确属于下面"可以关闭"的类别
-- **❌ 不要用 `browser_page(action="eval")` 调用 `chrome.tabs.*` / `chrome.tabGroups.*` API** —— 内容脚本无权调用这些扩展 API，必定失败。标签管理只通过 `browser_tab` 和 `browser_session` 工具完成
-- **❌ 不要绕弯路** —— 不要 find_tools、不要找其他技能/脚本，直接用 `browser_tab` + `browser_session`
-- **❌ 不要创建"临时 session"整理完后关掉** —— session 就是 Chrome Tab Group，创建即分组，整理完保持打开
+- **❌ 不要用 `browser_page(action="eval")` 调用 `chrome.tabs.*` / `chrome.tabGroups.*` API** —— 内容脚本无权调用这些扩展 API，必定失败。标签管理只通过 `browser_tab` / `browser_session` / `browser_tab(action="organize")` 完成
+- **❌ 不要绕弯路** —— 不要 find_tools、不要找其他技能/脚本，直接用 `browser_tab`（+ 需要时的 `browser_session`）
 
-#### 可以关闭的标签（清理规则）
-
-只有以下类型的标签可以关闭：
-1. **完全重复的标签**：URL 完全相同的多个 tab，只保留一个
-2. **明显无用的空白页**：如 `chrome://newtab`、空白的搜索引擎首页（百度/Google 首页但没有搜索内容）
-3. **用户明确要求关闭的标签**
-
-其他所有标签都应保留并归入合适的分组。
-
-#### 正确操作流程
+小范围微调（把某个 tab 挪个位置、从组里摘出来）可以继续用：
 
 ```
-# 1. 获取所有 tab（包括已分组和未分组的）
-browser_tab(action="list")        # 已有 session 管理的 tab
-browser_tab(action="user_list")   # 未分组的 tab
-
-# 2. 根据 URL/title 语义分类，规划分组方案（在脑中完成，不要调工具）
-
-# 3. 创建分组（session = Chrome Tab Group，创建后永久保留）
-browser_session(action="create", title="分组名", color="blue")
-
-# 4. 批量归入（用 attach_batch 一次性操作，效率最高）
-browser_tab(action="attach_batch", session=SID, tabs=[TAB_ID1, TAB_ID2, TAB_ID3])
-
-# 5. 仅关闭重复/无用 tab（严格按清理规则）
-browser_tab(action="close", session=SID, tab=TAB_ID)
-
-# 6. 微调：移动 tab 位置、在分组间转移
 browser_tab(action="move", session=SID, tab=TAB_ID, index=0)
 browser_tab(action="detach", session=SID, tab=TAB_ID)  # 移出分组
 ```
-
-#### 效率要求
-
-- **用 `attach_batch` 批量操作**，不要一个个 tab 逐个 attach
-- **先规划再执行**：看完所有 tab 后一次性规划分组方案，然后按组批量操作
-- 分组颜色搭配合理，不同类别用不同颜色区分
-
-#### 分组建议策略
-
-根据 tab 的 URL 和标题自动推断类别，常见分组：
-- 工作文档（飞书/Google Docs/Notion 等）
-- 代码相关（GitHub/GitLab/代码平台）
-- 监控数据（Grafana/APM/数据看板）
-- 沟通协作（邮件/IM/会议）
-- 学习参考（技术博客/文档/Stack Overflow）
-- 生活娱乐（购物/视频/社交）
-
-不必强行覆盖所有类别，根据实际 tab 内容灵活分组。
 
 ### 更新 Session（分组颜色/标题）
 

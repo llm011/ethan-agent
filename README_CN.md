@@ -54,7 +54,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 | 功能 | 状态 | 启用方式 |
 |---|---|---|
 | 苏念陪伴模式 | 内置 | `/mode 苏念` 或聊天界面切换——无需安装 |
-| 默认技能（channels、lark-im、deepwiki、article-to-video、use-browser、agent-browser、dev-browser 等） | 内置 | 首次运行自动复制 |
+| 默认技能（channels、lark-im、deepwiki、article-to-video、use-browser、agent-browser、dev-browser、tab-declutter 等） | 内置 | 首次运行自动复制 |
 | 记忆系统、定时任务、工具、Web UI | 内置 | `ethan serve` 启动后即用 |
 | 语义路由器（更聪明的技能匹配） | 内置 | 首次使用自动下载 BGE 模型（~24MB）——`ethan router pull` 可预拉取 |
 | Tavily 网页搜索 | 可选插件 | `ethan plugin add tavily`（需要 API Key） |
@@ -443,7 +443,7 @@ Agent 通过 `memory_write`、`procedure_write`、`profile_update` 工具在对�
 
 ## Skill 技能系统
 
-Skill 从 `~/.ethan/skills/` 加载。首次运行时，包内默认技能（channels、deepwiki、lark-im、lark-shared、skills-manager、article-to-video、use-browser、agent-browser、dev-browser）会自动复制到该目录。
+Skill 从 `~/.ethan/skills/` 加载。首次运行时，包内默认技能（channels、deepwiki、lark-im、lark-shared、skills-manager、article-to-video、use-browser、agent-browser、dev-browser、tab-declutter 等）会自动复制到该目录。
 
 支持目录格式（`<name>/SKILL.md` + `references/` 子目录）和旧版单文件 `.md` 格式。命中目录格式 skill 时，注入的 context 会附上 `references/*.md` 的文件名 + 一行摘要清单，让模型知道有哪些细节文档可查——再用 `skill_read(name=..., file="references/<name>.md")` 按需拉具体内容（pull-based，不全量灌入正文）。
 
