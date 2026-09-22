@@ -28,6 +28,7 @@ import { FastRulesTab } from "./settings/fast-rules-tab";
 import { PluginsTab } from "./settings/plugins-tab";
 import { ToolTiersView } from "./tool-tiers-view";
 import { AboutTab } from "./settings/about-tab";
+import { getServerUrl } from "@/lib/api-base";
 
 interface SettingsViewProps {
   models: { id: string; description: string }[];
@@ -138,10 +139,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
   const [apiKeyCreating, setApiKeyCreating] = useState(false);
   const [apiKeyJustCreated, setApiKeyJustCreated] = useState<APIKeyCreated | null>(null);
 
-  const [serverUrl, setServerUrl] = useState(() => {
-    const raw = localStorage.getItem("ethan_api_url") || "http://127.0.0.1:8900";
-    return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
-  });
+  const [serverUrl, setServerUrl] = useState(() => getServerUrl());
   const [serverToken, setServerToken] = useState(() => localStorage.getItem("ethan_token") || "");
 
   const [countdownMinutes, setCountdownMinutes] = useState(() => localStorage.getItem("countdown_minutes") || "25");
@@ -466,7 +464,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
                           import("@/lib/api-base").then(m => m.setApiUrl(serverUrl));
                           import("@/lib/desktop-ws").then(m => m.reconnectDesktopWebSocket());
                         }}
-                        placeholder="http://127.0.0.1:8900"
+                        placeholder="http://<host>:<port>"
                       />
                       <p className="text-xs text-muted-foreground">Server 后端地址（不含 /api），修改后自动重连</p>
                     </div>

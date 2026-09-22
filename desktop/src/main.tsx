@@ -5,6 +5,7 @@ import "./styles.css";
 import { isExternalUrl, openUrl } from "@/lib/external-link";
 import { normalizeThemeId, applyThemeClass } from "@/components/chat/themes";
 import { initDesktopWebSocket } from "@/lib/desktop-ws";
+import { initServerUrl } from "@/lib/server-url";
 
 // 启动时同步主题 class 到 <html>，避免 React mount 前的首帧走 :root 默认值
 // 造成主题切换前后的视觉漂移。必须在 createRoot 之前执行，确保首屏 paint 时
@@ -32,13 +33,18 @@ document.addEventListener("click", (e) => {
   openUrl(href);
 }, true);
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+// URL 初始化完成后才 mount：AuthProvider 的首个请求和 WebSocket 都依赖它。
+void (async () => {
+  await initServerUrl();
 
-// 初始化桌面端 WebSocket 长连接（仅主窗口，避免 countdown 窗口重复连接）
-if (!window.location.hash.includes("/countdown")) {
-  initDesktopWebSocket();
-}
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+
+  // 初始化桌面端 WebSocket 长连接（仅主窗口，避免 countdown 窗口重复连接）
+  if (!window.location.hash.includes("/countdown")) {
+    initDesktopWebSocket();
+  }
+})();
