@@ -9,15 +9,19 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "devtools"] }
-tauri-plugin-shell = "2"
-tauri-plugin-updater = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-process = "2"
-tauri-plugin-window-state = "2"
-tauri-plugin-single-instance = "2"
-tauri-plugin-deep-link = "2"
-tauri-plugin-notification = "2"
-tauri-plugin-autostart = "2"
+# Tauri 要求 npm 包与 Rust crate 的 major.minor 必须一致，否则 `tauri build` 直接报错退出。
+# 必须用 `~x.y.z`（只允许 patch）而不是 Cargo 默认的 `^x.y`——后者等于 >=x.y <x+1，
+# `cargo update` 会跳 minor（曾把 notification 拉到 2.4.x，与 npm 侧 2.3.x 失配导致发布连挂）。
+# 与 desktop/package.json 中对应 `@tauri-apps/plugin-*` 的 `~x.y.z` 保持一一对应。
+tauri-plugin-shell = "~2.3.5"
+tauri-plugin-updater = "~2.10.1"
+tauri-plugin-dialog = "~2.7.2"
+tauri-plugin-process = "~2.3.1"
+tauri-plugin-window-state = "~2.4.1"
+tauri-plugin-single-instance = "~2.4.3"
+tauri-plugin-deep-link = "~2.4.9"
+tauri-plugin-notification = "~2.3.3"
+tauri-plugin-autostart = "~2.5.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
