@@ -18,11 +18,19 @@ def _coerce_by_schema(value, prop_schema):
     - boolean：只认 "true"/"false"/"1"/"0"，避免把任意非空串都当 True
     - array/object：仅当字符串是合法 JSON 且形状匹配时才转
     - type 缺失或未知（含 anyOf/oneOf 等复合 schema）→ 不动
+    - type 是数组（联合类型，如 ["boolean","string"]）→ 不动
     """
     if not isinstance(prop_schema, dict) or not isinstance(value, str):
         return value
     t = prop_schema.get("type")
-    if t not in _JSON_TYPES:
+    # JSON Schema 允许 type 是数组（联合类型，如 browser_tab 的 collapse 声明
+    # ["boolean","string"]）。这里必须先挡掉非字符串的 type —— 早前直接
+    # `t not in _JSON_TYPES`，而 _JSON_TYPES 是 set，对 list 求 hash 会抛
+    # TypeError: unhashable type: 'list'，再被工具执行器的裸 except 吞成
+    # 「Tool error: unhashable type: 'list'」。结果是凡带联合类型参数的调用
+    # （实测 organize 一附带 collapse 就整轮失败，必须只传 ops）全部走不通。
+    # 联合类型不做猜测（与 anyOf/oneOf 同理）：值原样交给工具，由工具自己处理。
+    if not isinstance(t, str) or t not in _JSON_TYPES:
         return value
     if t == "string":
         return value
