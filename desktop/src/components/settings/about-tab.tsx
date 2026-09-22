@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { RefreshCw, CheckCircle2, AlertCircle, Download, RotateCw } from "lucide-react";
+import { RefreshCw, CheckCircle2, AlertCircle, LoaderCircle, RotateCw } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
 import { getVersion as getTauriAppVersion } from "@tauri-apps/api/app";
 import { startAutoUpdate, useUpdater } from "@/lib/use-updater";
@@ -81,10 +81,13 @@ export function AboutTab() {
     error: "检查失败",
   }[state];
 
+  // 注意：downloading/installing 等 in-flight 状态会被下面加上 animate-spin。
+  // 这里只能用本来就是圆弧形的图标（LoaderCircle），不能用 Download/箭头类——
+  // 后者是个带箭头的实心图形，整体绕中心旋转看起来是「箭头在打转」，很怪。
   const StatusIcon = state === "idle" ? CheckCircle2
     : state === "error" ? AlertCircle
-    : state === "ready" || state === "installed" || state === "installing" ? RotateCw
-    : state === "downloading" ? Download
+    : state === "ready" || state === "installed" || state === "installing" ? LoaderCircle
+    : state === "downloading" ? LoaderCircle
     : RefreshCw;
 
   return (
