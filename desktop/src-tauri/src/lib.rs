@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose, Engine as _};
+use serde::Deserialize;
 use std::fs;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -7,6 +8,65 @@ use tauri::{
 };
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_deep_link::DeepLinkExt;
+
+#[derive(Debug, Default, Deserialize)]
+struct EthanConfig {
+    #[serde(default)]
+    server: EthanServerConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct EthanServerConfig {
+    host: Option<String>,
+    port: Option<u16>,
+}
+
+/// 配置里的监听地址不能直接拿来当客户端地址：0.0.0.0 / :: 是 bind 地址，不可连接。
+/// IPv6 literal 放进 URL authority 时必须带中括号。
+fn client_host(host: &str) -> String {
+    let host = host.trim();
+    match host {
+        "" | "0.0.0.0" | "::" | "[::]" => "127.0.0.1".to_string(),
+        value if value.starts_with('[') && value.ends_with(']') => value.to_string(),
+        value if value.contains(':') => format!("[{value}]"),
+        value => value.to_string(),
+    }
+}
+
+fn configured_non_empty(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
+/// 返回桌面端应连接的 Ethan Server URL。
+///
+/// 与后端的优先级对齐：环境变量覆盖 config.yaml，最后才是 Ethan 自己的默认值。
+/// 本命令在 Rust 侧读用户目录，避免 WebView 再复制一个写死端口。
+#[tauri::command]
+fn get_ethan_server_url() -> String {
+    let env_host = std::env::var("ETHAN_SERVER_HOST").ok().and_then(|value| configured_non_empty(Some(value)));
+    let env_port = std::env::var("ETHAN_SERVER_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok());
+
+    let config_path = std::env::var_os("ETHAN_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".ethan")))
+        .map(|dir| dir.join("config.yaml"));
+    let config = config_path
+        .as_deref()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|content| serde_yaml::from_str::<EthanConfig>(&content).ok())
+        .unwrap_or_default();
+
+    let host = env_host
+        .or_else(|| configured_non_empty(config.server.host))
+        .unwrap_or_else(|| "0.0.0.0".to_string());
+    let port = env_port.or(config.server.port).unwrap_or(8900);
+    format!("http://{}:{}", client_host(&host), port)
+}
 
 /// 返回 ~/Pictures/Ethan 的规范路径，确保目录存在。
 fn ethan_pictures_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -176,7 +236,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
-        .invoke_handler(tauri::generate_handler![save_share_image, reveal_item_in_dir, set_countdown_always_on_top, close_countdown_window, open_countdown_window_cmd])
+        .invoke_handler(tauri::generate_handler![get_ethan_server_url, save_share_image, reveal_item_in_dir, set_countdown_always_on_top, close_countdown_window, open_countdown_window_cmd])
         .setup(|app| {
             let _ = app.get_webview_window("main").map(|w| w.set_title(""));
 

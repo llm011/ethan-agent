@@ -1,42 +1,14 @@
 /** 基础设施：API URL、认证、headers、通用接口（Models/Modes/Version）。 */
 
 import { bustCache } from "./local-cache";
+import { getApiUrl, getServerUrl, setServerUrl } from "./server-url";
 
-const STORAGE_KEY_API_URL = "ethan_api_url";
-const DEFAULT_SERVER_URL = "http://127.0.0.1:8900";
+export { getApiUrl, getServerUrl } from "./server-url";
 
-function normalizeServerUrl(raw: string | null): string {
-  if (!raw) return DEFAULT_SERVER_URL;
-  let url = raw.replace(/\/+$/, "");
-  // 兼容：用户存了带 /api 的旧值，剥离后存储 base
-  if (url.endsWith("/api")) url = url.slice(0, -4);
-  return url;
-}
-
-/** 获取完整 API URL（含 /api 后缀），供 fetch 调用使用。 */
-export function getApiUrl(): string {
-  if (typeof window === "undefined") return `${DEFAULT_SERVER_URL}/api`;
-  return `${normalizeServerUrl(localStorage.getItem(STORAGE_KEY_API_URL))}/api`;
-}
-
-/** 获取 Server 基础地址（不含 /api），用于 WebSocket 等非 REST 连接。 */
-export function getServerUrl(): string {
-  if (typeof window === "undefined") return DEFAULT_SERVER_URL;
-  return normalizeServerUrl(localStorage.getItem(STORAGE_KEY_API_URL));
-}
-
-/** 保存 Server 地址（用户只需填写 base，如 http://127.0.0.1:8900）。 */
+/** 保存 Server 地址（用户只需填写 base，如 http://127.0.0.1:8989）。 */
 export function setApiUrl(url: string): void {
-  localStorage.setItem(STORAGE_KEY_API_URL, normalizeServerUrl(url));
+  setServerUrl(url);
 }
-
-/**
- * @deprecated 桌面端使用 getApiUrl() 获取实时 URL。
- * 此处保留只是为了兼容 web 端迁移过来的代码中 `import { API_URL } from "./api-base"`。
- * 注意：所有 fetch 调用必须使用 `${getApiUrl()}` 而非 `${API_URL}`，否则用户在
- * Settings 中修改的 API URL 不会生效（auth/models/modes 等接口会走默认端口 8900）。
- */
-export const API_URL = `${DEFAULT_SERVER_URL}/api`;
 
 let authToken = "";
 
