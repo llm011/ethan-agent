@@ -16,6 +16,7 @@ import { handleNativeRequest } from './rpc';
 import { BrowserPageController } from './page-controller';
 import { NetworkMonitor } from './network-monitor';
 import { releaseCdpClient } from './cdp-client';
+import { forgetTab, recordTabOpened, reconcileOpenTimes } from './session-store/tab-open-times';
 import { pushStep, updateStepStatus, removeOverlay } from './overlay-injector';
 import { setupContextMenu, sendToEthan } from './context-menu';
 import {
@@ -249,7 +250,20 @@ async function dispatch(message: unknown): Promise<unknown | null> {
     attachBatchTabs: params => sessionStore.attachBatchTabs(params),
     detachTab: params => sessionStore.detachTab(params),
     moveTab: params => sessionStore.moveTab(params),
-    organizeTabs: params => sessionStore.organizeTabs(params),
+    organizeTabs: async params => {
+      // popup 里的「旧标签自动休息」开关：默认开启，显式 false 才关闭。
+      // 显式传了 restMode 的调用方优先（工具可以逐次覆盖）。
+      let restMode = params.restMode;
+      if (restMode === undefined) {
+        try {
+          const { autoRestTabs } = await chrome.storage.local.get('autoRestTabs');
+          restMode = autoRestTabs === false ? 'off' : 'yesterday';
+        } catch {
+          restMode = 'yesterday';
+        }
+      }
+      return sessionStore.organizeTabs({ ...params, restMode });
+    },
     updateSession: params => sessionStore.updateSession(params),
     pageSnapshot: withOverlay('snapshot', params => pageController.snapshot(params)),
     pageClick: withOverlay('click', params => pageController.click(params)),
@@ -574,7 +588,29 @@ chrome.alarms.onAlarm.addListener(alarm => {
 chrome.tabs.onRemoved.addListener(tabId => {
   void sessionStore.handleTabRemoved(tabId);
   void releaseCdpClient(tabId);
+  void forgetTab(tabId);
 });
+
+// tab「打开时间」账本：Chrome 不暴露打开时间（lastAccessed 是「最近访问」），
+// 要按「昨天及更早打开的」做自动休息就只能自己记。见 tab-open-times.ts。
+chrome.tabs.onCreated.addListener(tab => {
+  if (typeof tab.id === 'number') void recordTabOpened(tab.id);
+});
+
+// service worker 每次启动时跟当前真实的 tab 集合对一遍：清掉已关闭的 id
+// （浏览器重启后 id 会复用），并给存量 tab 补一条「现在」的记录 —— 补成现在
+// 而不是很久以前，避免刚启用时把一堆老 tab 集体判定成「昨天的」。
+void (async () => {
+  try {
+    const tabs = await chrome.tabs.query({});
+    const ids = tabs
+      .map(t => t.id)
+      .filter((id): id is number => typeof id === 'number');
+    await reconcileOpenTimes(ids);
+  } catch {
+    // 对不上就不动账本，后续判据会退回 lastAccessed（方向更保守）
+  }
+})();
 
 // ── cookie 弹窗自动关闭 ───────────────────────────────────────
 // 当 Ethan session 的 tab 加载完成时，注入 cookie-closer 脚本。

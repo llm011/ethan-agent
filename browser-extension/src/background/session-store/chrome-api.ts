@@ -207,3 +207,30 @@ export function moveTabToIndex(
     });
   });
 }
+
+/**
+ * 让 tab 休息：释放渲染进程内存，标题留在标签栏，点开时重新加载。
+ *
+ * 注意 Chrome 的两条限制（文档明说）：**活跃 tab 不会被 discard**，已 discard 的
+ * 也不会重复处理。命中这两种情况不报错，但调用方要自己先判掉（见 tab-rest.ts），
+ * 否则会以为「rested 了」其实没动。
+ */
+export function discardTab(tabId: number): Promise<chrome.tabs.Tab> {
+  return new Promise<chrome.tabs.Tab>((resolve, reject) => {
+    chrome.tabs.discard(tabId, tab => {
+      if (rejectWithRuntimeError(reject, 'Failed to discard tab')) {
+        return;
+      }
+      if (!tab) {
+        reject(
+          new BrowserExtensionRpcError(
+            BROWSER_RPC_ERROR_CODE.browserTabNotFound,
+            `Tab ${tabId} could not be discarded`,
+          ),
+        );
+        return;
+      }
+      resolve(tab);
+    });
+  });
+}

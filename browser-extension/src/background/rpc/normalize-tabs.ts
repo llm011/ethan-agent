@@ -9,6 +9,7 @@ import type {
   BrowserTabOrganizeParams,
   BrowserTabOrganizeOp,
   BrowserTabGroupColor,
+  BrowserTabRestMode,
 } from '../../shared';
 import {
   createInvalidParamsError,
@@ -108,9 +109,22 @@ export function normalizeTabOrganizeParams(params: unknown): BrowserTabOrganizeP
       'tabs.organize collapse must be "auto", "none", "true", "false" or a boolean',
     );
   }
+  // restMode：'yesterday'（默认，开启自动休息）/ 'off'（关掉）。
+  const rawRestMode = p.restMode;
+  let restMode: BrowserTabRestMode | undefined;
+  if (rawRestMode == null) {
+    restMode = undefined;
+  } else if (rawRestMode === 'yesterday' || rawRestMode === 'off') {
+    restMode = rawRestMode;
+  } else {
+    throw createInvalidParamsError(
+      'tabs.organize restMode must be "yesterday" or "off"',
+    );
+  }
   return {
     ops: ops.map((raw, i) => normalizeOrganizeOp(raw, i)),
     ...(collapse !== undefined ? { collapse } : {}),
+    ...(restMode !== undefined ? { restMode } : {}),
   };
 }
 
@@ -152,6 +166,26 @@ function normalizeOrganizeOp(raw: unknown, idx: number): BrowserTabOrganizeOp {
     }
     return {
       op: 'ungroup_all',
+      ...(p.groupId != null ? { groupId: normalizeNumber(p.groupId, 'groupId', `ops[${idx}]`) } : {}),
+      ...(typeof p.title === 'string' && p.title.trim() ? { title: p.title.trim() } : {}),
+    };
+  }
+  if (op === 'rest') {
+    const tabs = p.tabs;
+    if (!Array.isArray(tabs) || tabs.length === 0) {
+      throw createInvalidParamsError(`tabs.organize ops[${idx}].rest requires non-empty tabs`);
+    }
+    return {
+      op: 'rest',
+      tabs: tabs.map((id, j) => normalizeTabId(id, `ops[${idx}].tabs[${j}]`)),
+    };
+  }
+  if (op === 'rest_group' || op === 'rest_auto') {
+    if (p.groupId == null && !p.title) {
+      throw createInvalidParamsError(`tabs.organize ops[${idx}].${op} requires groupId or title`);
+    }
+    return {
+      op,
       ...(p.groupId != null ? { groupId: normalizeNumber(p.groupId, 'groupId', `ops[${idx}]`) } : {}),
       ...(typeof p.title === 'string' && p.title.trim() ? { title: p.title.trim() } : {}),
     };

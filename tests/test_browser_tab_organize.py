@@ -230,3 +230,69 @@ def test_organize_collapse_quoted_bool_forwarded(monkeypatch):
 
         _, params = hub.calls[0]
         assert params["collapse"] == raw, f"{raw!r} 应原样透传到扩展侧"
+
+
+def test_organize_rest_op_forwarded(monkeypatch):
+    """rest op 原样透传,工具侧不自己判断该不该休息(判据在扩展里)。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "rest", "tabs": [102, 103]}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops))
+
+    method, params = hub.calls[0]
+    assert method == "tabs.organize"
+    assert params["ops"] == [{"op": "rest", "tabs": [102, 103]}]
+
+
+def test_organize_rest_auto_op_forwarded(monkeypatch):
+    """rest_auto(整组按时间休息)也要透传。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "rest_auto", "groupId": 5}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops))
+
+    _, params = hub.calls[0]
+    assert params["ops"] == [{"op": "rest_auto", "groupId": 5}]
+
+
+def test_organize_rest_mode_default_omitted(monkeypatch):
+    """不传 rest_mode 时不带该字段,由扩展侧读 popup 开关(默认开启)。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "rest_auto", "groupId": 5}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops))
+
+    _, params = hub.calls[0]
+    assert "restMode" not in params, "未显式传 rest_mode 时不应塞默认值"
+
+
+def test_organize_rest_mode_off_forwarded(monkeypatch):
+    """rest_mode='off' 应当以 restMode 键传给扩展。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "rest_auto", "groupId": 5}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops, rest_mode="off"))
+
+    _, params = hub.calls[0]
+    assert params["restMode"] == "off"
+
+
+def test_organize_rest_mode_yesterday_forwarded(monkeypatch):
+    """显式传 'yesterday' 时原样透传,不被丢掉。"""
+    set_session_id("e1")
+    hub = _FakeHub(ORGANIZE_RESULT)
+    _patch(monkeypatch, hub, SessionMap())
+
+    ops = [{"op": "rest_auto", "groupId": 5}]
+    asyncio.run(BrowserTabTool().run(action="organize", ops=ops, rest_mode="yesterday"))
+
+    _, params = hub.calls[0]
+    assert params["restMode"] == "yesterday"

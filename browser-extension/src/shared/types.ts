@@ -546,7 +546,10 @@ export type BrowserTabOrganizeOp =
   | { op: 'close'; tabs: number[] }
   | { op: 'group'; title: string; tabs: number[]; color?: BrowserTabGroupColor; groupId?: number }
   | { op: 'ungroup'; tabs: number[] }
-  | { op: 'ungroup_all'; groupId?: number; title?: string };
+  | { op: 'ungroup_all'; groupId?: number; title?: string }
+  | { op: 'rest'; tabs: number[] }
+  | { op: 'rest_group'; groupId?: number; title?: string }
+  | { op: 'rest_auto'; groupId?: number; title?: string };
 
 export interface BrowserTabOrganizeParams {
   ops: BrowserTabOrganizeOp[];
@@ -558,6 +561,36 @@ export interface BrowserTabOrganizeParams {
    * 'none' 完全不折,true/false 为强制全折/全不折。
    */
   collapse?: 'auto' | 'none' | boolean;
+  /**
+   * 「按时间自动休息」的档位。默认 `'yesterday'`（开启）：昨天及更早打开、
+   * 今天没碰过、且不在保护名单里的 tab，会被 discard。
+   *
+   * `'off'` 完全关闭自动休息 —— 此时只有显式的 `rest` / `rest_group` op 才动手。
+   * 扩展设置页有对应的开关，用户可随时关掉。
+   */
+  restMode?: BrowserTabRestMode;
+}
+
+/**
+ * 让 tab「休息」（discard）：释放渲染进程内存，标题/位置/分组都留在标签栏，
+ * 点开时 Chrome 自动按原 URL 重新加载。
+ *
+ * 只对明确的 op（'rest' / 'rest_group'）生效；'rest_auto' 还要看下面的开关
+ * 与自动判据。
+ */
+export type BrowserTabRestMode = 'off' | 'yesterday';
+
+/** `applied` 里与「休息」相关的结果。 */
+export interface BrowserTabOrganizeRestApplied {
+  /** 实际被 discard 的 tab。 */
+  rested: number[];
+  /**
+   * 明确评估过、但按规则决定不动的 tab，附原因（可预期的）。
+   * 与 restedFailed 分开，调用方才能区分「按设计没动」和「动手失败了」。
+   */
+  restSkipped: { tabId: number; reason: string }[];
+  /** 尝试 discard 但失败的 tab（tab 已消失、discard API 报错、标签被保护）。 */
+  restFailed: { tabId: number; reason: string }[];
 }
 
 export interface BrowserTabOrganizeApplied {
@@ -573,6 +606,8 @@ export interface BrowserTabOrganizeApplied {
   collapseSkipped: number[];
   /** 尝试折叠但失败的组（组已消失、tabGroups API 报错）。 */
   collapseFailed: number[];
+  /** 被 discard 的 tab、按规则跳过的、以及动手失败的。 */
+  rest: BrowserTabOrganizeRestApplied;
 }
 
 export interface BrowserTabOrganizeResult {

@@ -21,6 +21,7 @@ import { getTabId, toSessionTab } from './utils';
 import { TAB_GROUP_ID_NONE } from './constants';
 import {
   createTab,
+  discardTab,
   getTab,
   groupTabs,
   moveTabToIndex,
@@ -32,6 +33,13 @@ import {
   updateGroupFull,
   updateTab,
 } from './chrome-api';
+import {
+  decideRest,
+  shouldAutoRest,
+  startOfLocalDay,
+  type RestSkipReason,
+} from './tab-rest';
+import { getTabOpenedAt } from './tab-open-times';
 
 export class BrowserSessionStore extends BrowserSessionStoreTabs {
   async openTab(params: BrowserTabOpenParams): Promise<BrowserTabOpenResult> {
@@ -162,6 +170,7 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
       collapsed: [],
       collapseSkipped: [],
       collapseFailed: [],
+      rest: { rested: [], restSkipped: [], restFailed: [] },
     };
     const skipped: { tabId: number; reason: string }[] = [];
     // 本次 touch 到的所有 group，收尾时统一折叠（去重）
@@ -278,6 +287,29 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
           await ungroupTabs(tabIds);
           applied.ungrouped.push(...tabIds);
         }
+      } else if (op.op === 'rest') {
+        await this.restTabs(op.tabs, applied, /* requireIdle */ false);
+      } else if (op.op === 'rest_group' || op.op === 'rest_auto') {
+        // rest_group：整组都休息（仍受保护名单约束）
+        // rest_auto：整组里「按时间该休息的」才休息，且受开关约束
+        const gid = await this.resolveGroupId(op.groupId, op.title);
+        if (gid == null) continue;
+        const tabs = await queryTabs({ groupId: gid });
+        const tabIds = tabs
+          .map(t => t.id)
+          .filter((id): id is number => id != null);
+        if (!tabIds.length) continue;
+        if (op.op === 'rest_auto') {
+          if (!shouldAutoRest(params.restMode)) {
+            for (const tabId of tabIds) {
+              applied.rest.restSkipped.push({ tabId, reason: 'auto-rest-disabled' });
+            }
+            continue;
+          }
+          await this.restTabs(tabIds, applied, /* requireIdle */ true);
+        } else {
+          await this.restTabs(tabIds, applied, /* requireIdle */ false);
+        }
       }
     }
 
@@ -349,4 +381,134 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
       return true;
     }
   }
+
+  /** 按 groupId 或 title 定位一个组；找不到返回 undefined。 */
+  private async resolveGroupId(
+    groupId: number | undefined,
+    title: string | undefined,
+  ): Promise<number | undefined> {
+    if (groupId != null) return groupId;
+    if (!title) return undefined;
+    const groups = await queryGroups({ title });
+    if (groups.length > 1) {
+      throw new BrowserExtensionRpcError(
+        BROWSER_RPC_ERROR_CODE.invalidParams,
+        `"${title}" matches ${groups.length} groups across windows; use groupId to specify which one`,
+      );
+    }
+    return groups[0]?.id;
+  }
+
+  /**
+   * 当前被活跃 Ethan session 占用的 tab 集合。
+   *
+   * session 账本按 groupId 记 tab，所以取每个 session 组里的 tab 就是「正在被
+   * 自动化操作」的那批 —— 它们绝不能被 discard（会打断正在跑的流程）。
+   */
+  private async liveSessionTabIds(): Promise<Set<number>> {
+    const out = new Set<number>();
+    for (const session of this.sessions.values()) {
+      try {
+        const tabs = await queryTabs({ groupId: session.groupId });
+        for (const t of tabs) {
+          if (typeof t.id === 'number') out.add(t.id);
+        }
+      } catch {
+        // 组已消失/查询失败：跳过这个 session，不因此阻断整批判定
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 让一批 tab 休息（discard）。
+   *
+   * `requireIdle` 为 true 时，多一道「打开时间在昨天及更早」的判据（自动模式）；
+   * 为 false 时是用户显式点名，只要不踩保护名单就照做。
+   *
+   * 保护名单（tab-rest.ts 的 decideRest）优先于一切：活跃 tab、出声的、固定的、
+   * 正在被 session/CDP 用的、特殊 scheme 的，一律不动，并记进 restSkipped。
+   */
+  private async restTabs(
+    tabIds: number[],
+    applied: BrowserTabOrganizeApplied,
+    requireIdle: boolean,
+  ): Promise<void> {
+    if (!tabIds.length) return;
+
+    const liveSessionTabIds = await this.liveSessionTabIds();
+    let cdpAttachedTabIds: Set<number>;
+    try {
+      const { getCdpAttachedTabIds } = await import('../cdp-client');
+      cdpAttachedTabIds = getCdpAttachedTabIds();
+    } catch (error) {
+      // 取不到 CDP 状态就没法保证不打断正在跑的操作 —— 整批放弃并如实上报，
+      // 不能猜一个空集合继续动手（那可能把挂着调试器的 tab 给 discard 了）。
+      const message = error instanceof Error ? error.message : String(error);
+      for (const tabId of tabIds) {
+        applied.rest.restFailed.push({
+          tabId,
+          reason: `无法确认调试器占用状态，已放弃本批休息：${message}`,
+        });
+      }
+      return;
+    }
+    const startOfToday = startOfLocalDay(Date.now());
+
+    for (const tabId of tabIds) {
+      let tab: chrome.tabs.Tab;
+      try {
+        tab = await getTab(tabId);
+      } catch {
+        applied.rest.restFailed.push({ tabId, reason: 'tab not found' });
+        continue;
+      }
+
+      // 打开时间：优先用自己记的账（准确反映「打开」），没有则退回 lastAccessed
+      // （那是「最近访问」，只会让判断更保守 —— 昨天开的今天碰过就算今天，保留）。
+      let openedAt = await getTabOpenedAt(tabId);
+      if (openedAt === undefined) {
+        openedAt = (tab as { lastAccessed?: number }).lastAccessed;
+      }
+
+      const reason = decideRest({
+        tab: tab as unknown as Parameters<typeof decideRest>[0]['tab'],
+        openedAt,
+        startOfToday,
+        liveSessionTabIds,
+        cdpAttachedTabIds,
+        // 只有自动模式才卡「今天打开的」；用户显式点名时时间不构成拒绝理由。
+        enforceRecency: requireIdle,
+      });
+
+      if (reason) {
+        applied.rest.restSkipped.push({
+          tabId,
+          reason: REST_SKIP_REASON_LABEL[reason] ?? reason,
+        });
+        continue;
+      }
+
+      try {
+        await discardTab(tabId);
+        applied.rest.rested.push(tabId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        applied.rest.restFailed.push({ tabId, reason: message });
+      }
+    }
+  }
 }
+
+/** 把内部原因码转成给人看的中文说明（会一路出现在工具输出里）。 */
+const REST_SKIP_REASON_LABEL: Record<RestSkipReason, string> = {
+  'already-discarded': '已经处于休息状态',
+  'active-tab': '是当前正在看的标签',
+  audible: '正在播放声音',
+  pinned: '已被固定',
+  'auto-discard-disabled': '该标签关闭了自动丢弃',
+  'unsupported-scheme': '该类型的页面不支持',
+  'protected-url': '受保护的页面（内部页/本地文件/本地服务）',
+  'live-session-tab': '正被 Ethan 会话或调试器使用',
+  'opened-today': '是今天打开的，先不处理',
+};
