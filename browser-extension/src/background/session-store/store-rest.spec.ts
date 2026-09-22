@@ -46,13 +46,13 @@ vi.mock('chrome', () => ({}));
       cb(t);
     },
     query: (info: unknown, cb: (t: unknown[]) => void) => {
-      const q = (info ?? {}) as { groupId?: number };
-      const all = Array.from(TABS.values());
-      cb(
-        q.groupId === undefined
-          ? all
-          : all.filter(t => t.groupId === q.groupId),
-      );
+      const q = (info ?? {}) as { groupId?: number; windowId?: number };
+      let all = Array.from(TABS.values());
+      // windowId 也要如实过滤：Chrome 允许两个窗口各有一个同 id 的组，
+      // 只按 groupId 过滤会掩盖「查太宽」的 bug。
+      if (q.groupId !== undefined) all = all.filter(t => t.groupId === q.groupId);
+      if (q.windowId !== undefined) all = all.filter(t => t.windowId === q.windowId);
+      cb(all);
     },
     discard: (id: number, cb: (t: unknown) => void) => {
       const t = TABS.get(id);
@@ -87,12 +87,12 @@ async function freshStore() {
 }
 
 /** 造一个 session 占住 groupId，供 liveSessionTabIds 使用。 */
-function seedSession(store: unknown, groupId: number) {
+function seedSession(store: unknown, groupId: number, windowId = 1) {
   // sessions 是 protected，测试里只能绕过类型访问。
   (store as { sessions: Map<string, unknown> }).sessions.set('s1', {
     sessionId: 's1',
     groupId,
-    windowId: 1,
+    windowId,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
@@ -219,5 +219,63 @@ describe('rest_auto 与开关', () => {
     });
     expect(discarded).toEqual([]);
     expect(out.applied.rest.rested).toEqual([]);
+  });
+});
+
+describe('自动档的时间判据必须有据可依', () => {
+  it('没有打开时间记录时不动手，也不用 lastAccessed 兜底', async () => {
+    // lastAccessed 是「最近访问」且对后台 tab 长时间不刷新，比真实打开时间旧。
+    // 拿它兜底会把「昨天开的、正在填表的 tab」判成昨天而 discard，草稿就没了。
+    TABS.set(
+      10,
+      makeTab({
+        id: 10,
+        groupId: 5,
+        lastAccessed: Date.now() - 30 * 24 * 60 * 60 * 1000,
+      }),
+    );
+    const store = await freshStore();
+
+    const out = await store.organizeTabs({
+      ops: [{ op: 'rest_auto', groupId: 5 }],
+    });
+
+    expect(discarded).toEqual([]);
+    expect(out.applied.rest.restSkipped).toEqual([
+      { tabId: 10, reason: '是今天打开的，先不处理' },
+    ]);
+  });
+
+  it('显式 rest 不受「没有记录」影响，照样动手', async () => {
+    TABS.set(10, makeTab({ id: 10, lastAccessed: Date.now() }));
+    const store = await freshStore();
+
+    const out = await store.organizeTabs({ ops: [{ op: 'rest', tabs: [10] }] });
+
+    expect(discarded).toEqual([10]);
+    expect(out.applied.rest.rested).toEqual([10]);
+  });
+});
+
+describe('liveSessionTabIds 按 (groupId, windowId) 定位', () => {
+  it('另一个窗口里的同 id 组不算被 session 占用', async () => {
+    // Chrome 允许两个窗口各有一个同 id 的组。session 在 window 1/group 5，
+    // window 2 的 group 5 是用户的普通组 —— 只按 groupId 查会把它一起保护掉，
+    // 那个组就永远休息不了。
+    TABS.set(10, makeTab({ id: 10, groupId: 5, windowId: 1 })); // session 组
+    TABS.set(11, makeTab({ id: 11, groupId: 5, windowId: 2 })); // 用户自己的组
+    const store = await freshStore();
+    seedSession(store, 5, /* windowId */ 1);
+
+    const out = await store.organizeTabs({
+      ops: [{ op: 'rest_group', groupId: 5 }],
+    });
+
+    // 11 属于另一个窗口的组；它不在 session 里，不该被保护。
+    expect(out.applied.rest.rested).toEqual([11]);
+    expect(discarded).toEqual([11]);
+    expect(out.applied.rest.restSkipped).toEqual([
+      { tabId: 10, reason: '正被 Ethan 会话或调试器使用' },
+    ]);
   });
 });

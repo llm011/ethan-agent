@@ -5,9 +5,10 @@
  * 一个昨天打开、今天点过一下的 tab 会被它报成今天。要按「昨天及更早打开的」
  * 这个判据做自动休息，就必须自己记。
  *
- * 记账时机：`chrome.tabs.onCreated`。存量（本版本装上之前就开着的 tab）没记录，
- * 由调用方回退到 `lastAccessed` —— 两者都只会让判断**更保守**（更旧才动手），
- * 不会把今天的 tab 误判成昨天的。
+ * 记账时机：`chrome.tabs.onCreated`。存量（本版本装上之前就开着的 tab）没有记录，
+ * 判据那边把「没有记录」当「今天」处理 —— 拿不到证据就不动手，方向保守。
+ * 不用 `tab.lastAccessed` 兜底：它是「最近访问」且对后台 tab 长时间不刷新，
+ * 偏旧，会把昨天开着、正在填表的 tab 判成「昨天的」而 discard。
  *
  * tab id 只在浏览器会话内唯一，浏览器重启后会重置，所以账本必须跟着会话清：
  * 每次 service worker 启动时用当前真实存在的 tab 集合裁剪一遍。
@@ -34,14 +35,19 @@ function toRecord(map: Map<number, number>): OpenTimeMap {
   return out;
 }
 
+/**
+ * 读账本。读失败**不缓存**空表：一次瞬时失败就把 cache 钉成空的，本次会话后续
+ * 所有查询都会报「没有记录」（判据那边按「今天」处理，安全），但如果此时恰好
+ * 有写操作，就会把空表覆盖回 storage，把真实记录冲掉。所以失败只让这一次
+ * 调用拿到空表，下次再来读。
+ */
 async function load(): Promise<Map<number, number>> {
   if (cache) return cache;
   try {
     const stored = await chrome.storage.local.get(STORAGE_KEY);
     cache = fromRecord((stored[STORAGE_KEY] as OpenTimeMap | undefined) ?? {});
   } catch {
-    // storage 不可用：本次会话退化为「全都没有记录」，调用方回退到 lastAccessed。
-    cache = new Map();
+    return new Map();
   }
   return cache;
 }
@@ -57,12 +63,29 @@ function schedulePersist(): void {
   }, 500);
 }
 
+/**
+ * 立刻把待写内容落盘。
+ *
+ * 给「SW 要被回收了」这一类时机用：上面那个 500ms 防抖定时器会随 SW 一起消失，
+ * 没触发就等于这次记录丢了 —— 而丢一条 onCreated 记录的后果不只是少一条数据，
+ * 是那个 tab 之后再也轮不到自动休息（见 reconcileOpenTimes 的说明）。
+ */
+export async function flushOpenTimes(): Promise<void> {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  await persistNow();
+}
+
 async function persistNow(): Promise<void> {
+  // cache 还是 null 说明从没成功读过账本，这时写下去只会把已有记录冲掉。
   if (!cache) return;
   try {
     await chrome.storage.local.set({ [STORAGE_KEY]: toRecord(cache) });
   } catch {
-    // 写失败不影响本次会话的内存账本；下次 SW 重启会退回 lastAccessed。
+    // 写失败不影响本次会话的内存账本；代价是这次修改丢了，下次 SW 重启后
+    // 这些 tab 会被当成「没有记录」（判据按「今天」处理，方向保守）。
   }
 }
 
@@ -91,13 +114,13 @@ export async function getTabOpenedAt(
 }
 
 /**
- * 用「当前真实存在的 tab」裁剪账本，并给没有记录的补上一条。
+ * 用「当前真实存在的 tab」裁剪账本。
  *
- * 两件事都要做：
- * - 删掉已不存在的 tabId，避免浏览器重启后 id 复用导致把新 tab 当成旧的；
- * - 给没记录的存量 tab 补一条 **现在** 的时间 —— 不能补成很久以前，
- *   否则刚装上的那一刻会把一堆老 tab 全判成「昨天的」而集体休息。
- *   补成「现在」的代价是：这些存量 tab 要等到明天才会被自动休息，方向是安全的。
+ * 只做一件事：删掉已不存在的 tabId。不做「给没记录的补一条」——
+ * 补出来的时间只能是「现在」，而没记录不代表 tab 是刚打开的（可能是 onCreated
+ * 那条记录还没落盘 SW 就被回收了，或者只是这一版装上之前就开着的）。补成
+ * 「现在」会让这个 tab 每次 SW 重启都重新变成「今天打开的」，于是**永远**轮不到
+ * 自动休息。宁可缺记录：判据那边把 undefined 当「今天」处理，方向是安全的。
  */
 export async function reconcileOpenTimes(
   liveTabIds: number[],
@@ -108,13 +131,6 @@ export async function reconcileOpenTimes(
   for (const id of Array.from(map.keys())) {
     if (!live.has(id)) {
       map.delete(id);
-      changed = true;
-    }
-  }
-  const now = Date.now();
-  for (const id of liveTabIds) {
-    if (!map.has(id)) {
-      map.set(id, now);
       changed = true;
     }
   }

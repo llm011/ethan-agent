@@ -404,12 +404,19 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
    *
    * session 账本按 groupId 记 tab，所以取每个 session 组里的 tab 就是「正在被
    * 自动化操作」的那批 —— 它们绝不能被 discard（会打断正在跑的流程）。
+   *
+   * 必须同时带 windowId（和 store-core 里 findSessionByGroup 的键一致）：
+   * Chrome 允许两个窗口各有一个同 id 的组，只按 groupId 查会把另一个窗口里
+   * 用户的普通组也算进来，那个组就永远休息不了、还报「正被会话使用」。
    */
   private async liveSessionTabIds(): Promise<Set<number>> {
     const out = new Set<number>();
     for (const session of this.sessions.values()) {
       try {
-        const tabs = await queryTabs({ groupId: session.groupId });
+        const tabs = await queryTabs({
+          groupId: session.groupId,
+          windowId: session.windowId,
+        });
         for (const t of tabs) {
           if (typeof t.id === 'number') out.add(t.id);
         }
@@ -464,12 +471,14 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
         continue;
       }
 
-      // 打开时间：优先用自己记的账（准确反映「打开」），没有则退回 lastAccessed
-      // （那是「最近访问」，只会让判断更保守 —— 昨天开的今天碰过就算今天，保留）。
-      let openedAt = await getTabOpenedAt(tabId);
-      if (openedAt === undefined) {
-        openedAt = (tab as { lastAccessed?: number }).lastAccessed;
-      }
+      // 打开时间只用自己记的账。
+      //
+      // 曾经的写法是「没有记录就退回 tab.lastAccessed」，那是错的：lastAccessed 是
+      // 「最近一次被访问」而不是「打开」，而且拿不到用户交互的后台 tab 会长时间不刷新，
+      // 所以它**偏旧**。这正好和这里需要的方向相反 —— 昨天开的、填了一半表单的 tab
+      // 报的仍是昨天，就会被判成「昨天的」而 discard，草稿直接没了。
+      // 没有记录就留 undefined，判据那边按「今天」处理（保守，不动）。
+      const openedAt = await getTabOpenedAt(tabId);
 
       const reason = decideRest({
         tab: tab as unknown as Parameters<typeof decideRest>[0]['tab'],

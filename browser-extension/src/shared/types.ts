@@ -589,7 +589,7 @@ export interface BrowserTabOrganizeRestApplied {
    * 与 restedFailed 分开，调用方才能区分「按设计没动」和「动手失败了」。
    */
   restSkipped: { tabId: number; reason: string }[];
-  /** 尝试 discard 但失败的 tab（tab 已消失、discard API 报错、标签被保护）。 */
+  /** 尝试 discard 但失败的 tab（tab 已消失、discard API 报错等）。 */
   restFailed: { tabId: number; reason: string }[];
 }
 

@@ -212,6 +212,8 @@ flowchart LR
 | `pinned` | 用户手动固定了 |
 | `auto-discard-disabled` | tab 自己的 `autoDiscardable === false` |
 | `live-session-tab` | 正被 Ethan session 账本或 CDP 占用(会被打断) |
+
+`live-session-tab` 取 session 的 tab 时要**同时按 `groupId` 和 `windowId`** 查(和 `store-core.ts` 里 `findSessionByGroup` 的键一致)。Chrome 允许两个窗口各有一个同 id 的组,只按 `groupId` 查会把另一个窗口里用户的普通组也算进来,那个组就永远休息不了、还报「正被会话使用」。
 | `protected-url` | `chrome://`/`about:`/`devtools://` 等内部页、`file://`、localhost |
 | `opened-today` | 时间判据(仅自动模式) |
 
@@ -220,9 +222,11 @@ flowchart LR
 **时间判据**:Chrome **不暴露** tab 的打开时间(`tab.lastAccessed` 是「最近一次被访问」,一个昨天开、今天点过一下的 tab 会被它报成今天),所以扩展自己维护一份账本(`tab-open-times.ts`,`chrome.storage.local` 的 `tabOpenTimes` 键):
 
 - `chrome.tabs.onCreated` 记下打开时间,`onRemoved` 清掉;
-- tab id 只在浏览器会话内唯一,重启后会重置 —— 所以 service worker 每次启动都调 `reconcileOpenTimes(当前真实 tab)` 裁一遍账本;
-- 存量(装上本版本之前就开着的)tab 补的时间是**现在**而不是很久以前,否则刚启用那一刻会把一堆老 tab 全判成「昨天的」而集体休息。代价是这些 tab 要等到明天才会被自动休息,方向安全;
-- 没有记录时回退到 `lastAccessed` —— 它只会让判断**更保守**(更旧才动手)。
+- 记完**立刻 flush** 落盘,不等那 500ms 防抖 —— SW 空闲后会被回收,定时器跟着消失,这条记录就丢了。丢一条 `onCreated` 记录的后果不只是少一条数据:那个 tab 之后再也轮不到自动休息;
+- tab id 只在浏览器会话内唯一,重启后会重置 —— 所以 service worker 每次启动都调 `reconcileOpenTimes(当前真实 tab)` 裁一遍账本(只删已消失的 id);
+- **不给没记录的存量 tab 补时间**。补出来的只能是「现在」,而「没记录」不代表刚打开(可能记录还没落盘 SW 就被回收,也可能只是这一版装上之前就开着)。补成「现在」会让这个 tab 每次 SW 重启都重新变成「今天打开的」,于是永远轮不到自动休息;
+- **不用 `tab.lastAccessed` 兜底**。它是「最近访问」,而且拿不到用户交互的后台 tab 长时间不刷新,所以它**偏旧** —— 昨天开着、正在填表的 tab 报的仍是昨天,会被判成「昨天的」而 discard,草稿就没了。方向正好相反,不能当打开时间用。没有记录就留空,判据按「今天」处理(不动);
+- 读账本失败**不缓存空表**:一次瞬时失败把 cache 钉成空的,本次会话后续查询都会报「没有记录」(安全),但此时若有写操作就会把空表覆盖回 storage,把真实记录冲掉。所以失败只让这一次调用拿到空表。
 
 **时间判据只在自动模式生效**,用独立的 `enforceRecency` 布尔量控制,而不是把 `startOfToday` 压成哨兵值:那种写法会被 `openedAt === undefined` 那条早退绕过(没有记录时照样判成「今天」),显式点名就失效了。所以 `rest`/`rest_group`(用户说了算)传 `enforceRecency: false`,今天打开的也能休息;`rest_auto` 传 `true`。
 

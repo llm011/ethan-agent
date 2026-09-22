@@ -16,7 +16,7 @@ import { handleNativeRequest } from './rpc';
 import { BrowserPageController } from './page-controller';
 import { NetworkMonitor } from './network-monitor';
 import { releaseCdpClient } from './cdp-client';
-import { forgetTab, recordTabOpened, reconcileOpenTimes } from './session-store/tab-open-times';
+import { flushOpenTimes, forgetTab, recordTabOpened, reconcileOpenTimes } from './session-store/tab-open-times';
 import { pushStep, updateStepStatus, removeOverlay } from './overlay-injector';
 import { setupContextMenu, sendToEthan } from './context-menu';
 import {
@@ -593,13 +593,20 @@ chrome.tabs.onRemoved.addListener(tabId => {
 
 // tab「打开时间」账本：Chrome 不暴露打开时间（lastAccessed 是「最近访问」），
 // 要按「昨天及更早打开的」做自动休息就只能自己记。见 tab-open-times.ts。
+//
+// 记完立刻 flush，不等那 500ms 防抖：SW 空闲后会被回收，定时器跟着消失，
+// 这条记录就丢了 —— 而丢掉 onCreated 记录的后果不只是少一条数据，是那个 tab
+// 之后再也轮不到自动休息。
 chrome.tabs.onCreated.addListener(tab => {
-  if (typeof tab.id === 'number') void recordTabOpened(tab.id);
+  if (typeof tab.id !== 'number') return;
+  void (async () => {
+    await recordTabOpened(tab.id!);
+    await flushOpenTimes();
+  })();
 });
 
-// service worker 每次启动时跟当前真实的 tab 集合对一遍：清掉已关闭的 id
-// （浏览器重启后 id 会复用），并给存量 tab 补一条「现在」的记录 —— 补成现在
-// 而不是很久以前，避免刚启用时把一堆老 tab 集体判定成「昨天的」。
+// service worker 每次启动时跟当前真实的 tab 集合对一遍，清掉已关闭的 id
+// （浏览器重启后 id 会复用）。不给存量 tab 补记录 —— 原因见 reconcileOpenTimes。
 void (async () => {
   try {
     const tabs = await chrome.tabs.query({});
