@@ -192,6 +192,16 @@ export async function releaseCdpClient(tabId: number): Promise<void> {
   await client?.detach();
 }
 
+/**
+ * 已挂 CDP 的 tab 集合。
+ *
+ * 给「让 tab 休息」用：discard 一个挂着调试器的 tab 会触发 detach，把正在跑的
+ * 自动化操作中途打断，所以这些 tab 必须排除在休息名单之外。
+ */
+export function getCdpAttachedTabIds(): Set<number> {
+  return new Set(clientsByTabId.keys());
+}
+
 export async function releaseAllCdpClients(): Promise<void> {
   const clients = Array.from(clientsByTabId.values());
   clientsByTabId.clear();

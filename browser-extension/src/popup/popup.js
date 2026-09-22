@@ -26,10 +26,10 @@ function genRandomClientName() {
 
 async function load() {
   const stored = await chrome.storage.local.get([
-    'serverUrl', 'token', 'clientName', 'autoCloseCookies',
+    'serverUrl', 'token', 'clientName', 'autoCloseCookies', 'autoRestTabs',
   ]);
   let { clientName } = stored;
-  const { serverUrl, token, autoCloseCookies } = stored;
+  const { serverUrl, token, autoCloseCookies, autoRestTabs } = stored;
   // 没填过就自动生成一个可读的随机名，并立刻落盘保存
   if (!clientName || !clientName.trim()) {
     clientName = genRandomClientName();
@@ -42,6 +42,8 @@ async function load() {
   $('clientName').value = clientName || '';
   // 默认开启，显式 false 才关闭
   $('autoCloseCookies').checked = autoCloseCookies !== false;
+  // 同上：默认开启，显式 false 才关闭
+  $('autoRestTabs').checked = autoRestTabs !== false;
   refreshStatus();
 }
 
@@ -242,6 +244,9 @@ $('reading').addEventListener('click', async () => {
 });
 $('autoCloseCookies').addEventListener('change', async (e) => {
   await chrome.storage.local.set({ autoCloseCookies: e.target.checked });
+});
+$('autoRestTabs').addEventListener('change', async (e) => {
+  await chrome.storage.local.set({ autoRestTabs: e.target.checked });
 });
 
 // 页面指令列表：读 commands 渲染成按钮，点击 → 后台执行，结果进页面右上角面板。

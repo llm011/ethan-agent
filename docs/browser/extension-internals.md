@@ -181,6 +181,9 @@ flowchart LR
 | `group` | 把 `tabs` 收进 `title` 指定的组;`groupId` 有就直接用,否则按 title 复用已有组,都没有则新建 |
 | `ungroup` | 把 `tabs` 移出所在组 |
 | `ungroup_all` | 按 `groupId` 或 `title` 整组解散 |
+| `rest` | 让 `tabs` 休息(见 6.2);显式点名,不受「今天打开的」限制 |
+| `rest_group` | 按 `groupId` 或 `title` 整组休息;同样是显式点名 |
+| `rest_auto` | 整组里「按时间该休息的」才休息,受 `restMode` 与 popup 开关约束 |
 
 `organize` 建的组**不加** `Ethan · ` 前缀(那是 session 管的组),也不写进 session 账本;关掉 tab 后调 `handleTabRemoved` 让 session 账本自愈。
 
@@ -192,3 +195,41 @@ flowchart LR
 - `'true'` / `'false'`(带引号的字符串):等价于布尔 —— 工具的 schema 同时声明了 `string` 类型,按 schema 去掉引号的客户端可能发字符串形式,这里归一成布尔而不是报非法参数。
 
 `applied.collapsed` 是实际折叠成功的组 id 列表。折叠用 `chrome.tabGroups.update(groupId, {collapsed: true})`;组在此期间被用户删掉时静默跳过(既不记 collapsed 也不记 failed)。`chrome.tabGroups.query` 整体失败(API 不可用)时,本次涉及的组全部记入 `applied.collapseFailed`,避免调用方误以为「都折好了」。
+
+### 6.2 tab「休息」(discard):不占内存但留在标签栏
+
+「休息」= `chrome.tabs.discard(tabId)`(Chrome 54+)。渲染进程被卸载、内存释放,但 tab **仍在标签栏里,标题和分组都保留**;用户点开时 Chrome 按原 URL 重新加载。不需要新权限(`tabs` 已声明),也不会 discard 活跃 tab 或已 discard 的 tab。
+
+代价是**页面状态会丢**:填到一半的表单、滚动位置、SPA 的登录态、暂停中的视频。因为代价不可逆而收益只是省内存,`tab-rest.ts` 里所有判据都朝「更保守」偏——拿不准就不动。判据写成纯函数便于单测钉住(判错一次就是用户丢数据)。
+
+**保护名单**(`decideRest`,`tab-rest.ts`)按顺序判定,命中即不休息并记入 `applied.rest.restSkipped`:
+
+| 原因码 | 含义 |
+|---|---|
+| `already-discarded` | 已经在休息状态 |
+| `active-tab` | 用户正在看的那个(会当场触发重新加载) |
+| `audible` | 正在出声(可能在放视频或开会) |
+| `pinned` | 用户手动固定了 |
+| `auto-discard-disabled` | tab 自己的 `autoDiscardable === false` |
+| `live-session-tab` | 正被 Ethan session 账本或 CDP 占用(会被打断) |
+
+`live-session-tab` 取 session 的 tab 时要**同时按 `groupId` 和 `windowId`** 查(和 `store-core.ts` 里 `findSessionByGroup` 的键一致)。Chrome 允许两个窗口各有一个同 id 的组,只按 `groupId` 查会把另一个窗口里用户的普通组也算进来,那个组就永远休息不了、还报「正被会话使用」。
+| `protected-url` | `chrome://`/`about:`/`devtools://` 等内部页、`file://`、localhost |
+| `opened-today` | 时间判据(仅自动模式) |
+
+`protected-url` 里判 localhost 用的是 `URL().hostname` 精确比对而不是前缀匹配 —— 前缀匹配会把 `https://localhost.example.com` 这种正常公网域名也算进去(方向虽然保守,但会让一个正常网站永远不休息)。
+
+**时间判据**:Chrome **不暴露** tab 的打开时间(`tab.lastAccessed` 是「最近一次被访问」,一个昨天开、今天点过一下的 tab 会被它报成今天),所以扩展自己维护一份账本(`tab-open-times.ts`,`chrome.storage.local` 的 `tabOpenTimes` 键):
+
+- `chrome.tabs.onCreated` 记下打开时间,`onRemoved` 清掉;
+- 记完**立刻 flush** 落盘,不等那 500ms 防抖 —— SW 空闲后会被回收,定时器跟着消失,这条记录就丢了。丢一条 `onCreated` 记录的后果不只是少一条数据:那个 tab 之后再也轮不到自动休息;
+- tab id 只在浏览器会话内唯一,重启后会重置 —— 所以 service worker 每次启动都调 `reconcileOpenTimes(当前真实 tab)` 裁一遍账本(只删已消失的 id);
+- **不给没记录的存量 tab 补时间**。补出来的只能是「现在」,而「没记录」不代表刚打开(可能记录还没落盘 SW 就被回收,也可能只是这一版装上之前就开着)。补成「现在」会让这个 tab 每次 SW 重启都重新变成「今天打开的」,于是永远轮不到自动休息;
+- **不用 `tab.lastAccessed` 兜底**。它是「最近访问」,而且拿不到用户交互的后台 tab 长时间不刷新,所以它**偏旧** —— 昨天开着、正在填表的 tab 报的仍是昨天,会被判成「昨天的」而 discard,草稿就没了。方向正好相反,不能当打开时间用。没有记录就留空,判据按「今天」处理(不动);
+- 读账本失败**不缓存空表**:一次瞬时失败把 cache 钉成空的,本次会话后续查询都会报「没有记录」(安全),但此时若有写操作就会把空表覆盖回 storage,把真实记录冲掉。所以失败只让这一次调用拿到空表。
+
+**时间判据只在自动模式生效**,用独立的 `enforceRecency` 布尔量控制,而不是把 `startOfToday` 压成哨兵值:那种写法会被 `openedAt === undefined` 那条早退绕过(没有记录时照样判成「今天」),显式点名就失效了。所以 `rest`/`rest_group`(用户说了算)传 `enforceRecency: false`,今天打开的也能休息;`rest_auto` 传 `true`。
+
+**开关**:按时间自动休息默认开启,popup 里「旧标签自动休息」可关(`chrome.storage.local` 的 `autoRestTabs`,默认 `true`,显式 `false` 才关)。`organizeTabs` 的 dispatch 在调用方没传 `restMode` 时读这个开关,注入 `'yesterday'`(开)或 `'off'`(关);工具侧显式传的 `rest_mode` 优先,可逐次覆盖。`restMode: 'off'` 只拦 `rest_auto`,`rest`/`rest_group` 是显式指令,不受开关影响。
+
+结果按 `applied.rest.rested` / `restSkipped`(带中文原因) / `restFailed` 三桶上报。另外一个坑:进 `restTabs` 时要先拿到 CDP 占用集合,拿不到就**整批放弃**并把所有 tab 记入 `restFailed` —— 不能猜一个空集合继续动手,那可能把挂着调试器的 tab 给 discard 了。

@@ -313,6 +313,9 @@ _HINTS = {
         "已应用 tab 整理操作。applied 字段说明实际执行了什么;skipped 是因 tab 消失等原因跳过的条目。"
         "整理后会自动折叠涉及的 TabGroup(applied.collapsed),但**跳过用户当前活跃的那一组**"
         "(applied.collapseSkipped)——那一组保持展开。折叠失败的组在 applied.collapseFailed。"
+        "若用了 rest/rest_group/rest_auto,applied.rest 说明休息结果:"
+        "rested 是实际释放了内存的 tab,restSkipped 是按规则有意没动的(附原因,"
+        "如「是当前正在看的标签」「是今天打开的」),restFailed 是尝试了但失败的。"
     ),
 }
 
@@ -789,8 +792,14 @@ class BrowserTabTool(_BrowserToolBase):
                     '{"op":"close","tabs":[tabId,...]} 关闭这些 tab;'
                     '{"op":"group","title":"组名","tabs":[tabId,...],"color":"blue","groupId":N} 把这些 tab 放进指定组(groupId 或 title 找到已有组;都没提供则新建);'
                     '{"op":"ungroup","tabs":[tabId,...]} 把这些 tab 移出所属组;'
-                    '{"op":"ungroup_all","groupId":N} 解散整个组(groupId 或 title 指定)。'
+                    '{"op":"ungroup_all","groupId":N} 解散整个组(groupId 或 title 指定);'
+                    '{"op":"rest","tabs":[tabId,...]} 让这些 tab 休息(释放内存,标题保留,点开时重新加载);'
+                    '{"op":"rest_group","groupId":N} 整组休息;'
+                    '{"op":"rest_auto","groupId":N} 整组里「昨天及更早打开的」才休息。'
                     "op 顺序应用;tab 已消失则跳过(不报错)。"
+                    "「休息」的代价:页面会重新加载,填了一半的表单/滚动位置会丢。"
+                    "因此活跃 tab、正在播放声音的、固定住的、正被 session 或调试器使用的、"
+                    "以及内部页/本地文件/本地服务一律不动,会记在 rest.restSkipped 里说明原因。"
                 ),
                 "items": {"type": "object"},
             },
@@ -806,11 +815,22 @@ class BrowserTabTool(_BrowserToolBase):
                     "'none' 或 false=完全不折叠;true=强制全部折叠(含活跃组)。"
                 ),
             },
+            "rest_mode": {
+                "type": "string",
+                "enum": ["yesterday", "off"],
+                "description": (
+                    "organize 专用:「按时间自动休息」的档位。"
+                    "不传时跟随扩展设置(popup 里的「旧标签自动休息」开关,默认开启)。"
+                    "'yesterday'=把昨天及更早打开、今天没碰过、且不在保护名单里的 tab 释放内存;"
+                    "'off'=只处理显式指定的 rest/rest_group,不做按时间的自动休息。"
+                    "注意只有 rest_auto op 才会走这个档位判断。"
+                ),
+            },
         },
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1, ops: list = None, collapse: bool | str = None) -> str:
+    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1, ops: list = None, collapse: bool | str = None, rest_mode: str = None) -> str:
         self._authorize()
         try:
             # 提前拦缺参:只有 user_list/find_tab 是全局的,其余都要 session。
@@ -875,6 +895,9 @@ class BrowserTabTool(_BrowserToolBase):
                 payload = {"ops": ops}
                 if collapse is not None:
                     payload["collapse"] = collapse
+                # 不传 rest_mode → 扩展侧读 popup 的开关（默认开启）。
+                if rest_mode is not None:
+                    payload["restMode"] = rest_mode
                 return json.dumps(await _call("tab_organize", payload), ensure_ascii=False)
             return f"未知 action: {action}"
         except BrowserError as e:
