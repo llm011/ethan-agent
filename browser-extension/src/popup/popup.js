@@ -1,5 +1,10 @@
 /* eslint-disable */
 import { wsToHttp, readCommands } from '../shared';
+import {
+  TAB_PALETTE_SHORTCUT_KEY as SHORTCUT_KEY,
+  DEFAULT_TAB_PALETTE_SHORTCUT as DEFAULT_SHORTCUT,
+  resolveShortcut,
+} from '../shared/tab-palette-config';
 
 const $ = id => document.getElementById(id);
 
@@ -256,8 +261,6 @@ $('autoRestTabs').addEventListener('change', async (e) => {
 //   1. 配置页面内的快捷键（真实按键录入，不让用户手打组合串）
 //   2. 提供一个「现在就打开」的入口
 
-const SHORTCUT_KEY = 'tabPaletteShortcut';
-const DEFAULT_SHORTCUT = 'mod+shift+k';
 const IS_MAC = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '');
 
 /** 内部格式 "mod+shift+k" → 展示用 "⌘⇧K" / "Ctrl+Shift+K" */
@@ -325,7 +328,7 @@ function checkRisky(combo) {
 
 async function loadShortcut() {
   const stored = await chrome.storage.local.get([SHORTCUT_KEY]);
-  const combo = typeof stored[SHORTCUT_KEY] === 'string' ? stored[SHORTCUT_KEY] : DEFAULT_SHORTCUT;
+  const combo = resolveShortcut(stored);
   const input = $('paletteShortcut');
   if (input) {
     input.value = comboToLabel(combo) || '未设置';

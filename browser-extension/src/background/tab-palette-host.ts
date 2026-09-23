@@ -12,9 +12,12 @@
 import { searchTabs } from './session-store/tab-search';
 import { queryGroups, queryTabs, updateTab } from './session-store/chrome-api';
 import { toSessionTab } from './session-store/utils';
+import {
+  TAB_PALETTE_SHORTCUT_KEY,
+  DEFAULT_TAB_PALETTE_SHORTCUT,
+} from '../shared/tab-palette-config';
 
-export const TAB_PALETTE_SHORTCUT_KEY = 'tabPaletteShortcut';
-export const DEFAULT_TAB_PALETTE_SHORTCUT = 'mod+shift+k';
+export { TAB_PALETTE_SHORTCUT_KEY, DEFAULT_TAB_PALETTE_SHORTCUT };
 
 const PALETTE_FILE = 'content/tab-palette.js';
 

@@ -243,7 +243,7 @@ flowchart LR
 **两层快捷键**(Chrome 的限制决定的,不是设计选择):
 
 - **扩展层**:`chrome.commands` 的 `open-tab-palette`(默认 `Cmd/Ctrl+Shift+K`)。它**不能**被改成任意按键 —— `chrome.commands` 只接受「修饰键 + 主键」的形式,且键位由浏览器统一管理;这一层的价值是页面**没有焦点时也能开**(比如焦点在地址栏),以及 `chrome://` 页面上仍可用。
-- **页面内层**(`content/tab-palette.ts`):content script 自己监听 keydown。这一层**可以**是任意组合,也是 popup 里给用户配的那一个(`chrome.storage.local` 的 `tabPaletteShortcut`,默认 `mod+shift+k`)。`mod` 是平台无关写法(mac=Cmd / 其它=Ctrl),存成 `mod` 让同一份配置跨平台可读。
+- **页面内层**(`content/tab-palette.ts`):content script 自己监听 keydown。这一层**可以**是任意组合,也是 popup 里给用户配的那一个(`chrome.storage.local` 的 `tabPaletteShortcut`,默认 `mod+shift+k`)。`mod` 是平台无关写法(mac=Cmd / 其它=Ctrl),存成 `mod` 让同一份配置跨平台可读。默认值定义在 `shared/tab-palette-config.ts`,**popup / background / content script 三处必须共用同一个默认**:content script 编译成经典脚本不能 import,靠构建时内联,曾经因为漏了兜底导致「全新安装时 popup 显示 ⌘⇧K 但快捷键不生效」。
 
 popup 里用 `keydown` 直接录按键(不是让用户手打组合串),并强制要求至少一个真修饰键(`Cmd`/`Ctrl`/`Alt`)——**只按 Shift 或裸键会和页面自身的输入/快捷键冲突**。`Backspace`/`Delete` 清空 = 停用页面内那一层(此时只剩扩展层生效)。录到 `Cmd/Ctrl+T/N/W/Q`、`Ctrl+Tab` 这类会被浏览器/系统**先**吃掉的组合时给警告,因为扩展根本收不到。
 

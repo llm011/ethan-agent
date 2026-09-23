@@ -515,13 +515,28 @@ type ElProps = Record<string, unknown>;
   );
 
   // 启动时同步一次快捷键配置
+  //
+  // 必须兜底默认值：全新安装时 storage 里还没有这个 key，直接用 undefined 会让
+  // parseCombo 返回 null，页面内快捷键就完全不生效——而 popup 那边有兜底、显示的是
+  // 默认键，用户看到的是「设置里明明写着 ⌘⇧K，按了却没反应」。
+  //
+  // 经典脚本不能 import，所以这里内联一份与 shared/tab-palette-config.ts 的
+  // resolveShortcut 相同的语义（没存过→默认；显式空串→停用）。改一边要改另一边，
+  // shared/tab-palette-config.spec.ts 里有断言钉住默认值本身。
+  const DEFAULT_SHORTCUT = 'mod+shift+k';
+  function resolve(combo: unknown): string {
+    return typeof combo === 'string' ? combo : DEFAULT_SHORTCUT;
+  }
   try {
-    chrome.storage.local.get(['tabPaletteShortcut'], (stored: { tabPaletteShortcut?: string }) => {
-      if (chrome.runtime.lastError) return;
-      applyShortcut(stored && stored.tabPaletteShortcut);
+    chrome.storage.local.get(['tabPaletteShortcut'], (stored: { tabPaletteShortcut?: unknown }) => {
+      if (chrome.runtime.lastError) {
+        applyShortcut(DEFAULT_SHORTCUT);
+        return;
+      }
+      applyShortcut(resolve(stored && stored.tabPaletteShortcut));
     });
   } catch {
-    /* 忽略 */
+    applyShortcut(DEFAULT_SHORTCUT);
   }
 
   // 监听设置变化，popup 改完立即生效，不必刷新页面
