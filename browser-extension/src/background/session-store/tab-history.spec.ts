@@ -5,6 +5,7 @@ import {
   filterToday,
   normalizeClosedAt,
   searchTabsWithHistory,
+  toClosedEntries,
   type ClosedTabEntry,
 } from './tab-history';
 import type { BrowserSessionTab } from '../../shared';
@@ -282,5 +283,55 @@ describe('合并后的 limit', () => {
       TODAY,
     );
     expect(res.matches.length).toBeLessThanOrEqual(10);
+  });
+});
+
+describe('toClosedEntries（真实 sessions 负载）', () => {
+  it('已关闭的 tab 没有 id 也能转出来，不应该抛', () => {
+    // 这就是线上真实的形状：tab 已经不存在，id/windowId 都取不到。
+    // 之前这里走 toSessionTab → getTabId，会直接抛 "Missing Chrome tab id"，
+    // 异常被调用方 catch 吞掉，于是「开关点了完全没反应」。
+    const raw = [
+      { lastModified: Math.floor(TODAY / 1000), tab: { url: 'https://a.com/x', title: 'A' } },
+    ];
+    const entries = toClosedEntries(raw);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.tab.url).toBe('https://a.com/x');
+    expect(entries[0]!.tab.title).toBe('A');
+    expect(typeof entries[0]!.tab.tabId).toBe('number');
+  });
+
+  it('多条没有 id 时兜底 id 不重复（否则按 tabId 排序/去重会串）', () => {
+    const raw = [
+      { lastModified: Math.floor(TODAY / 1000), tab: { url: 'https://a.com/1', title: 'A' } },
+      { lastModified: Math.floor(TODAY / 1000), tab: { url: 'https://a.com/2', title: 'B' } },
+    ];
+    const ids = toClosedEntries(raw).map(e => e.tab.tabId);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('关闭整个窗口时窗口里的 tab 逐个展开', () => {
+    const raw = [
+      {
+        lastModified: Math.floor(TODAY / 1000),
+        window: { tabs: [{ url: 'https://a.com', title: 'A' }, { url: 'https://b.com', title: 'B' }] },
+      },
+    ];
+    expect(toClosedEntries(raw).map(e => e.tab.title)).toEqual(['A', 'B']);
+  });
+
+  it('整条链路能真的搜到历史（不抛且命中）', () => {
+    const raw = [
+      { lastModified: Math.floor(TODAY / 1000), tab: { url: 'https://closed.com/spec', title: 'Spec' } },
+    ];
+    const res = searchTabsWithHistory(
+      [tab(1, 'https://open.com', 'Open')],
+      toClosedEntries(raw),
+      { query: 'spec', includeClosed: true },
+      new Map(),
+      TODAY,
+    );
+    expect(res.matches).toHaveLength(1);
+    expect(res.matches[0]!.source).toBe('closed');
   });
 });

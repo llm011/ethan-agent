@@ -41,6 +41,57 @@ export function normalizeClosedAt(lastModified: number | undefined): number {
   return lastModified < 1e11 ? lastModified * 1000 : lastModified;
 }
 
+/**
+ * 已关闭的 tab 转成 BrowserSessionTab。
+ *
+ * **不能复用 `toSessionTab`**：它走 `getTabId`，而 `id` 缺失时直接 throw。
+ * `sessions` 返回的是**已经不存在的** tab，`id` 基本取不到（`windowId`/`groupId`
+ * 同样没有意义），用 `toSessionTab` 会在第一条就抛 —— 而调用方的 catch 会把它
+ * 降级成空数组，表现是「开关点了完全没反应」，且没有任何线索。所以这里自己构造：
+ * id 缺失时用负数序号兜底，只保证「有个唯一键」+「URL/标题可搜可点」。
+ */
+export function closedToSessionTab(
+  tab: { id?: number; windowId?: number; url?: string; title?: string; favIconUrl?: string },
+  fallbackId: number,
+): BrowserSessionTab {
+  return {
+    tabId: typeof tab.id === 'number' ? tab.id : fallbackId,
+    windowId: typeof tab.windowId === 'number' ? tab.windowId : -1,
+    url: tab.url,
+    title: tab.title,
+    ...(tab.favIconUrl ? { favIconUrl: tab.favIconUrl } : {}),
+  };
+}
+
+/** `sessions.Session` 里我们真正用到的部分（故意放宽类型，便于单测构造）。 */
+export interface RawSession {
+  lastModified?: number;
+  tab?: { id?: number; windowId?: number; url?: string; title?: string; favIconUrl?: string };
+  window?: {
+    tabs?: { id?: number; windowId?: number; url?: string; title?: string; favIconUrl?: string }[];
+  };
+}
+
+/**
+ * 把 sessions 返回的 Session 摊平成「已关闭的 tab」条目，带上关闭时间。
+ *
+ * 关闭整个窗口时窗口里的 tab 会一并带出来，这里逐个展开。
+ */
+export function toClosedEntries(sessions: RawSession[]): ClosedTabEntry[] {
+  const out: ClosedTabEntry[] = [];
+  let seq = 0;
+  for (const s of sessions) {
+    const closedAt = normalizeClosedAt(s.lastModified);
+    if (s.tab) {
+      out.push({ tab: closedToSessionTab(s.tab, -(++seq)), closedAt });
+    }
+    for (const t of s.window?.tabs ?? []) {
+      out.push({ tab: closedToSessionTab(t, -(++seq)), closedAt });
+    }
+  }
+  return out;
+}
+
 /** 把 URL 归一化成去重键：忽略 hash，去掉末尾斜杠差异。 */
 export function dedupeKey(url: string | undefined): string {
   if (!url) return '';

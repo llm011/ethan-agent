@@ -29,6 +29,8 @@ interface PaletteResults {
   scanned: number;
   total: number;
   error?: string;
+  /** 开关开着但取历史失败时的原因（例如权限缺失），面板据此提示而不是假装没有。 */
+  closedError?: string;
 }
 
 interface PaletteState {
@@ -42,6 +44,8 @@ interface PaletteState {
   error: string;
   /** 是否把「今天已关闭的 tab」也算进来。默认关，每次打开面板都重置。 */
   includeClosed: boolean;
+  /** 开关开着却取不到历史时的原因，直接显示给用户 */
+  closedError: string;
   /** 请求序号：避免快速输入时旧响应盖掉新结果 */
   seq: number;
   lastFocused: HTMLElement | null;
@@ -69,6 +73,7 @@ type ElProps = Record<string, unknown>;
     loading: false,
     error: '',
     includeClosed: false,
+    closedError: '',
     seq: 0,
     lastFocused: null,
   };
@@ -247,6 +252,12 @@ type ElProps = Record<string, unknown>;
           text: state.query ? '没有匹配的标签页' : '没有可显示的标签页',
         }),
       );
+      // 开关开着但历史取不到：说清原因，别让用户以为「今天确实没关过 tab」
+      if (state.includeClosed && state.closedError) {
+        listEl.appendChild(
+          el('div', { class: 'empty', text: '历史读取失败：' + state.closedError }),
+        );
+      }
       return;
     }
 
@@ -323,6 +334,10 @@ type ElProps = Record<string, unknown>;
           : '共 ' + state.scanned + ' 个' +
             (state.includeClosed ? '标签页与历史' : '标签页'),
     });
+    // 历史取不到时，即便有开着的命中也要让用户知道开关那半边是坏的
+    if (state.includeClosed && state.closedError) {
+      left.textContent = '历史读取失败：' + state.closedError;
+    }
     const right = el('span', {}, []);
     if (state.includeClosed) {
       right.appendChild(el('kbd', { text: 'Alt+H' }));
@@ -345,6 +360,7 @@ type ElProps = Record<string, unknown>;
     state.matches = (res && res.matches) || [];
     state.scanned = (res && res.scanned) || 0;
     state.total = (res && res.total) || 0;
+    state.closedError = (res && res.closedError) || '';
     if (state.matches.length) state.error = '';
     state.activeIndex = 0;
     state.loading = false;
@@ -555,6 +571,7 @@ type ElProps = Record<string, unknown>;
     state.error = '';
     // 下次打开回到默认「只搜还开着的 tab」——用户按快捷键时多半是想找开着的
     state.includeClosed = false;
+    state.closedError = '';
     state.seq++; // 让在途响应失效
 
     if (state.lastFocused && state.lastFocused.focus) {
