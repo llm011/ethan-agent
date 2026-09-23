@@ -9,7 +9,7 @@
 //
 // 关键：这条链路**只依赖 chrome.tabs / chrome.tabGroups**，不碰 ethan 的 ws。
 // ethan 没起、端口不对、代理拦了 localhost，都不影响 tab 搜索。
-import { searchTabsWithHistory } from './session-store/tab-history';
+import { normalizeClosedAt, searchTabsWithHistory } from './session-store/tab-history';
 import type { ClosedTabEntry } from './session-store/tab-history';
 import {
   getRecentlyClosed,
@@ -145,8 +145,8 @@ export async function getShortcut(): Promise<string> {
 function toClosedEntries(sessions: chrome.sessions.Session[]): ClosedTabEntry[] {
   const out: ClosedTabEntry[] = [];
   for (const s of sessions) {
-    // lastModified 的单位是秒，转成毫秒与其他时间戳口径一致
-    const closedAt = (s.lastModified ?? 0) * 1000;
+    // lastModified 的单位官方文档和类型注释说法不一致，交给 normalizeClosedAt 判
+    const closedAt = normalizeClosedAt(s.lastModified);
     if (s.tab) {
       out.push({ tab: toSessionTab(s.tab), closedAt });
     }

@@ -8,7 +8,7 @@
  *
  * 本模块是纯函数（不碰 chrome API），方便单测。
  */
-import { searchTabs } from './tab-search';
+import { clampLimit, searchTabs } from './tab-search';
 import type {
   BrowserSessionTab,
   BrowserTabSearchMatch,
@@ -19,8 +19,26 @@ import type {
 /** 一条已关闭的 tab —— 在 BrowserSessionTab 基础上带上关闭时间。 */
 export interface ClosedTabEntry {
   tab: BrowserSessionTab;
-  /** 关闭时间（毫秒时间戳），来自 sessions.Session.lastModified（秒 → 毫秒）。 */
+  /** 关闭时间（毫秒时间戳）。来源见 normalizeClosedAt 对 lastModified 单位的处理。 */
   closedAt: number;
+}
+
+/**
+ * 把 `sessions.Session.lastModified` 归一成**毫秒**时间戳。
+ *
+ * 这个字段的单位有分歧：Chrome 官方文档写的是「seconds since the epoch」，
+ * 而 `@types/chrome` 的类型注释写的是 milliseconds。猜错一边的后果是「只搜今天」
+ * 直接失效（按秒当毫秒会算成 1970 年，一条都留不下；按毫秒当秒会溢出到遥远的未来，
+ * 昨天的也全算今天）——而且不会报错，只是搜不到历史，很难发现。
+ *
+ * 所以这里不赌单位，用量级判断：当前时间戳在秒级约 1.7e9、毫秒级约 1.7e12。
+ * 1e11 这个分界落在两者之间且远离任何一边，足以区分。
+ */
+export function normalizeClosedAt(lastModified: number | undefined): number {
+  if (typeof lastModified !== 'number' || !Number.isFinite(lastModified) || lastModified <= 0) {
+    return 0;
+  }
+  return lastModified < 1e11 ? lastModified * 1000 : lastModified;
 }
 
 /** 把 URL 归一化成去重键：忽略 hash，去掉末尾斜杠差异。 */
@@ -157,15 +175,16 @@ export function searchTabsWithHistory(
     return a.tab.tabId - b.tab.tabId;
   });
 
-  const limit = closedResult.truncated || openResult.truncated
-    ? Math.max(openResult.matches.length, closedResult.matches.length)
-    : merged.length;
-  const matches = merged.slice(0, limit);
+  // 截断在**合并之后**按同一个 limit 做。
+  // 不能沿用两批各自的 matches 长度：那样等于把上限翻倍（两批各留 limit 条），
+  // 面板会一次列出 2×limit 行，而面板要限高滚动。
+  const matches = merged.slice(0, clampLimit(params.limit));
 
   return {
     query: openResult.query,
     total: openResult.total + closedResult.total,
     scanned: openResult.scanned + closedResult.scanned,
+    // 只看合并后的总数够不够撑满 limit，两批各自的 truncated 在这里没有意义
     truncated: merged.length > matches.length,
     matches,
   };

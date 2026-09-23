@@ -3,6 +3,7 @@ import {
   dedupeKey,
   excludeOpenTabs,
   filterToday,
+  normalizeClosedAt,
   searchTabsWithHistory,
   type ClosedTabEntry,
 } from './tab-history';
@@ -200,5 +201,86 @@ describe('searchTabsWithHistory', () => {
       TODAY,
     );
     expect(res.truncated).toBe(false);
+  });
+});
+
+describe('normalizeClosedAt', () => {
+  it('秒级时间戳 ×1000', () => {
+    // 2026-09-24T15:00:00Z 的秒级表示
+    expect(normalizeClosedAt(Math.floor(TODAY / 1000))).toBe(Math.floor(TODAY / 1000) * 1000);
+  });
+
+  it('毫秒级时间戳原样返回', () => {
+    expect(normalizeClosedAt(TODAY)).toBe(TODAY);
+  });
+
+  it('两种单位归一后都落在「今天」里', () => {
+    const secs = Math.floor(TODAY / 1000);
+    const fromSec = filterToday([{ tab: tab(1, 'https://a.com'), closedAt: normalizeClosedAt(secs) }], TODAY);
+    const fromMs = filterToday([{ tab: tab(1, 'https://a.com'), closedAt: normalizeClosedAt(TODAY) }], TODAY);
+    expect(fromSec).toHaveLength(1);
+    expect(fromMs).toHaveLength(1);
+  });
+
+  it('脏数据返回 0（会被 filterToday 丢掉）', () => {
+    expect(normalizeClosedAt(undefined)).toBe(0);
+    expect(normalizeClosedAt(0)).toBe(0);
+    expect(normalizeClosedAt(Number.NaN)).toBe(0);
+  });
+});
+
+describe('合并后的 limit', () => {
+  function manyOpen(n: number): BrowserSessionTab[] {
+    return Array.from({ length: n }, (_, i) => tab(i + 1, `https://open${i}.com/page`, `page ${i}`));
+  }
+  function manyClosed(n: number): ClosedTabEntry[] {
+    return Array.from({ length: n }, (_, i) =>
+      closed(100 + i, `https://closed${i}.com/page`, 1, `page ${i}`),
+    );
+  }
+
+  it('合并后条数不超过 limit（不会变成两批各 limit 条）', () => {
+    const res = searchTabsWithHistory(
+      manyOpen(8),
+      manyClosed(8),
+      { query: 'page', limit: 10, includeClosed: true },
+      new Map(),
+      TODAY,
+    );
+    expect(res.matches.length).toBe(10);
+  });
+
+  it('被截断时 truncated 为 true', () => {
+    const res = searchTabsWithHistory(
+      manyOpen(8),
+      manyClosed(8),
+      { query: 'page', limit: 10, includeClosed: true },
+      new Map(),
+      TODAY,
+    );
+    expect(res.truncated).toBe(true);
+  });
+
+  it('没截断时 truncated 为 false', () => {
+    const res = searchTabsWithHistory(
+      manyOpen(3),
+      manyClosed(2),
+      { query: 'page', limit: 10, includeClosed: true },
+      new Map(),
+      TODAY,
+    );
+    expect(res.matches).toHaveLength(5);
+    expect(res.truncated).toBe(false);
+  });
+
+  it('limit 未传时用默认上限（不会无限返回）', () => {
+    const res = searchTabsWithHistory(
+      manyOpen(30),
+      manyClosed(30),
+      { query: 'page', includeClosed: true },
+      new Map(),
+      TODAY,
+    );
+    expect(res.matches.length).toBeLessThanOrEqual(10);
   });
 });
