@@ -22,7 +22,6 @@
 """
 
 import asyncio
-from datetime import datetime
 
 from ethan.memory.session import SessionStore
 
@@ -196,5 +195,34 @@ def test_find_today_session_matches_by_source_not_title(tmp_path):
         await store.create("m", source="web")
         found2 = await store.find_today_session("heartbeat")
         assert found2 is not None and found2.id == today.id
+
+    asyncio.run(_run())
+
+
+def test_heartbeat_does_not_clobber_user_renamed_title(tmp_path, monkeypatch):
+    """用户在侧栏改过标题的心跳会话，不该被下一次心跳的自愈静默覆盖回去。
+
+    侧栏「心跳」分组和普通分组共用 renderSession，右键菜单里有「重命名」，
+    走的是 PATCH /sessions/{id}（无前缀校验）。用户改名后标题就不带 `[心跳]` 了，
+    此时「缺前缀」是用户意图，不是中断残留 —— 自愈只该治从未命名成功的占位标题。
+    """
+
+    async def _run():
+        store = await _mk_store(tmp_path)
+        s = await store.create(
+            "m", source="heartbeat", title="[心跳] 2026-09-23 · 系统维护"
+        )
+        # 用户重命名（模拟 PATCH /sessions/{id}）
+        await store.update_title(s.id, "今天的心跳（我看过了）")
+
+        from ethan.memory.session import _is_placeholder_title
+
+        found = await store.find_today_session("heartbeat")
+        assert found is not None and found.id == s.id
+        # 缺前缀，但不是占位标题 -> 不该被判为「需要自愈」
+        assert not found.title.startswith("[心跳]")
+        assert not _is_placeholder_title(found.title, []), (
+            "用户自定义标题不该被当成未命名孤儿"
+        )
 
     asyncio.run(_run())
