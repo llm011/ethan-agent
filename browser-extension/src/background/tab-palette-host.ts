@@ -9,8 +9,14 @@
 //
 // 关键：这条链路**只依赖 chrome.tabs / chrome.tabGroups**，不碰 ethan 的 ws。
 // ethan 没起、端口不对、代理拦了 localhost，都不影响 tab 搜索。
-import { searchTabs } from './session-store/tab-search';
-import { queryGroups, queryTabs, updateTab } from './session-store/chrome-api';
+import { normalizeClosedAt, searchTabsWithHistory } from './session-store/tab-history';
+import type { ClosedTabEntry } from './session-store/tab-history';
+import {
+  getRecentlyClosed,
+  queryGroups,
+  queryTabs,
+  updateTab,
+} from './session-store/chrome-api';
 import { toSessionTab } from './session-store/utils';
 import {
   TAB_PALETTE_SHORTCUT_KEY,
@@ -135,8 +141,27 @@ export async function getShortcut(): Promise<string> {
   }
 }
 
+/** 把 sessions 返回的 Session 摊平成「已关闭的 tab」条目，带上关闭时间。 */
+function toClosedEntries(sessions: chrome.sessions.Session[]): ClosedTabEntry[] {
+  const out: ClosedTabEntry[] = [];
+  for (const s of sessions) {
+    // lastModified 的单位官方文档和类型注释说法不一致，交给 normalizeClosedAt 判
+    const closedAt = normalizeClosedAt(s.lastModified);
+    if (s.tab) {
+      out.push({ tab: toSessionTab(s.tab), closedAt });
+    }
+    // 关掉整个窗口时会把窗口里的 tab 一并带出来，逐个展开
+    if (s.window?.tabs) {
+      for (const t of s.window.tabs) {
+        out.push({ tab: toSessionTab(t), closedAt });
+      }
+    }
+  }
+  return out;
+}
+
 /** 面板发来的 search 请求：在扩展侧匹配，只回命中的几条。 */
-async function handleSearch(query: string) {
+async function handleSearch(query: string, includeClosed = false) {
   const tabs = (await queryTabs({})).map(toSessionTab);
   const groups = new Map<number, { title?: string; color?: string }>();
   try {
@@ -149,7 +174,18 @@ async function handleSearch(query: string) {
   } catch {
     // tabGroups 不可用时降级：不影响搜索本身
   }
-  return searchTabs(tabs, { query, limit: 50 }, groups);
+
+  // 只有开关打开时才去取历史：默认路径不碰 sessions，也就不会因缺权限而报错
+  let closed: ClosedTabEntry[] = [];
+  if (includeClosed) {
+    try {
+      closed = toClosedEntries(await getRecentlyClosed());
+    } catch {
+      closed = []; // 取不到历史就当没有，不影响已打开的 tab 结果
+    }
+  }
+
+  return searchTabsWithHistory(tabs, closed, { query, limit: 50, includeClosed }, groups);
 }
 
 /** 面板发来的 activate 请求：切到那个 tab 并聚焦它的窗口。 */
@@ -182,7 +218,10 @@ export function registerTabPaletteMessages(): void {
     if (!msg || msg.target !== 'tabPalette') return;
 
     if (msg.type === 'search') {
-      handleSearch(typeof msg.query === 'string' ? msg.query : '')
+      handleSearch(
+        typeof msg.query === 'string' ? msg.query : '',
+        msg.includeClosed === true,
+      )
         .then(res => sendResponse(res))
         .catch(err =>
           sendResponse({

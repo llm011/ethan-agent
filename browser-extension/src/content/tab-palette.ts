@@ -18,6 +18,10 @@ interface PaletteMatch {
     favIconUrl?: string;
   };
   groupTitle?: string;
+  /** 'open' = 当前还开着；'closed' = 历史（今天已关闭）。 */
+  source?: 'open' | 'closed';
+  /** 仅 closed：关闭时间（毫秒）。 */
+  closedAt?: number;
 }
 
 interface PaletteResults {
@@ -36,6 +40,8 @@ interface PaletteState {
   total: number;
   loading: boolean;
   error: string;
+  /** 是否把「今天已关闭的 tab」也算进来。默认关，每次打开面板都重置。 */
+  includeClosed: boolean;
   /** 请求序号：避免快速输入时旧响应盖掉新结果 */
   seq: number;
   lastFocused: HTMLElement | null;
@@ -62,6 +68,7 @@ type ElProps = Record<string, unknown>;
     total: 0,
     loading: false,
     error: '',
+    includeClosed: false,
     seq: 0,
     lastFocused: null,
   };
@@ -138,6 +145,28 @@ type ElProps = Record<string, unknown>;
       '  font-size: 13px; color: #9aa0aa; }',
       '#' + ROOT_ID + ' kbd { font-family: inherit; font-size: 10px; padding: 1px 4px;',
       '  border-radius: 4px; background: rgba(127,127,127,0.18); }',
+      '#' + ROOT_ID + ' .head { display: flex; align-items: center; gap: 8px;',
+      '  padding: 0 16px 10px; }',
+      '#' + ROOT_ID + ' .tgl { display: inline-flex; align-items: center; gap: 6px;',
+      '  font-size: 11px; color: #6b7280; cursor: pointer; padding: 3px 9px;',
+      '  border-radius: 999px; border: 1px solid #e2e5ea; user-select: none; flex: none; }',
+      '#' + ROOT_ID + ' .tgl:hover { border-color: #c9ced6; }',
+      '#' + ROOT_ID + ' .tgl .sw { width: 24px; height: 13px; border-radius: 999px;',
+      '  background: #d3d7de; position: relative; transition: background .12s; flex: none; }',
+      '#' + ROOT_ID + ' .tgl .sw::after { content: ""; position: absolute; top: 1.5px; left: 1.5px;',
+      '  width: 10px; height: 10px; border-radius: 50%; background: #fff;',
+      '  transition: transform .12s; }',
+      '#' + ROOT_ID + ' .tgl.on { color: #4f46e5; border-color: #c7c9f7; background: #f5f5ff; }',
+      '#' + ROOT_ID + ' .tgl.on .sw { background: #6366f1; }',
+      '#' + ROOT_ID + ' .tgl.on .sw::after { transform: translateX(11px); }',
+      '#' + ROOT_ID + ' .row .src { font-size: 10px; padding: 1px 6px; border-radius: 999px;',
+      '  flex: none; white-space: nowrap; background: rgba(217,119,6,0.14); color: #b45309; }',
+      '#' + ROOT_ID + ' .row.closed .t, #' + ROOT_ID + ' .row.closed .url { opacity: 0.72; }',
+      '@media (prefers-color-scheme: dark) {',
+      '  #' + ROOT_ID + ' .tgl { color: #9aa0aa; border-color: #343a46; }',
+      '  #' + ROOT_ID + ' .tgl.on { color: #a5b4fc; border-color: #4c4f86; background: #262a3f; }',
+      '  #' + ROOT_ID + ' .row .src { background: rgba(251,191,36,0.16); color: #fbbf24; }',
+      '}',
     ].join('\n');
     (document.head || document.documentElement).appendChild(styleEl);
   }
@@ -190,6 +219,15 @@ type ElProps = Record<string, unknown>;
     return /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '');
   }
 
+  /** 历史条目右侧的标记：能算出时间就显示 HH:MM，否则只写「已关闭」。 */
+  function closedLabel(m: PaletteMatch): string {
+    if (!m.closedAt) return '已关闭';
+    const d = new Date(m.closedAt);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return '已关闭 ' + hh + ':' + mm;
+  }
+
   function render() {
     if (!listEl) return;
     listEl.textContent = '';
@@ -212,11 +250,22 @@ type ElProps = Record<string, unknown>;
       return;
     }
 
-    // 按窗口分组显示（多窗口时一眼能分清）
+    // 按窗口分组显示（多窗口时一眼能分清）。
+    // 历史条目没有窗口归属，单独归到「已关闭」一段——它排在最后，
+    // 所以「窗口 N」标题只会出现在前面连续的开着的那批里。
     let lastWindow: number | undefined;
+    let closedHeaderDone = false;
     state.matches.forEach((m, idx) => {
       const tab = m.tab;
-      if (tab.windowId !== lastWindow) {
+      const closed = m.source === 'closed';
+      if (closed) {
+        if (!closedHeaderDone) {
+          closedHeaderDone = true;
+          listEl!.appendChild(
+            el('div', { class: 'hd', text: '今天已关闭' }),
+          );
+        }
+      } else if (tab.windowId !== lastWindow) {
         lastWindow = tab.windowId;
         listEl!.appendChild(el('div', { class: 'hd', text: '窗口 ' + tab.windowId }));
       }
@@ -234,7 +283,10 @@ type ElProps = Record<string, unknown>;
       const row = el(
         'div',
         {
-          class: 'row' + (idx === state.activeIndex ? ' sel' : ''),
+          class:
+            'row' +
+            (idx === state.activeIndex ? ' sel' : '') +
+            (closed ? ' closed' : ''),
           onmouseenter: () => {
             if (state.activeIndex === idx) return;
             state.activeIndex = idx;
@@ -250,6 +302,7 @@ type ElProps = Record<string, unknown>;
             el('div', { class: 't', text: tab.title || '(无标题)' }),
             el('div', { class: 'url', text: hostOf(tab.url) }),
           ]),
+          closed ? el('span', { class: 'src', text: closedLabel(m) }) : null,
           m.groupTitle ? el('span', { class: 'tag', text: m.groupTitle }) : null,
           tab.active ? el('span', { class: 'tag', text: '当前' }) : null,
         ],
@@ -265,17 +318,25 @@ type ElProps = Record<string, unknown>;
       text: state.loading
         ? '搜索中…'
         : state.total
-          ? '匹配 ' + state.total + ' / ' + state.scanned + ' 个标签页'
-          : '共 ' + state.scanned + ' 个标签页',
+          ? '匹配 ' + state.total + ' / ' + state.scanned + ' 个' +
+            (state.includeClosed ? '标签页与历史' : '标签页')
+          : '共 ' + state.scanned + ' 个' +
+            (state.includeClosed ? '标签页与历史' : '标签页'),
     });
-    const right = el('span', {}, [
-      el('kbd', { text: '↑↓' }),
-      document.createTextNode(' 选择  '),
-      el('kbd', { text: 'Enter' }),
-      document.createTextNode(' 跳转  '),
-      el('kbd', { text: 'Esc' }),
-      document.createTextNode(' 关闭'),
-    ]);
+    const right = el('span', {}, []);
+    if (state.includeClosed) {
+      right.appendChild(el('kbd', { text: 'Alt+H' }));
+      right.appendChild(document.createTextNode(' 隐藏已关闭  '));
+    } else {
+      right.appendChild(el('kbd', { text: 'Alt+H' }));
+      right.appendChild(document.createTextNode(' 搜历史  '));
+    }
+    right.appendChild(el('kbd', { text: '↑↓' }));
+    right.appendChild(document.createTextNode(' 选择  '));
+    right.appendChild(el('kbd', { text: 'Enter' }));
+    right.appendChild(document.createTextNode(' 跳转  '));
+    right.appendChild(el('kbd', { text: 'Esc' }));
+    right.appendChild(document.createTextNode(' 关闭'));
     metaEl.appendChild(left);
     metaEl.appendChild(right);
   }
@@ -299,7 +360,12 @@ type ElProps = Record<string, unknown>;
     updateMeta();
     try {
       chrome.runtime.sendMessage(
-        { target: 'tabPalette', type: 'search', query: state.query },
+        {
+          target: 'tabPalette',
+          type: 'search',
+          query: state.query,
+          includeClosed: state.includeClosed,
+        },
         (res: PaletteResults | undefined) => {
           // 忽略过期响应（用户已经继续打字）
           if (mySeq !== state.seq) return;
@@ -378,6 +444,13 @@ type ElProps = Record<string, unknown>;
       activate(state.activeIndex);
       return;
     }
+    // Alt+H：不用离开键盘去点开关。跟 Enter/↑↓ 一样在输入框里也能按。
+    if (e.altKey && (e.key === 'h' || e.key === 'H')) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleClosed();
+      return;
+    }
     // 输入期间的按键不要穿透给页面的快捷键
     e.stopPropagation();
   }
@@ -407,12 +480,33 @@ type ElProps = Record<string, unknown>;
     listEl = list;
     metaEl = meta;
 
+    // 历史开关：默认关（只搜还开着的 tab），点了才把「今天已关闭的」并进来。
+    // 用 tabindex=-1 而不是 button：输入框要一直保持焦点，否则用户打不了字；
+    // 鼠标点它一下仍然会触发 click，键盘上则用 Alt+H 切换。
+    const toggle = el(
+      'div',
+      {
+        class: 'tgl' + (state.includeClosed ? ' on' : ''),
+        role: 'button',
+        tabindex: '-1',
+        title: '把今天已关闭的标签页也一起搜（Alt+H）',
+        onclick: () => {
+          toggleClosed();
+        },
+      },
+      [
+        el('span', { class: 'sw' }),
+        el('span', { text: '含已关闭' }),
+      ],
+    );
+
     const container = el(
       'div',
       { id: ROOT_ID },
       [
         el('div', { class: 'panel' }, [
           input,
+          el('div', { class: 'head' }, [toggle]),
           el('div', { class: 'sep' }),
           list,
           meta,
@@ -435,6 +529,15 @@ type ElProps = Record<string, unknown>;
     search();
   }
 
+  /** 切换「含已关闭」。开关状态不持久化：每次开面板都从默认关开始。 */
+  function toggleClosed() {
+    state.includeClosed = !state.includeClosed;
+    // 开关要立刻反映在视觉上，不等 search 回来
+    if (root) root.querySelectorAll('.tgl').forEach(n => n.classList.toggle('on', state.includeClosed));
+    search();
+    if (inputEl) inputEl.focus();
+  }
+
   function close() {
     if (!state.open) return;
     document.removeEventListener('keydown', onKeydown, true);
@@ -450,6 +553,8 @@ type ElProps = Record<string, unknown>;
     state.matches = [];
     state.activeIndex = 0;
     state.error = '';
+    // 下次打开回到默认「只搜还开着的 tab」——用户按快捷键时多半是想找开着的
+    state.includeClosed = false;
     state.seq++; // 让在途响应失效
 
     if (state.lastFocused && state.lastFocused.focus) {

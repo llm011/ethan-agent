@@ -58,7 +58,8 @@
     "scripting",
     "contextMenus",
     "notifications",
-    "clipboardWrite"
+    "clipboardWrite",
+    "sessions"
   ],
   "host_permissions": [
     "ws://localhost/*",
