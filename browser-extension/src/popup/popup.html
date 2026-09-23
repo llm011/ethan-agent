@@ -169,6 +169,23 @@
       </label>
     </div>
 
+    <div class="toggle-row" style="display:block">
+      <div class="label">标签页搜索快捷键</div>
+      <div class="desc">
+        在任意网页里按下即可搜索已打开的标签页，不依赖 Ethan 是否在运行。
+      </div>
+      <div style="display:flex;gap:8px;margin-top:9px;align-items:center">
+        <input id="paletteShortcut" readonly placeholder="点这里后按下按键组合"
+               style="flex:1;cursor:pointer;font-family:ui-monospace,SFMono-Regular,Menlo,monospace" />
+        <button id="paletteReset" style="flex:none;width:auto;padding:8px 10px;background:#eef1f8;color:#3a4150">恢复默认</button>
+      </div>
+      <div class="hint" id="paletteShortcutHint">点上面的输入框，然后直接按下你想要的组合键</div>
+    </div>
+
+    <div class="row">
+      <button id="openPalette">打开标签页搜索</button>
+    </div>
+
     <script type="module" src="popup.js"></script>
   </body>
 </html>

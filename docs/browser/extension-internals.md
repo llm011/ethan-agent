@@ -233,3 +233,22 @@ flowchart LR
 **开关**:按时间自动休息默认开启,popup 里「旧标签自动休息」可关(`chrome.storage.local` 的 `autoRestTabs`,默认 `true`,显式 `false` 才关)。`organizeTabs` 的 dispatch 在调用方没传 `restMode` 时读这个开关,注入 `'yesterday'`(开)或 `'off'`(关);工具侧显式传的 `rest_mode` 优先,可逐次覆盖。`restMode: 'off'` 只拦 `rest_auto`,`rest`/`rest_group` 是显式指令,不受开关影响。
 
 结果按 `applied.rest.rested` / `restSkipped`(带中文原因) / `restFailed` 三桶上报。另外一个坑:进 `restTabs` 时要先拿到 CDP 占用集合,拿不到就**整批放弃**并把所有 tab 记入 `restFailed` —— 不能猜一个空集合继续动手,那可能把挂着调试器的 tab 给 discard 了。
+
+## 7. Tab 搜索命令面板(不依赖 ethan)
+
+页面里按快捷键弹出的 tab 搜索浮层。**关键性质:这条链路完全不经过 ethan 的 WebSocket** —— 只要扩展装着,无论 ethan 是否在运行、端口是否改动、系统代理是否拦了 `ws://localhost`,tab 搜索都能用。tab 数据和匹配都在扩展侧。
+
+**为什么匹配不在 Python 侧**:早期 `browser_tab(action='find_tab')` 是把 `tabs.userList` 的全量 tab 拉回 Python,再在那边做 `target in url` 的子串匹配。那是把**数据搬到计算处**,而不是把计算搬到数据处:用户开几百个 tab 时每次搜索都要传一遍全量列表,而插件本来就有 `chrome.tabs` / `chrome.tabGroups`。现在 Python 只发关键词、只收命中的几条。
+
+**两层快捷键**(Chrome 的限制决定的,不是设计选择):
+
+- **扩展层**:`chrome.commands` 的 `open-tab-palette`(默认 `Cmd/Ctrl+Shift+K`)。它**不能**被改成任意按键 —— `chrome.commands` 只接受「修饰键 + 主键」的形式,且键位由浏览器统一管理;这一层的价值是页面**没有焦点时也能开**(比如焦点在地址栏),以及 `chrome://` 页面上仍可用。
+- **页面内层**(`content/tab-palette.ts`):content script 自己监听 keydown。这一层**可以**是任意组合,也是 popup 里给用户配的那一个(`chrome.storage.local` 的 `tabPaletteShortcut`,默认 `mod+shift+k`)。`mod` 是平台无关写法(mac=Cmd / 其它=Ctrl),存成 `mod` 让同一份配置跨平台可读。
+
+popup 里用 `keydown` 直接录按键(不是让用户手打组合串),并强制要求至少一个真修饰键(`Cmd`/`Ctrl`/`Alt`)——**只按 Shift 或裸键会和页面自身的输入/快捷键冲突**。`Backspace`/`Delete` 清空 = 停用页面内那一层(此时只剩扩展层生效)。录到 `Cmd/Ctrl+T/N/W/Q`、`Ctrl+Tab` 这类会被浏览器/系统**先**吃掉的组合时给警告,因为扩展根本收不到。
+
+**注入方式是按需注入**,不是声明式 `content_scripts`:页面加载不为它付出任何成本,只在用户真按快捷键时 `chrome.scripting.executeScript` 注入一次(记在 `injectedTabs`,导航后失效重注)。`chrome://`、扩展页、应用商店等特权页无法注入 —— 这种情况**发系统通知说明原因**,而不是静默无反应。过去 popup 也会「转圈没反馈」,这类「不知道在等什么」的问题比慢本身更糟。
+
+**匹配语义**(`session-store/tab-search.ts`,纯函数、有单测):空格切词、**任一命中即匹配(OR)**、大小写不敏感、`title` 权重高于 `url`、词边界区分「完全/前缀/子串」匹配(`hub.docker.com` 搜 `hub` 优于 `github.com`),按「命中词数 → 分数 → 活动优先」排序。
+
+一个易踩的坑:`scoreField` 返回 **`null`** 而不是 `0` 表示未命中 —— 子串命中的加成本来就是 0 分,若用 `0` 兼作「未命中」哨兵,`github.com` 里搜 `hub` 会被当成没命中而漏掉候选。命中与否必须和得分高低分开表达。

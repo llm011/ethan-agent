@@ -87,6 +87,7 @@ export function toSessionTab(tab: chrome.tabs.Tab): BrowserSessionTab {
     url: tab.url,
     title: tab.title,
     active: tab.active,
+    ...(tab.favIconUrl ? { favIconUrl: tab.favIconUrl } : {}),
   };
 }
 

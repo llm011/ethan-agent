@@ -10,6 +10,7 @@ import type {
   BrowserTabOrganizeOp,
   BrowserTabGroupColor,
   BrowserTabRestMode,
+  BrowserTabSearchParams,
 } from '../../shared';
 import {
   createInvalidParamsError,
@@ -191,4 +192,34 @@ function normalizeOrganizeOp(raw: unknown, idx: number): BrowserTabOrganizeOp {
     };
   }
   throw createInvalidParamsError(`tabs.organize ops[${idx}]: unknown op "${String(op)}"`);
+}
+
+export function normalizeTabSearchParams(params: unknown): BrowserTabSearchParams {
+  // 搜索允许空 params（等价 userList），所以不像其他方法那样硬要求对象。
+  if (params == null) {
+    return {};
+  }
+  const nextParams = ensureObjectParams(params, 'Invalid tabs.search params');
+
+  const query =
+    typeof nextParams.query === 'string' ? nextParams.query.trim() : '';
+  const activeOnly = nextParams.activeOnly === true;
+
+  const result: BrowserTabSearchParams = {};
+  if (query) {
+    result.query = query;
+  }
+  if (activeOnly) {
+    result.activeOnly = true;
+  }
+  if (nextParams.windowId != null) {
+    result.windowId = normalizeNumber(nextParams.windowId, 'windowId', 'tabs.search');
+  }
+  if (nextParams.groupId != null) {
+    result.groupId = normalizeNumber(nextParams.groupId, 'groupId', 'tabs.search');
+  }
+  if (nextParams.limit != null) {
+    result.limit = normalizeNumber(nextParams.limit, 'limit', 'tabs.search');
+  }
+  return result;
 }

@@ -87,6 +87,8 @@ export interface BrowserSessionTab {
   url?: string;
   title?: string;
   active?: boolean;
+  /** 仅命令面板用：页面图标。agent 侧用不到，但不影响序列化。 */
+  favIconUrl?: string;
 }
 
 export type BrowserSessionListParams = Record<string, never>;
@@ -194,6 +196,55 @@ export type BrowserTabUserListParams = Record<string, never>;
 
 export interface BrowserTabUserListResult {
   tabs: BrowserSessionTab[];
+}
+
+/**
+ * tabs.search：在当前浏览器已打开的 tab 里按关键词查找。
+ *
+ * 匹配在扩展侧完成（tab 数据本来就只在这里），不把全量 tab 列表送去 ethan
+ * 再匹配——那等于把数据搬到计算处，而不是把计算搬到数据处。
+ *
+ * query 以空格切词，**任一命中即算匹配**（OR），按命中词数与字段权重打分排序：
+ * title 命中权重高于 url 命中，完全匹配权重高于前缀/子串匹配。
+ * 大小写不敏感。
+ */
+export interface BrowserTabSearchParams {
+  /** 关键词，空格分隔。空串/未传表示不过滤，返回全部（等价 userList）。 */
+  query?: string;
+  /** 只返回用户当前活动的 tab，忽略 query。 */
+  activeOnly?: boolean;
+  /** 限制在某个窗口内搜索。不传=所有窗口。 */
+  windowId?: number;
+  /** 限制在某个 tab group 内搜索。不传=所有分组；传 0/-1 视为「不在任何分组」。 */
+  groupId?: number;
+  /** 最多返回多少条候选，默认 10，上限 50。 */
+  limit?: number;
+}
+
+/** 单个候选。tab 字段保持与 BrowserSessionTab 一致，外加命中说明。 */
+export interface BrowserTabSearchMatch {
+  tab: BrowserSessionTab;
+  /** 命中的关键词（去重后，保持原顺序）。 */
+  matchedKeywords: string[];
+  /** 相关性分数，越大越相关。 */
+  score: number;
+  /** 命中在哪个字段：title / url / both。 */
+  matchedIn: 'title' | 'url' | 'both';
+  /** 该 tab 所属分组的标题（若能取到）。 */
+  groupTitle?: string;
+  /** 该 tab 所属分组的颜色（若能取到）。 */
+  groupColor?: string;
+}
+
+export interface BrowserTabSearchResult {
+  query: string;
+  /** 参与搜索的 tab 总数（过滤 window/group 后）。 */
+  scanned: number;
+  /** 命中总数（可能多于 matches，因为 matches 受 limit 截断）。 */
+  total: number;
+  matches: BrowserTabSearchMatch[];
+  /** 结果是否被 limit 截断。 */
+  truncated: boolean;
 }
 
 export interface BrowserTabAttachParams {

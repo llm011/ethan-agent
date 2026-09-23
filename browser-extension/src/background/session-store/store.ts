@@ -9,6 +9,8 @@ import type {
   BrowserTabMoveResult,
   BrowserTabOpenParams,
   BrowserTabOpenResult,
+  BrowserTabSearchParams,
+  BrowserTabSearchResult,
   BrowserTabUserListResult,
   BrowserTabOrganizeParams,
   BrowserTabOrganizeResult,
@@ -17,6 +19,7 @@ import type {
 import { createSessionNotFoundError, BrowserExtensionRpcError } from './errors';
 import { BROWSER_RPC_ERROR_CODE } from '../../shared';
 import { BrowserSessionStoreTabs } from './store-tabs';
+import { searchTabs } from './tab-search';
 import { getTabId, toSessionTab } from './utils';
 import { TAB_GROUP_ID_NONE } from './constants';
 import {
@@ -84,6 +87,38 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
     return {
       tabs: tabs.map(toSessionTab),
     };
+  }
+
+  /**
+   * 在已打开的 tab 里按关键词搜索。
+   *
+   * 匹配逻辑全在扩展侧（见 tab-search.ts）——tab 数据本来就只在这里，
+   * 把全量列表送去 ethan 再匹配等于把数据搬到计算处，而且 tab 多时
+   * 传输量很大。这里只把「命中的几条」发回去。
+   */
+  async searchTabs(
+    params: BrowserTabSearchParams,
+  ): Promise<BrowserTabSearchResult> {
+    const tabs = (await queryTabs({})).map(toSessionTab);
+    const groups = await this.loadGroupMeta();
+    return searchTabs(tabs, params, groups);
+  }
+
+  /** 取分组标题/颜色，用于给搜索结果补上下文。取不到就返回空 Map，不影响搜索。 */
+  private async loadGroupMeta(): Promise<Map<number, { title?: string; color?: string }>> {
+    const map = new Map<number, { title?: string; color?: string }>();
+    try {
+      const groups = await queryGroups({});
+      for (const group of groups) {
+        map.set(group.id, {
+          ...(group.title ? { title: group.title } : {}),
+          ...(group.color ? { color: group.color } : {}),
+        });
+      }
+    } catch {
+      // tabGroups API 不可用（或权限没给）时静默降级：搜索本身不受影响。
+    }
+    return map;
   }
 
   async getActiveTab(

@@ -67,6 +67,7 @@ export const BROWSER_RPC_METHODS = {
   tabsOpen: 'tabs.open',
   tabsList: 'tabs.list',
   tabsUserList: 'tabs.userList',
+  tabsSearch: 'tabs.search',
   tabsAttach: 'tabs.attach',
   tabsActive: 'tabs.active',
   tabsActivate: 'tabs.activate',
