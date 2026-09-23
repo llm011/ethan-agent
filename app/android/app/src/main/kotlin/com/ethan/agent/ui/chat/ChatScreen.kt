@@ -20,6 +20,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1007,10 +1008,16 @@ fun ChatScreen(
                                 decorationBox = { innerTextField ->
                                     Box {
                                         if (state.inputText.isEmpty()) {
+                                            // 单行 + 省略号：手机上输入框横向空间被左右两排
+                                            // 按钮挤得很窄（+ / 超级权限 / 展开 / 发送），
+                                            // 提示文案换行会顶高整条输入栏。强制一行，
+                                            // 放不下由系统截断，不再折成两行。
                                             Text(
-                                                if (state.isStreaming) "排队发送：本轮结束后自动发出…" else "输入消息，支持 Markdown…",
+                                                if (state.isStreaming) "排队发送：本轮结束后自动发出" else "输入消息，支持 Markdown",
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                                 style = MaterialTheme.typography.bodyMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
                                         innerTextField()
@@ -1226,9 +1233,11 @@ fun ChatScreen(
                         Box {
                             if (state.inputText.isEmpty()) {
                                 Text(
-                                    "输入消息，支持 Markdown…",
+                                    "输入消息，支持 Markdown",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                     style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                             innerTextField()
@@ -1697,9 +1706,16 @@ private fun EmptyChatState(
         "☀️ 深圳的天气怎么样" to "深圳的天气怎么样",
         "📄 帮我找找最新的 Agent 论文" to "帮我找找最新的 Agent 论文",
     )
+    // 键盘弹出后 imePadding() 把整个 Column 压缩，而这里内容固定约 330dp 高：
+    // 居中布局会把溢出部分均匀切掉两头，第二个提示文字（副标题）刚好落在上边缘
+    // 被切一半（用户反馈）。改为「可滚动 + 靠上（CenterVertically 改为 Top）」：
+    //   - Top 对齐：空间够时内容整体上移，副标题不会顶到上边缘；
+    //   - verticalScroll：空间不够时（横屏 / 键盘弹起）用户能自己滑，不会静默丢内容。
+    val scrollState = rememberScrollState()
     Column(
         modifier = modifier
-            .wrapContentHeight(Alignment.CenterVertically)
+            .wrapContentHeight(Alignment.Top)
+            .verticalScroll(scrollState)
             .padding(horizontal = 24.dp, vertical = 30.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
