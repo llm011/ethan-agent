@@ -30,6 +30,10 @@ import {
 } from './reading-injector';
 import { streamChat, fetchModels, cancelStream } from './chat-proxy';
 import { runCommand } from './command-runner';
+import {
+  registerTabPaletteMessages,
+  registerTabPaletteCommands,
+} from './tab-palette-host';
 
 const sessionStore = new BrowserSessionStore();
 const pageController = new BrowserPageController(sessionStore);
@@ -243,6 +247,7 @@ async function dispatch(message: unknown): Promise<unknown | null> {
     openTab: params => sessionStore.openTab(params),
     listTabs: params => sessionStore.listTabs(params),
     listUserTabs: () => sessionStore.listUserTabs(),
+    searchTabs: params => sessionStore.searchTabs(params),
     attachTab: params => sessionStore.attachTab(params),
     getActiveTab: params => sessionStore.getActiveTab(params),
     activateTab: params => sessionStore.activateTab(params),
@@ -698,5 +703,10 @@ chrome.commands.onCommand.addListener((command) => {
     return;
   }
 });
+
+// ── Tab 搜索命令面板 ─────────────────────────────────────────
+// 独立于 ethan 的连接：只要扩展在，tab 搜索就能用。
+registerTabPaletteMessages();
+registerTabPaletteCommands();
 
 console.log('[EthanBrowser] background started, rpc v' + BROWSER_RPC_VERSION);

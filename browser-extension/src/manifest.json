@@ -31,6 +31,10 @@
     "toggle-overlay": {
       "suggested_key": { "default": "Ctrl+Shift+E", "mac": "Command+Shift+E" },
       "description": "切换操作步骤浮层显示/隐藏"
+    },
+    "open-tab-palette": {
+      "suggested_key": { "default": "Ctrl+Shift+K", "mac": "Command+Shift+K" },
+      "description": "搜索并跳转到已打开的标签页"
     }
   },
   "background": {

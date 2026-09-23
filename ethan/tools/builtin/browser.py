@@ -770,7 +770,8 @@ class BrowserTabTool(_BrowserToolBase):
     name = "browser_tab"
     description = (
         "管理 session 内的 tab。open 新开 tab;list 列出 session 内 tab;"
-        "user_list 列出用户所有 tab;find_tab 按 URL/域名查找已开 tab(active_only=true 取用户当前活动 tab);"
+        "user_list 列出用户所有 tab;find_tab 按关键词在已开 tab 里搜索(匹配 title 和 url,"
+        "空格分隔多词,任一命中即返回候选列表;active_only=true 取用户当前活动 tab);"
         "attach 把已有 tab 纳入 session;attach_batch 批量把多个 tab 纳入 session;"
         "active 取当前活动 tab;activate 切换活动 tab;close 关闭 tab;"
         "detach 把 tab 移出 session(取消分组但不关闭);move 调整 tab 在组内的位置。"
@@ -781,8 +782,18 @@ class BrowserTabTool(_BrowserToolBase):
             "action": {"type": "string", "enum": ["open", "list", "user_list", "find_tab", "attach", "attach_batch", "active", "activate", "close", "detach", "move", "organize"]},
             "session": {"type": "string", "description": "目标 session_id(除 user_list/find_tab 外必填;从 browser_session(action='list') 取)"},
             "tab": {"type": "string", "description": "目标 tab_id(attach/activate/close;从 browser_tab(action='user_list'/'list') 结果取 tabId)"},
-            "url": {"type": "string", "description": "open 时打开的 URL;find_tab 时按域名或 URL 前缀匹配"},
-            "active_only": {"type": "boolean", "description": "find_tab 专用:true=只返回用户当前活动的 tab,忽略 url"},
+            "url": {"type": "string", "description": "open 时打开的 URL;find_tab 时也可直接填网址当关键词(等价 query)"},
+            "active_only": {"type": "boolean", "description": "find_tab 专用:true=只返回用户当前活动的 tab,忽略关键词"},
+            "query": {
+                "type": "string",
+                "description": (
+                    "find_tab 专用:搜索关键词,空格分隔多个词。"
+                    "按 title 和 url 双字段匹配,大小写不敏感,任一命中即算匹配(OR),"
+                    "按命中词数+相关度排序返回候选。搜「标题里有 XX 的页面」用这个,"
+                    "比用 url 匹配有效——很多页面 URL 里没有标题里的词。"
+                ),
+            },
+            "limit": {"type": "integer", "description": "find_tab 专用:最多返回几个候选,默认 10,上限 50"},
             "tabs": {"type": "array", "items": {"type": "string"}, "description": "attach_batch 时的 tab_id 列表"},
             "index": {"type": "integer", "description": "move 时的目标位置索引"},
             "ops": {
@@ -830,7 +841,7 @@ class BrowserTabTool(_BrowserToolBase):
         "required": ["action"],
     }
 
-    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1, ops: list = None, collapse: bool | str = None, rest_mode: str = None) -> str:
+    async def run(self, action: str, session: str = "", tab: str = "", url: str = "", active_only: bool = False, tabs: list = None, index: int = -1, ops: list = None, collapse: bool | str = None, rest_mode: str = None, query: str = "", limit: int = None) -> str:
         self._authorize()
         try:
             # 提前拦缺参:只有 user_list/find_tab 是全局的,其余都要 session。
@@ -847,22 +858,46 @@ class BrowserTabTool(_BrowserToolBase):
             if action == "user_list":
                 return json.dumps(await _call("tab_user_list", {}), ensure_ascii=False)
             if action == "find_tab":
-                result = await _call("tab_user_list", {})
-                tabs = result.get("tabs", []) if isinstance(result, dict) else []
+                # 匹配下沉到扩展侧（tabs.search）：tab 数据本来就只在那里。
+                # 早期版本是把全量 tab 拉回 Python 做子串匹配——那是把数据搬到
+                # 计算处而不是反过来，tab 一多传输量大，而且只搜 url、只回第一条。
+                #
+                # query 和 url 都当关键词用（url 更符合「我知道网址」的直觉，
+                # query 更符合「我记得标题」；两者都走同一套切词+打分）。
+                keywords = " ".join(x for x in (query, url) if x).strip()
+                payload = {}
+                if keywords:
+                    payload["query"] = keywords
                 if active_only:
-                    matched = [t for t in tabs if t.get("active")]
-                elif url:
-                    from urllib.parse import urlparse
-                    try:
-                        target = urlparse(url).netloc or url
-                    except Exception:
-                        target = url
-                    matched = [t for t in tabs if target in (t.get("url") or "")]
-                else:
-                    matched = tabs
-                if not matched:
-                    return json.dumps({"found": False, "tab": None}, ensure_ascii=False)
-                return json.dumps({"found": True, "tab": matched[0]}, ensure_ascii=False)
+                    payload["activeOnly"] = True
+                if limit is not None:
+                    payload["limit"] = limit
+                result = await _call("tab_search", payload)
+                if not isinstance(result, dict):
+                    return json.dumps({"found": False, "matches": [], "total": 0},
+                                      ensure_ascii=False)
+                matches = result.get("matches") or []
+                if not matches:
+                    return json.dumps({
+                        "found": False,
+                        "matches": [],
+                        "total": 0,
+                        "hint": "没有匹配的 tab。可用 browser_tab(action='user_list') 看全部已开 tab。",
+                    }, ensure_ascii=False)
+                # 直接回候选列表，不再额外挑一条当「答案」：用户说「那个 XX 页面」
+                # 时往往不是第一个命中的，只回一条会让模型挑错还没得选。
+                out = {
+                    "found": True,
+                    "matches": matches,
+                    "total": result.get("total", len(matches)),
+                    "scanned": result.get("scanned", 0),
+                }
+                if result.get("truncated"):
+                    out["hint"] = (
+                        f"共匹配 {result.get('total')} 个,已按相关度截断展示。"
+                        f"用 limit 调大,或加关键词收窄。"
+                    )
+                return json.dumps(out, ensure_ascii=False)
             if action == "attach":
                 return json.dumps(await _call("tab_attach", {"sessionId": session, "tabId": tab},
                                               browser_session_id=session), ensure_ascii=False)

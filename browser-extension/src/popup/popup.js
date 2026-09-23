@@ -1,5 +1,10 @@
 /* eslint-disable */
 import { wsToHttp, readCommands } from '../shared';
+import {
+  TAB_PALETTE_SHORTCUT_KEY as SHORTCUT_KEY,
+  DEFAULT_TAB_PALETTE_SHORTCUT as DEFAULT_SHORTCUT,
+  resolveShortcut,
+} from '../shared/tab-palette-config';
 
 const $ = id => document.getElementById(id);
 
@@ -44,6 +49,8 @@ async function load() {
   $('autoCloseCookies').checked = autoCloseCookies !== false;
   // 同上：默认开启，显式 false 才关闭
   $('autoRestTabs').checked = autoRestTabs !== false;
+  // 快捷键配置与 ethan 连接无关，独立加载——即使 ethan 没起也要能用
+  loadShortcut();
   refreshStatus();
 }
 
@@ -249,6 +256,151 @@ $('autoRestTabs').addEventListener('change', async (e) => {
   await chrome.storage.local.set({ autoRestTabs: e.target.checked });
 });
 
+// ── 标签页搜索命令面板 ────────────────────────────────────────
+// 面板本身在页面里跑（不依赖 ethan），这里只负责两件事：
+//   1. 配置页面内的快捷键（真实按键录入，不让用户手打组合串）
+//   2. 提供一个「现在就打开」的入口
+
+const IS_MAC = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '');
+
+/** 内部格式 "mod+shift+k" → 展示用 "⌘⇧K" / "Ctrl+Shift+K" */
+function comboToLabel(combo) {
+  if (!combo) return '';
+  const parts = combo.split('+').filter(Boolean);
+  const out = [];
+  for (const p of parts) {
+    const low = p.toLowerCase();
+    if (low === 'mod') out.push(IS_MAC ? '⌘' : 'Ctrl');
+    else if (low === 'cmd' || low === 'meta') out.push(IS_MAC ? '⌘' : 'Win');
+    else if (low === 'ctrl') out.push(IS_MAC ? '⌃' : 'Ctrl');
+    else if (low === 'shift') out.push(IS_MAC ? '⇧' : 'Shift');
+    else if (low === 'alt') out.push(IS_MAC ? '⌥' : 'Alt');
+    else if (low === 'space') out.push('Space');
+    else out.push(low.length === 1 ? low.toUpperCase() : low.charAt(0).toUpperCase() + low.slice(1));
+  }
+  return IS_MAC ? out.join('') : out.join('+');
+}
+
+/** KeyboardEvent → 内部组合串。没有修饰键时返回 null（裸键太容易和页面冲突）。 */
+function eventToCombo(e) {
+  const mods = [];
+  if (e.metaKey) mods.push('meta');
+  if (e.ctrlKey) mods.push('ctrl');
+  if (e.altKey) mods.push('alt');
+  if (e.shiftKey) mods.push('shift');
+
+  const key = (e.key || '').toLowerCase();
+  // 只有修饰键按下：还不能算一个完整组合，等主键
+  if (['meta', 'control', 'alt', 'shift'].includes(key)) return null;
+  if (!key) return null;
+
+  // 至少要有一个真修饰键（meta/ctrl/alt）。只用 Shift 会和页面输入冲突。
+  const hasRealMod = e.metaKey || e.ctrlKey || e.altKey;
+  if (!hasRealMod) return null;
+
+  // meta/ctrl 在 mac 上语义重叠，统一成一个 "mod" 让配置可跨平台理解：
+  // mac 用户按 Cmd 存成 mod，Windows 用户按 Ctrl 也存成 mod。
+  let normalizedMods = [];
+  if (e.metaKey || e.ctrlKey) normalizedMods.push('mod');
+  if (e.altKey) normalizedMods.push('alt');
+  if (e.shiftKey) normalizedMods.push('shift');
+
+  const keyName = key === ' ' ? 'space' : key;
+  return normalizedMods.concat([keyName]).join('+');
+}
+
+/** 会被浏览器/系统优先吃掉、扩展拿不到的组合，提前提醒。 */
+function checkRisky(combo) {
+  if (!combo) return '';
+  const parts = combo.split('+');
+  const hasMod = parts.includes('mod');
+  const key = parts[parts.length - 1];
+
+  // 浏览器/系统层先拦截的，内容脚本收不到，必须提前告知
+  if (key === 'tab') {
+    return 'Ctrl/Cmd+Tab 是系统切换标签页的快捷键，扩展无法接管';
+  }
+  if (hasMod && ['t', 'n', 'w', 'q'].includes(key)) {
+    return (IS_MAC ? '⌘' : 'Ctrl+') + key.toUpperCase() + ' 是浏览器内置快捷键，会被浏览器先吃掉';
+  }
+  return '';
+}
+
+async function loadShortcut() {
+  const stored = await chrome.storage.local.get([SHORTCUT_KEY]);
+  const combo = resolveShortcut(stored);
+  const input = $('paletteShortcut');
+  if (input) {
+    input.value = comboToLabel(combo) || '未设置';
+    input.dataset.combo = combo;
+  }
+  return combo;
+}
+
+async function saveShortcut(combo) {
+  await chrome.storage.local.set({ [SHORTCUT_KEY]: combo });
+  const input = $('paletteShortcut');
+  if (input) {
+    input.value = comboToLabel(combo) || '未设置';
+    input.dataset.combo = combo;
+  }
+  const warn = checkRisky(combo);
+  setHint(warn || '已保存，所有已打开的网页立即生效', warn ? 'warn' : 'ok');
+}
+
+function setupShortcutUI() {
+  const input = $('paletteShortcut');
+  if (!input) return;
+
+  input.addEventListener('focus', () => {
+    input.dataset.recording = '1';
+    input.value = '请按下组合键…';
+  });
+
+  input.addEventListener('blur', () => {
+    delete input.dataset.recording;
+    const combo = input.dataset.combo || DEFAULT_SHORTCUT;
+    input.value = comboToLabel(combo);
+  });
+
+  input.addEventListener('keydown', async e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === 'Escape') {
+      input.blur();
+      return;
+    }
+    // 允许用 Backspace/Delete 清空（等于停用页面内快捷键）
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      await saveShortcut('');
+      return;
+    }
+
+    const combo = eventToCombo(e);
+    if (!combo) {
+      // 只按了修饰键或裸键：给提示，不保存
+      const hint = $('paletteShortcutHint');
+      if (hint) hint.textContent = '请至少按住 Cmd/Ctrl/Alt 之一，再按一个字母或数字键';
+      return;
+    }
+    const hint = $('paletteShortcutHint');
+    if (hint) hint.textContent = '点上面的输入框，然后直接按下你想要的组合键';
+    await saveShortcut(combo);
+    input.blur();
+  });
+
+  $('paletteReset')?.addEventListener('click', async () => {
+    await saveShortcut(DEFAULT_SHORTCUT);
+  });
+
+  $('openPalette')?.addEventListener('click', async () => {
+    // popup 会失焦关闭，所以先派发给 background 再收起
+    await chrome.runtime.sendMessage({ target: 'tabPaletteHost', type: 'open' });
+    window.close();
+  });
+}
+
 // 页面指令列表：读 commands 渲染成按钮，点击 → 后台执行，结果进页面右上角面板。
 async function renderCommands() {
   const list = $('commandList');
@@ -303,5 +455,6 @@ $('manageCommands')?.addEventListener('click', (e) => {
   chrome.runtime.openOptionsPage();
 });
 
+setupShortcutUI();
 load();
 renderCommands();

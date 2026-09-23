@@ -12,6 +12,7 @@ import {
   normalizeTabMoveParams,
   normalizeTabOpenParams,
   normalizeTabOrganizeParams,
+  normalizeTabSearchParams,
 } from './normalize-tabs';
 
 export async function handleTabMethods(
@@ -36,6 +37,13 @@ export async function handleTabMethods(
 
   if (message.method === BROWSER_RPC_METHODS.tabsUserList) {
     return createSuccessResponse(message, await deps.listUserTabs());
+  }
+
+  if (message.method === BROWSER_RPC_METHODS.tabsSearch) {
+    return createSuccessResponse(
+      message,
+      await deps.searchTabs(normalizeTabSearchParams(message.params)),
+    );
   }
 
   if (message.method === BROWSER_RPC_METHODS.tabsAttach) {

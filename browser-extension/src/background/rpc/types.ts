@@ -53,6 +53,8 @@ import type {
   BrowserTabOpenParams,
   BrowserTabOpenResult,
   BrowserTabUserListResult,
+  BrowserTabSearchParams,
+  BrowserTabSearchResult,
   BrowserTabAttachBatchParams,
   BrowserTabAttachBatchResult,
   BrowserTabDetachParams,
@@ -86,6 +88,7 @@ export interface BrowserRequestDependencies {
   openTab: (params: BrowserTabOpenParams) => Promise<BrowserTabOpenResult>;
   listTabs: (params: BrowserTabListParams) => Promise<BrowserTabListResult>;
   listUserTabs: () => Promise<BrowserTabUserListResult>;
+  searchTabs: (params: BrowserTabSearchParams) => Promise<BrowserTabSearchResult>;
   attachTab: (
     params: BrowserTabAttachParams,
   ) => Promise<BrowserTabAttachResult>;

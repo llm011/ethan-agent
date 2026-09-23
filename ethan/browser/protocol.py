@@ -19,6 +19,7 @@ METHODS = {
     "tab_open": "tabs.open",
     "tab_list": "tabs.list",
     "tab_user_list": "tabs.userList",
+    "tab_search": "tabs.search",
     "tab_attach": "tabs.attach",
     "tab_active": "tabs.active",
     "tab_activate": "tabs.activate",

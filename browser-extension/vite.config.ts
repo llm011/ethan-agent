@@ -38,7 +38,7 @@ export default defineConfig({
         // Build content scripts: transpile TS → JS (classic script, no ESM/CJS artifacts)
         // executeScript({ files }) 不支持 ESM，需输出为 classic script
         mkdirSync('dist/content', { recursive: true });
-        const contentScripts = ['reader-extract.ts', 'overlay.ts', 'cookie-closer.ts', 'reading-mode.ts', 'result-panel.ts', 'selection-bar.ts'];
+        const contentScripts = ['reader-extract.ts', 'overlay.ts', 'cookie-closer.ts', 'reading-mode.ts', 'result-panel.ts', 'selection-bar.ts', 'tab-palette.ts'];
         for (const name of contentScripts) {
           let src: string;
           if (name === 'reading-mode.ts') {
