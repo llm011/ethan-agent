@@ -3,6 +3,12 @@
 @import "shadcn/tailwind.css";
 @plugin "@tailwindcss/typography";
 
+/* Tailwind v4 的内容自动探测不会扫 node_modules / 工作区外的符号链接包，
+   而 @ethan/shared 的组件（如 ScrollArea）就在 packages/shared 下。
+   不加这条 @source，只在共享包里出现的工具类（size-full / p-px / touch-none…）
+   不会被生成，导致 ScrollArea 的 viewport 高度塌成内容高度、时间轴撑高后无法滚动。 */
+@source "../../packages/shared/src";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
