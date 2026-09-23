@@ -217,9 +217,12 @@ class BackgroundTaskTool(BaseTool):
         # 注意：这里**不**预存 prompt。_run_background 会把同一个 prompt 经
         # POST /api/chat 再发一次，而 /api/chat 自己会把 req.messages 里的 user
         # 消息落库——预存会导致后台会话里同一条 query 出现两次（用户反馈）。
+        # 标题随创建一起落库（单次事务）：`[后台]` 前缀是后台会话被识别/排除的唯一
+        # 依据，分两次写若中途被打断会留下无前缀的孤儿会话（同 ETHA-13 心跳那条）。
         store = await get_session_store()
-        session = await store.create(get_config().defaults.model)
-        await store.update_title(session.id, f"[后台] {title}")
+        session = await store.create(
+            get_config().defaults.model, title=f"[后台] {title}"
+        )
 
         task = _BgTask(session_id=session.id, title=title, started_at=time.time(), channel=channel)
         t = threading.Thread(

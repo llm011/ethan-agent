@@ -470,13 +470,13 @@ class ScheduleCreateTool(BaseTool):
         # 导致 API 调用失败（500/400/422 等）时，会话库里留下一个"建了会话但
         # /api/schedule 实际没注册成功"的孤儿会话——标题是 [定时] xxx，里面
         # 一条消息都没有。
+        # 标题随创建一起落库（单次事务）：`[定时]` 前缀是「定时」分组识别的唯一依据，
+        # 先 create 再 update_title 的两次写之间若进程被打断，会留下有 source
+        # 却没有前缀的孤儿会话（同 ETHA-13 心跳那条），永远落不进定时分组。
         store = await get_session_store()
-        session = await store.create(get_config().defaults.model, source="schedule")
-        try:
-            await store.update_title(session.id, f"[定时] {title}")
-        except Exception:
-            # update_title 失败不会让整个任务失败
-            pass
+        session = await store.create(
+            get_config().defaults.model, source="schedule", title=f"[定时] {title}"
+        )
 
         # Send request to FastAPI backend
         token = get_config().network.auth_token

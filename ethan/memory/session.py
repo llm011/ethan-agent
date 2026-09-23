@@ -859,11 +859,18 @@ class SessionStore:
             "missing": False,
         }
 
-    async def create(self, model: str, source: str = "web", mode: str = "") -> Session:
+    async def create(self, model: str, source: str = "web", mode: str = "", title: str | None = None) -> Session:
+        """新建会话。
+
+        `title` 让调用方把标题**随创建一起**落库（单次事务）。系统会话必须用它——
+        `[心跳]`/`[定时]`/`[后台]` 这些前缀是分组识别的唯一依据，先 create 再
+        update_title 的两次写之间若进程被打断（如 watchdog 重启风暴），就会留下
+        一条有 source 却没有前缀的孤儿会话，永远落不进对应分组、只能掉进「最新对话」。
+        """
         now = time.time()
         session = Session(
             id=_generate_id(),
-            title="新对话",
+            title=title or "新对话",
             model=model,
             created_at=now,
             updated_at=now,
