@@ -194,6 +194,30 @@ export function queryGroups(
   });
 }
 
+/**
+ * 最近关闭的 tab/窗口。
+ *
+ * 用 sessions 而不是 history：sessions 就是「最近关掉的 tab」这个语义，
+ * 不需要 history 那条更重的权限（"在所有已登录设备上读取和更改浏览历史"）。
+ * 上限由浏览器固定为 25 条（MAX_SESSION_RESULTS），我们不需要也无法调大。
+ */
+export function getRecentlyClosed(
+  maxResults = 25,
+): Promise<chrome.sessions.Session[]> {
+  return new Promise(resolve => {
+    // query 为 {} 而非 filter：只要最近关闭的 tab，不需要按窗口过滤。
+    // 这个 API 取不到结果不算错误，失败时返回空数组即可，不该让搜索整个挂掉。
+    try {
+      chrome.sessions.getRecentlyClosed({ maxResults }, sessions => {
+        void chrome.runtime.lastError;
+        resolve(sessions ?? []);
+      });
+    } catch {
+      resolve([]);
+    }
+  });
+}
+
 export function moveTabToIndex(
   tabId: number,
   index: number,

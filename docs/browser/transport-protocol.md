@@ -114,7 +114,7 @@ method 命名空间对齐扩展侧 dispatch 字符串,这样移植过来的扩�
 | `tab_open` | `tabs.open` | 在 session 内开新 tab |
 | `tab_list` | `tabs.list` | 列出 session 内 tab |
 | `tab_user_list` | `tabs.userList` | 列出用户全部 tab |
-| `tab_search` | `tabs.search` | 按关键词搜索已开 tab（匹配 title+url，返回候选列表） |
+| `tab_search` | `tabs.search` | 按关键词搜索已开 tab（匹配 title+url，返回候选列表；只搜开着的 tab） |
 | `tab_attach` | `tabs.attach` | 把已有 tab 纳入 session |
 | `tab_active` | `tabs.active` | 取当前活动 tab |
 | `tab_activate` | `tabs.activate` | 切换活动 tab |

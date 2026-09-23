@@ -219,6 +219,13 @@ export interface BrowserTabSearchParams {
   groupId?: number;
   /** 最多返回多少条候选，默认 10，上限 50。 */
   limit?: number;
+  /**
+   * 是否把「今天已关闭的 tab」也算进候选（命令面板顶部的开关）。
+   *
+   * 只影响命令面板；agent 侧的 tabs.search 不传此参数，永远只搜开着的 tab。
+   * 历史与当前已打开的按 URL 去重，不会重复出现。
+   */
+  includeClosed?: boolean;
 }
 
 /** 单个候选。tab 字段保持与 BrowserSessionTab 一致，外加命中说明。 */
