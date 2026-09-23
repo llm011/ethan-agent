@@ -20,6 +20,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1007,10 +1008,23 @@ fun ChatScreen(
                                 decorationBox = { innerTextField ->
                                     Box {
                                         if (state.inputText.isEmpty()) {
+                                            // 占位文案在「用户可能正在输入」这件事上会误导，
+                                            // 留空又容易让人以为输入框坏了，所以保留；但内容
+                                            // 必须短到不折行 —— 手机上输入框横向空间被一排按钮
+                                            // 挤得很窄（+ / 超级权限 / 展开 / 发送），一折行就顶高
+                                            // 整条输入栏（原来是「输入消息，支持 Markdown…」）。
+                                            // maxLines = 1 只做兜底：文案短到不折行时它不生效，
+                                            // 万一以后有人把文案改长，也只会被截断而不会撑高输入栏。
+                                            //
+                                            // 注意：不要在「输入框行」上做 centerVertically——
+                                            // BasicTextField 会随输入长到 maxLines = 5，居中后输入区
+                                            // 上下同时溢出，顶栏「+」被切一半、最后一行也贴着输入栏边。
                                             Text(
-                                                if (state.isStreaming) "排队发送：本轮结束后自动发出…" else "输入消息，支持 Markdown…",
+                                                if (state.isStreaming) CHAT_INPUT_PLACEHOLDER_QUEUED
+                                                else CHAT_INPUT_PLACEHOLDER,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                                 style = MaterialTheme.typography.bodyMedium,
+                                                maxLines = 1,
                                             )
                                         }
                                         innerTextField()
@@ -1226,9 +1240,11 @@ fun ChatScreen(
                         Box {
                             if (state.inputText.isEmpty()) {
                                 Text(
-                                    "输入消息，支持 Markdown…",
+                                    CHAT_INPUT_PLACEHOLDER,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                     style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                             innerTextField()
@@ -1543,6 +1559,16 @@ private class MessageCollapseState(
 private const val COLLAPSE_SCREEN_FRACTION = 0.5f
 
 /**
+ * 输入框占位文案。**必须短到在窄屏上不折行** —— 文案一折行会把整条输入栏顶高，
+ * 因为左右两侧被一排按钮（+ / 超级权限 / 展开 / 发送）占掉了大部分宽度。
+ *
+ * 提到顶层常量是为了两处（收起态输入框、全屏编辑）引用同一份字符串，
+ * 改文案时不会只改到一处。
+ */
+internal const val CHAT_INPUT_PLACEHOLDER = "输入消息"
+internal const val CHAT_INPUT_PLACEHOLDER_QUEUED = "排队发送"
+
+/**
  * 估算「半屏高」并判断是否值得折叠。
  *
  * 为什么要估算而不是用 BoxWithConstraints 实测：只有**先**知道是不是长消息，
@@ -1697,9 +1723,16 @@ private fun EmptyChatState(
         "☀️ 深圳的天气怎么样" to "深圳的天气怎么样",
         "📄 帮我找找最新的 Agent 论文" to "帮我找找最新的 Agent 论文",
     )
+    // 键盘弹出后 imePadding() 把整个 Column 压缩，而这里内容固定约 330dp 高：
+    // 居中布局会把溢出部分均匀切掉两头，第二个提示文字（副标题）刚好落在上边缘
+    // 被切一半（用户反馈）。改为「可滚动 + 靠上（CenterVertically 改为 Top）」：
+    //   - Top 对齐：空间够时内容整体上移，副标题不会顶到上边缘；
+    //   - verticalScroll：空间不够时（横屏 / 键盘弹起）用户能自己滑，不会静默丢内容。
+    val scrollState = rememberScrollState()
     Column(
         modifier = modifier
-            .wrapContentHeight(Alignment.CenterVertically)
+            .wrapContentHeight(Alignment.Top)
+            .verticalScroll(scrollState)
             .padding(horizontal = 24.dp, vertical = 30.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
