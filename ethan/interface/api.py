@@ -154,8 +154,9 @@ async def lifespan(app: FastAPI):
     _asyncio.create_task(_migrate_and_reindex())
     # 进程互相监控：写 server PID + 拉起 watchdog（独立进程，server 挂了它会重启）
     # worktree/开发场景设 ETHAN_NO_WATCHDOG=1 跳过，避免覆盖主 worktree 的 PID 文件被误杀
-    if os.environ.get("ETHAN_NO_WATCHDOG") != "1":
-        from ethan.watchdog import ensure_watchdog_running, write_server_pid
+    from ethan.watchdog import ensure_watchdog_running, watchdog_disabled, write_server_pid
+
+    if not watchdog_disabled():
         write_server_pid()
         # 把实际端口传给 watchdog，否则它只会盯 8900——服务跑在非默认端口时
         # 会被判"死亡"反复重启，且 _kill_server 的端口扫描会误杀别的实例。
@@ -320,9 +321,33 @@ def _port_is_served(host: str, port: int) -> bool:
         return False
 
 
-def run_server(host: str | None = None, port: int | None = None):
-    import os
+def _find_db_conflicts() -> list[tuple[int, str]]:
+    """找出其它正在写同一个 sessions.db 的 ethan 进程（不含自己）。
 
+    conflict 的本质是抢**同一个 SQLite 文件**，不是抢端口——两个实例用不同端口
+    照样互锁。判据复用 ``cli._find_conflicting_servers``，避免两处判据各自漂移
+    （判据错过一次，幽灵实例就能双写全库排他写锁）。
+
+    import 放在函数内，是为了不在 api.py 的模块级引入 cli 依赖：api.py 会被
+    uvicorn 直接加载，而 cli 顶层 import typer。注意这**并不能**避免 Typer 进入
+    进程（真走到这里就会加载它），只是把它推迟到需要判据的那一刻，别拖累不检查
+    冲突的调用路径。
+
+    任何异常都降级为「无冲突」——这是一道防御性闸门，不该因为 lsof 缺失
+    / pgrep 行为差异而让服务起不来。
+    """
+    try:
+        from ethan.interface.cli import _find_conflicting_servers
+
+        return _find_conflicting_servers()
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "[Server] 重复实例检测不可用（检测本身失败），跳过", exc_info=True
+        )
+        return []
+
+
+def run_server(host: str | None = None, port: int | None = None, *, force: bool = False):
     import uvicorn
 
     # 未显式指定时跟随 config.yaml 的 server.*，再回退内置默认。
@@ -353,6 +378,30 @@ def run_server(host: str | None = None, port: int | None = None):
             port,
         )
         raise SystemExit(1)
+
+    # 端口不同 ≠ 安全：真正互锁的是同一个 sessions.db（单写者模型）。
+    # 上面那条只查端口，于是「被 watchdog 用别的端口拉起」的实例能一路穿透到这里，
+    # 跑完整个 lifespan（scheduler / heartbeat / channel listener 全起来），
+    # 和主实例双写 DELETE 模式的全库排他写锁 —— 实测表现为 journal 卡住不释放、
+    # 连纯 SELECT 都 `database is locked`、前端「打开会话一直加载」。
+    # 判据必须取「谁打开了同一个 sessions.db」，与端口无关；
+    # ETHAN_NO_WATCHDOG=1 沿用 cli.py 的语义：开发/测试场景明确放行。
+    #
+    # force=True（`ethan serve --force`）也要放行：cli 层已用 `--force` 跳过它自己
+    # 那道检测，这里若不再放行，`--force` 就完全失效（错误提示里还在推荐它）。
+    from ethan.watchdog import watchdog_disabled
+
+    if not force and not watchdog_disabled():
+        conflicts = _find_db_conflicts()
+        if conflicts:
+            logging.getLogger(__name__).error(
+                "[Server] 已有 ethan 实例在使用同一个 sessions.db，拒绝重复启动"
+                "（端口不同也会抢同一把全库写锁）。冲突进程: %s。"
+                "如需重启请先运行 `ethan serve stop`；"
+                "确认要强行启动可加 `--force`（不推荐，会锁冲突）。",
+                ", ".join(f"pid={pid}" for pid, _ in conflicts),
+            )
+            raise SystemExit(1)
 
     # lifespan 里的 watchdog 拉起逻辑拿不到这里的参数，通过模块级状态传递
     global _SERVER_BIND

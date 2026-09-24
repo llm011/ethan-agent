@@ -232,19 +232,62 @@ ethan server uninstall   # 卸载
 
 ### 服务反复失联 / 起不来？先查多实例
 
-同一个端口同一时间只应有一个 ethan 实例。多实例互抢端口和数据目录（`sessions.db`）
-是「服务不稳定、桌面端老掉线」的最常见原因：
+同一时间只应有一个 ethan 实例在跑。**判据是「谁打开了同一个 `sessions.db`」，不是
+端口**——两个实例用不同端口照样会互锁。`sessions.db` 是 DELETE journal 模式，写锁
+**全库排他**，两个实例并发写会：
+
+- 日志里刷出大量 `database is locked`；
+- 严重时一个写事务卡住不提交，`sessions.db-journal` 一直不释放，**连纯 SELECT 都
+  `database is locked`**；
+- 用户侧表现为**「打开某个会话一直加载」**（读被长事务堵住，`busy_timeout=30s`
+  才会失败）。
 
 ```bash
 ethan server status                    # 有冲突会直接列出来
-lsof -nP -iTCP:8900 -sTCP:LISTEN       # 看谁真正持有端口
+lsof -p <pid> | grep sessions.db       # 确认某进程是否持有同一个库
+ls -la ~/.ethan/db/sessions.db-journal # 存在且长时间不消失 = 有卡死的写事务
 cat /tmp/ethan/watchdog.log            # watchdog 的重启决策日志
 tail -f ~/.ethan/logs/api.err.log      # 服务启动/绑定错误
 ```
 
-端口上已有健康实例时，重复启动会**立刻退出**并提示（不会挂成僵尸进程）。
+重复实例会被**立刻拒绝**（退出码 1，不会跑完 lifespan 才失败，也不会挂成僵尸）：
+
+- 端口上已有健康实例 → 拒绝；
+- **另一个实例（哪怕端口不同）开着同一个 `sessions.db` → 同样拒绝**；
+- 开发/测试要绕过（worktree 跑测试时库和常驻服务是同一个文件）→ 设
+  `ETHAN_NO_WATCHDOG=1`；
+- 确认要强行启动 → `ethan serve --force`（**不推荐**，真的会锁冲突）。
+
+> `ETHAN_NO_WATCHDOG` **只认 `1`**。写 `=0` 不算关闭（早期 cli 与 api 两处判法
+> 不一致，`=0` 会「过了 cli 检测却被 api 守卫拦下」，现已统一）。
+
 保留唯一实例：`ethan server stop` 后重新启动，或 `ethan server uninstall` 卸掉
 launchd 服务再手动 `ethan serve`。
+
+> **watchdog 会退役。** 非 launchd 启动的实例会留下一个独立的 watchdog 进程，它只认
+> 端口、不认主人。若拉起它的那个 serve 已退出（典型：换成 launchd 托管在别的端口），
+> watchdog 会一直 ping 旧端口、判定「server 死亡」并无限复活幽灵实例。退役判据分两种：
+>
+> - **孤儿 watchdog**（自己启动时端口上就没有任何监听者）：只要一次「拉起来但在 30s
+>   内没健康」就**主动退出**（`ORPHAN_RESURRECT_ATTEMPTS`，默认 1）。这是幽灵场景的
+>   根治点——注意幽灵实例其实**能起来**（它只是和主实例抢同一个 `sessions.db`），
+>   所以「拉起失败次数」在这里恒为 0，必须靠「孤儿」这个判据才退得掉。
+> - **正常服役的 watchdog**（启动时端口上有主实例）：**连续** `MAX_RESURRECT_ATTEMPTS`
+>   （默认 5）次拉起失败才退役，且**复活成功会清零计数**，所以偶发崩溃的正常实例不会
+>   被误退役——真正的崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）
+>   或它自己继续重启。
+
+> **launchd 的 `maxfiles` 默认只有 256，对 ethan 偏低。** ethan 要同时持有 Lark
+> 事件监听、微信轮询、浏览器插件 WebSocket、多个 SQLite 连接等。fd 耗尽会报
+> `OSError: [Errno 24] Too many open files`，且可能发生在 SQLite 提交路径上，
+> 表现为写事务卡住。检查与调高：
+>
+> ```bash
+> launchctl limit maxfiles              # 看当前软/硬上限
+> sudo launchctl limit maxfiles 65536 unlimited   # 重启后仍生效需写 /etc/launchd.conf 或 plist
+> ```
+>
+> plist 里也可用 `SoftResourceLimits` / `HardResourceLimits` 单独给这个服务放行。
 
 ---
 

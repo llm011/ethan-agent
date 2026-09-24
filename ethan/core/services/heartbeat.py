@@ -313,9 +313,10 @@ async def _tick() -> None:
     logger.info("[Heartbeat] tick")
     # 确保 watchdog 进程存活（互相拉起的 server 侧逻辑）
     # 多 worktree 开发时跳过（ETHAN_NO_WATCHDOG=1）
-    if not os.environ.get("ETHAN_NO_WATCHDOG"):
+    from ethan.watchdog import check_watchdog_health, watchdog_disabled
+
+    if not watchdog_disabled():
         try:
-            from ethan.watchdog import check_watchdog_health
             # 用本进程实际监听端口（run_server 启动时写入），否则 watchdog 被
             # 拉起后会盯错端口。非 serve 场景（CLI）没这个变量，回退默认。
             _port = int(os.environ.get("ETHAN_SERVER_PORT", "8900") or "8900")

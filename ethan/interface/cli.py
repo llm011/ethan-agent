@@ -181,13 +181,13 @@ def serve_main(
 ) -> None:
     """Start the HTTP API server. Default runs in foreground."""
     if ctx.invoked_subcommand is None:
-        import os
-
         host, port = _server_bind_defaults(host, port)
         # ETHAN_NO_WATCHDOG=1 是开发/测试开关（CLAUDE.md 的多 worktree 规范），
         # 语义就是「我知道自己在干什么，别接管我的进程」。worktree 里跑测试时
         # sessions.db 与常驻服务是同一个文件，不放行会把日常开发流程堵死。
-        if not force and not os.environ.get("ETHAN_NO_WATCHDOG"):
+        from ethan.watchdog import watchdog_disabled
+
+        if not force and not watchdog_disabled():
             conflicts = _find_conflicting_servers()
             if conflicts:
                 from rich.console import Console
@@ -218,7 +218,9 @@ def serve_main(
                 console.print("    ethan serve --force        — 强制启动（不推荐，会锁冲突）")
                 raise typer.Exit(1)
         from ethan.interface.api import run_server
-        run_server(host=host, port=port)
+        # force 要透传：run_server 里还有一道「同一个 sessions.db」的守卫，
+        # 不透传的话 `ethan serve --force` 会被那道守卫再拦一次，等于失效。
+        run_server(host=host, port=port, force=force)
 
 @serve_app.command("stop")
 def serve_stop() -> None:

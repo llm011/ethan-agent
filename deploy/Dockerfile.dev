@@ -41,6 +41,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl git ca-certificates \
     vim-tiny less tree bat \
     jq wget unzip \
+    # lsof + procps(pgrep)：重复实例检测（run_server 的 DB 同一性守卫）靠它们
+    # 判断「谁打开了同一个 sessions.db」。缺了会静默降级为「无冲突」。
+    lsof procps \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && ln -s /usr/bin/batcat /usr/local/bin/bat \
     && rm -rf /var/lib/apt/lists/*
