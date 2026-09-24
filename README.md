@@ -389,11 +389,22 @@ ethan server uninstall  # uninstall
 > The watchdog also **retires itself**: a non-launchd start leaves behind a detached
 > watchdog that only knows a port, not its owner. If the serve that spawned it is gone
 > (e.g. replaced by a launchd-managed instance on another port), the watchdog would
-> otherwise keep resurrecting ghost instances on the stale port forever. It now exits
-> after `MAX_RESURRECT_ATTEMPTS` (5) **consecutive** failed start attempts (spawned but
-> not healthy within 30s). A successful restart **resets the counter**, so an instance
-> that crashes occasionally is not wrongly retired. Real crashes are still restarted by
-> the outer supervisor (launchd `KeepAlive` / manual `ethan serve`).
+> otherwise keep resurrecting ghost instances on the stale port forever. The retry budget
+> now depends on how the watchdog started:
+>
+> - **Orphan watchdog** (no listener on the port when it started): a *single* failed
+>   resurrection (spawned but not healthy within 30s) retires it
+>   (`ORPHAN_RESURRECT_ATTEMPTS`, default 1). This is the actual fix for the ghost case —
+>   note a ghost instance usually **does** come up healthy (it merely fights the primary
+>   instance over the same `sessions.db`), so a "failed start" counter alone never reaches
+>   its threshold.
+> - **Watchdog that started with a live owner** (something was listening on the port):
+>   exits only after `MAX_RESURRECT_ATTEMPTS` (5) **consecutive** failures, and a
+>   **successful restart resets the counter**, so an instance that crashes occasionally is
+>   not wrongly retired.
+>
+> Real crashes are still restarted by the outer supervisor (launchd `KeepAlive` / manual
+> `ethan serve`).
 >
 > Note: launchd's default `maxfiles` is only **256**, which is low for ethan (Lark
 > listeners + WeChat polling + browser WebSockets + several SQLite connections).

@@ -47,6 +47,11 @@ MAX_FAILURES = 3            # 连续N次失败才判定死亡
 # 退役后就再没人重启它了）。
 MAX_RESURRECT_ATTEMPTS = 5
 
+# 启动时端口上就没监听者（孤儿 watchdog，主人已不存在）时，容忍的复活失败次数。
+# 取 1：第一个「拉起来但 30s 内没健康」的实例就足以证明没人需要这个端口，继续试
+# 只会顺手制造更多争抢同一 sessions.db 的幽灵实例。
+ORPHAN_RESURRECT_ATTEMPTS = 1
+
 
 def watchdog_disabled() -> bool:
     """`ETHAN_NO_WATCHDOG=1` 是否生效（开发/测试开关）。
@@ -432,10 +437,16 @@ def watchdog_main(port: int = DEFAULT_PORT) -> None:
     # 实测代价：幽灵实例跑完整个 lifespan（scheduler/heartbeat 全起）与主实例双写
     # 同一个 DELETE 模式 sessions.db，把库锁死到连 SELECT 都 `database is locked`。
     #
-    # 判据：连续 N 轮尝试重启、但每次重启出来的实例都活不过一个健康检查周期，
-    # 且端口上原本就没有任何「主实例」在监听（_port_in_use 为假）——说明没人需要
-    # 这个端口了，watchdog 应当退役，而不是继续制造实例。真正的 server 崩溃由
-    # 上一层的 supervisor（launchd KeepAlive / 用户手动 serve）负责重启。
+    # 判据：**端口上原本就没有任何「主实例」在监听**时，才允许靠「连续 N 次复活
+    # 失败」退役。启动时端口上已有监听者 = 这是个真在服役的实例，它的 crash 循环
+    # 交给上层 supervisor 处理，watchdog 不轻易退役（否则一个正常跑几个月、偶发崩
+    # 过的实例会被永久剥夺守护——非 launchd 场景下它就是唯一的 supervisor）。
+    #
+    # 注意不能只看「拉起失败」：幽灵场景下 `_start_server` 会**成功**拉起一个实例
+    # 且 30s 内健康（它只是和主实例抢同一个 sessions.db），每次都算复活成功、计数
+    # 一路清零，退役逻辑永远不触发——正是实测里 84 次无限重启的样子。所以判据的
+    # 主项是「孤儿端口」，拉起失败只是加速退役的辅助项。
+    started_orphan = not _port_in_use(port)
     _resurrect_failures = 0
 
     while True:
@@ -490,7 +501,19 @@ def watchdog_main(port: int = DEFAULT_PORT) -> None:
                             _resurrect_failures = 0
                         else:
                             _resurrect_failures += 1
-                            if _resurrect_failures >= MAX_RESURRECT_ATTEMPTS:
+                            if started_orphan:
+                                logger.warning(
+                                    "[Watchdog] 本 watchdog 启动时端口 %d 上就没有任何"
+                                    "监听者（判断为被遗留的孤儿 watchdog），本次重启只"
+                                    "拉到 %d 次失败即退役",
+                                    port,
+                                    ORPHAN_RESURRECT_ATTEMPTS,
+                                )
+                            if _resurrect_failures >= (
+                                ORPHAN_RESURRECT_ATTEMPTS
+                                if started_orphan
+                                else MAX_RESURRECT_ATTEMPTS
+                            ):
                                 logger.error(
                                     "[Watchdog] 已连续 %d 次拉起端口 %d 上的 server "
                                     "但均在 30s 内未能健康 —— 判定本 watchdog 的主人"

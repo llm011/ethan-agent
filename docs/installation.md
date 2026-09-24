@@ -266,11 +266,16 @@ launchd 服务再手动 `ethan serve`。
 
 > **watchdog 会退役。** 非 launchd 启动的实例会留下一个独立的 watchdog 进程，它只认
 > 端口、不认主人。若拉起它的那个 serve 已退出（典型：换成 launchd 托管在别的端口），
-> watchdog 会一直 ping 旧端口、判定「server 死亡」并无限复活幽灵实例。现在它**连续**
-> `MAX_RESURRECT_ATTEMPTS`（默认 5）次「拉起来但 30s 内没健康」就会**主动退出**，
-> 不再制造重复实例。**复活成功会清零计数**，所以偶发崩溃的正常实例不会被误退役
-> —— 真正的崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）或
-> 它自己继续重启。
+> watchdog 会一直 ping 旧端口、判定「server 死亡」并无限复活幽灵实例。退役判据分两种：
+>
+> - **孤儿 watchdog**（自己启动时端口上就没有任何监听者）：只要一次「拉起来但在 30s
+>   内没健康」就**主动退出**（`ORPHAN_RESURRECT_ATTEMPTS`，默认 1）。这是幽灵场景的
+>   根治点——注意幽灵实例其实**能起来**（它只是和主实例抢同一个 `sessions.db`），
+>   所以「拉起失败次数」在这里恒为 0，必须靠「孤儿」这个判据才退得掉。
+> - **正常服役的 watchdog**（启动时端口上有主实例）：**连续** `MAX_RESURRECT_ATTEMPTS`
+>   （默认 5）次拉起失败才退役，且**复活成功会清零计数**，所以偶发崩溃的正常实例不会
+>   被误退役——真正的崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）
+>   或它自己继续重启。
 
 > **launchd 的 `maxfiles` 默认只有 256，对 ethan 偏低。** ethan 要同时持有 Lark
 > 事件监听、微信轮询、浏览器插件 WebSocket、多个 SQLite 连接等。fd 耗尽会报

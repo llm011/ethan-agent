@@ -382,9 +382,18 @@ ethan server uninstall  # 卸载
 >
 > **watchdog 会退役**：非 launchd 启动会留下一个独立 watchdog，它只认端口、不认主人。
 > 若拉起它的那个 serve 已退出（典型：换成 launchd 托管在别的端口），它本来会无限复活
-> 幽灵实例。现在**连续** `MAX_RESURRECT_ATTEMPTS`（默认 5）次「拉起来但 30s 内没健康」
-> 就**主动退出**。**复活成功会清零计数**，所以偶发崩溃的正常实例不会被误退役；真正的
-> 崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）或它自己继续重启。
+> 幽灵实例。退役阈值现在分两种：
+>
+> - **孤儿 watchdog**（自己启动时端口上就没有任何监听者）：只要一次「拉起来但在 30s 内
+>   没健康」就**主动退出**（`ORPHAN_RESURRECT_ATTEMPTS`，默认 1）。这才是幽灵场景的
+>   根治点——幽灵实例其实**能起来**（它只是和主实例抢同一个 `sessions.db`），所以光靠
+>   「拉起失败次数」永远到不了阈值。
+> - **正常服役的 watchdog**（启动时端口上有主实例）：**连续** `MAX_RESURRECT_ATTEMPTS`
+>   （默认 5）次拉起失败才退役，且**复活成功会清零计数**，所以偶发崩溃的正常实例不会
+>   被误退役。
+>
+> 真正的崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）或它自己继续
+> 重启。
 >
 > 另注：launchd 的 `maxfiles` 默认只有 **256**，对 ethan 偏低（Lark 监听 + 微信轮询 +
 > 浏览器 WebSocket + 多个 SQLite 连接）。耗尽会报 `Errno 24: Too many open files`，

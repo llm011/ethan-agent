@@ -359,11 +359,13 @@ def test_watchdog_retires_after_repeated_failed_resurrections(monkeypatch):
     monkeypatch.setattr(w, "HEALTH_CHECK_INTERVAL", 0)
     monkeypatch.setattr(w, "MAX_FAILURES", 2)
     monkeypatch.setattr(w, "MAX_RESURRECT_ATTEMPTS", 2)
+    monkeypatch.setattr(w, "ORPHAN_RESURRECT_ATTEMPTS", 99)
 
-    # 端口永远没人监听（真死）→ resurrecting 恒为 True
+    # 端口一直有监听者（不是孤儿 watchdog）→ 走 MAX_RESURRECT_ATTEMPTS 这条路，
+    # 孤儿判定另有两个专门的测试覆盖。
     monkeypatch.setattr(w, "_check_server_health", lambda _p: False)
     monkeypatch.setattr(w, "_server_is_dead", lambda _p: True)
-    monkeypatch.setattr(w, "_port_in_use", lambda _p: False)
+    monkeypatch.setattr(w, "_port_in_use", lambda _p: True)
     monkeypatch.setattr(w, "_kill_server", lambda _p: None)
     monkeypatch.setattr(w, "_check_lark_event_bus", lambda: True)
     monkeypatch.setattr(w.time, "sleep", lambda _s: None)
@@ -404,7 +406,9 @@ def test_watchdog_counts_only_consecutive_failures(monkeypatch):
     phase = {"dead": True}
     monkeypatch.setattr(w, "_check_server_health", lambda _p: not phase["dead"])
     monkeypatch.setattr(w, "_server_is_dead", lambda _p: phase["dead"])
-    monkeypatch.setattr(w, "_port_in_use", lambda _p: not phase["dead"])
+    # 非孤儿（启动时端口上有主实例），否则会走孤儿快速退役、验不到「成功即清零」
+    monkeypatch.setattr(w, "ORPHAN_RESURRECT_ATTEMPTS", 99)
+    monkeypatch.setattr(w, "_port_in_use", lambda _p: True)
     monkeypatch.setattr(w, "_kill_server", lambda _p: None)
     monkeypatch.setattr(w, "_check_lark_event_bus", lambda: True)
     monkeypatch.setattr(w, "_write_pid", lambda *_a, **_k: None)
@@ -444,10 +448,11 @@ def test_watchdog_retires_only_after_consecutive_start_failures(monkeypatch):
     monkeypatch.setattr(w, "HEALTH_CHECK_INTERVAL", 0)
     monkeypatch.setattr(w, "MAX_FAILURES", 2)
     monkeypatch.setattr(w, "MAX_RESURRECT_ATTEMPTS", 3)
+    monkeypatch.setattr(w, "ORPHAN_RESURRECT_ATTEMPTS", 99)
 
     monkeypatch.setattr(w, "_check_server_health", lambda _p: False)
     monkeypatch.setattr(w, "_server_is_dead", lambda _p: True)
-    monkeypatch.setattr(w, "_port_in_use", lambda _p: False)
+    monkeypatch.setattr(w, "_port_in_use", lambda _p: True)  # 非孤儿
     monkeypatch.setattr(w, "_kill_server", lambda _p: None)
     monkeypatch.setattr(w, "_check_lark_event_bus", lambda: True)
     monkeypatch.setattr(w.time, "sleep", lambda _s: None)
@@ -466,6 +471,93 @@ def test_watchdog_retires_only_after_consecutive_start_failures(monkeypatch):
         w.watchdog_main(port=8900)
 
     assert exc.value.code == 0  # 退役
+    assert starts["n"] == 3
+
+
+def test_watchdog_retires_early_when_started_as_orphan(monkeypatch):
+    """启动时端口上就没监听者（孤儿 watchdog）→ 一次复活失败就退役。
+
+    这是个真 gap（自己 review 出来的）：幽灵场景下 `_start_server` 会**成功**
+    拉起实例且 30s 内健康（它只是和主实例抢同一个 sessions.db），于是每次都算
+    「复活成功」、计数一路清零，退役逻辑永远不触发——实测就是这样无限重启了
+    84 次。所以判据必须以「启动时端口上有主实例」为前提，孤儿 watchdog 才谈得上
+    靠失败次数退役。
+    """
+    import ethan.watchdog as w
+
+    monkeypatch.setattr(w, "HEALTH_CHECK_INTERVAL", 0)
+    monkeypatch.setattr(w, "MAX_FAILURES", 2)
+    # 故意留一个很大的失败阈值：退役必须是被 started_orphan 提前触发的，
+    # 否则这个测试会因为「凑够了 MAX_RESURRECT_ATTEMPTS」而假通过。
+    monkeypatch.setattr(w, "MAX_RESURRECT_ATTEMPTS", 99)
+    monkeypatch.setattr(w, "ORPHAN_RESURRECT_ATTEMPTS", 1)
+
+    monkeypatch.setattr(w, "_check_server_health", lambda _p: False)
+    monkeypatch.setattr(w, "_server_is_dead", lambda _p: True)
+    monkeypatch.setattr(w, "_port_in_use", lambda _p: False)  # 启动时就是孤儿
+    monkeypatch.setattr(w, "_kill_server", lambda _p: None)
+    monkeypatch.setattr(w, "_check_lark_event_bus", lambda: True)
+    monkeypatch.setattr(w.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(w, "_write_pid", lambda *_a, **_k: None)
+    monkeypatch.setattr(w, "_write_watchdog_port", lambda *_a, **_k: None)
+
+    starts = {"n": 0}
+
+    def _fake_start(_port=w.DEFAULT_PORT):
+        starts["n"] += 1
+        return False
+
+    monkeypatch.setattr(w, "_start_server", _fake_start)
+
+    with pytest.raises(SystemExit) as exc:
+        w.watchdog_main(port=8900)
+
+    assert exc.value.code == 0  # 退役
+    assert starts["n"] == 1  # 远未达到 MAX_RESURRECT_ATTEMPTS=99
+
+
+def test_watchdog_does_not_retire_early_when_started_with_owner(monkeypatch):
+    """启动时端口上有监听者（正常服役的实例）→ 不按孤儿阈值退役。
+
+    真实崩溃循环应交上层 supervisor（launchd KeepAlive）处理；watchdog 轻易
+    退役会让非 launchd 场景彻底失去守护。
+    """
+    import ethan.watchdog as w
+
+    monkeypatch.setattr(w, "HEALTH_CHECK_INTERVAL", 0)
+    monkeypatch.setattr(w, "MAX_FAILURES", 2)
+    monkeypatch.setattr(w, "MAX_RESURRECT_ATTEMPTS", 3)
+    monkeypatch.setattr(w, "ORPHAN_RESURRECT_ATTEMPTS", 1)
+
+    monkeypatch.setattr(w, "_check_server_health", lambda _p: False)
+    monkeypatch.setattr(w, "_server_is_dead", lambda _p: True)
+    # 启动时有监听者：第一次调用返回 True（主实例还在），之后才消失。
+    seen = {"n": 0}
+
+    def _port_in_use(_p):
+        seen["n"] += 1
+        return seen["n"] == 1
+
+    monkeypatch.setattr(w, "_port_in_use", _port_in_use)
+    monkeypatch.setattr(w, "_kill_server", lambda _p: None)
+    monkeypatch.setattr(w, "_check_lark_event_bus", lambda: True)
+    monkeypatch.setattr(w.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(w, "_write_pid", lambda *_a, **_k: None)
+    monkeypatch.setattr(w, "_write_watchdog_port", lambda *_a, **_k: None)
+
+    starts = {"n": 0}
+
+    def _fake_start(_port=w.DEFAULT_PORT):
+        starts["n"] += 1
+        return False
+
+    monkeypatch.setattr(w, "_start_server", _fake_start)
+
+    with pytest.raises(SystemExit) as exc:
+        w.watchdog_main(port=8900)
+
+    assert exc.value.code == 0
+    # 走的是 MAX_RESURRECT_ATTEMPTS=3，而不是孤儿的 1
     assert starts["n"] == 3
 
 
