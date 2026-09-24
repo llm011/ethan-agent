@@ -477,3 +477,46 @@ def test_plist_raises_fd_limit():
     data = plistlib.loads(content.encode())
     assert data["SoftResourceLimits"]["NumberOfFiles"] >= 8192
     assert data["HardResourceLimits"]["NumberOfFiles"] >= 8192
+
+
+# ── status 不误报唯一的 launchd 正主 ─────────────────────────────────
+
+
+def test_status_excludes_launchd_pid(monkeypatch, capsys):
+    """launchd 托管的实例带 ETHAN_NO_WATCHDOG=1 → **不写** server.pid。
+
+    status 原先只靠 server.pid 排除正主，于是 legit_pid 恒为 None，唯一的健康
+    实例被报成「多实例冲突」（实测如此）。必须同时把 launchd 的 PID 排除掉。
+    """
+    from ethan.interface.commands import server as srv
+
+    fake_list = (
+        '{\n'
+        '\t"PID" = 4242;\n'
+        '\t"Program" = "/x/ethan";\n'
+        '}'
+    )
+    monkeypatch.setattr(srv, "_is_installed", lambda: True)
+    monkeypatch.setattr(
+        srv, "_launchctl", lambda *_a, **_k: type(
+            "R", (), {"returncode": 0, "stdout": fake_list}
+        )()
+    )
+    # server.pid 不存在（launchd 场景就是如此）
+    monkeypatch.setattr("ethan.watchdog._read_pid", lambda _p: None)
+
+    seen: dict = {}
+
+    def _fake_conflicts(extra_exclude_pids=None):
+        seen["exclude"] = extra_exclude_pids
+        return []
+
+    monkeypatch.setattr(
+        "ethan.interface.cli._find_conflicting_servers", _fake_conflicts
+    )
+
+    srv.status()
+    out = capsys.readouterr().out
+    # launchd 的 PID 必须在排除集里，否则会误报
+    assert seen.get("exclude") and 4242 in seen["exclude"]
+    assert "多个 ethan 实例" not in out

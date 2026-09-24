@@ -309,6 +309,7 @@ def status() -> None:
         console.print("[yellow]服务未安装。运行 [bold]ethan server install[/bold] 可安装开机自启服务。[/yellow]")
         return
     result = _launchctl("list", PLIST_NAME)
+    launchd_pid: int | None = None
     if result.returncode != 0 or not result.stdout.strip() or result.stdout.strip() == "-":
         console.print("[yellow]● 服务已安装但当前未在运行[/yellow]")
         console.print(f"  plist:  {PLIST_PATH}")
@@ -317,6 +318,10 @@ def status() -> None:
         console.print("[green]● 服务运行中[/green]")
         if "pid" in fields:
             console.print(f"  PID:    {fields['pid']}")
+            try:
+                launchd_pid = int(fields["pid"])
+            except ValueError:
+                launchd_pid = None
         if "exe" in fields:
             console.print(f"  程序:   {fields['exe']}")
         console.print(f"  日志:   {Path.home() / '.ethan' / 'logs' / 'api.out.log'}")
@@ -329,15 +334,29 @@ def status() -> None:
     # 但 status 自身是独立的短命 CLI 进程：正常运行的那个常驻 server 并不是当前
     # 进程，若不排除就会被 _find_conflicting_servers 误报成「冲突」——只要有 1 个
     # 健康 server 在跑，status 就永远多报 1 个（它数的那个 pid 恰恰是唯一的正主）。
-    # 所以把 /tmp/ethan/server.pid 记录的合法 server PID 作为「非冲突」排除掉，
-    # 只对真正多出来的实例告警。
+    #
+    # 合法正主有两条来源，必须都给上：
+    # 1. /tmp/ethan/server.pid —— serve 自己写的；
+    # 2. **launchd 的 PID** —— launchd 托管的实例带 ETHAN_NO_WATCHDOG=1，**不写**
+    #    server.pid。只用第 1 条的话，launchd 场景下 legit_pid 恒为 None，唯一的
+    #    正主会被报成冲突（实测如此），用户每次 status 都看到假的「多实例」告警。
+    exclude: set[int] = set()
     try:
-        from ethan.interface.cli import _find_conflicting_servers
         from ethan.watchdog import SERVER_PID_FILE, _read_pid
 
-        legit_pid = _read_pid(SERVER_PID_FILE)
+        pid_file_pid = _read_pid(SERVER_PID_FILE)
+        if pid_file_pid:
+            exclude.add(pid_file_pid)
+    except Exception:
+        pass
+    if launchd_pid:
+        exclude.add(launchd_pid)
+
+    try:
+        from ethan.interface.cli import _find_conflicting_servers
+
         conflicts = _find_conflicting_servers(
-            extra_exclude_pids={legit_pid} if legit_pid else None
+            extra_exclude_pids=exclude or None
         )
     except Exception:
         conflicts = []

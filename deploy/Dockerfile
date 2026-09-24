@@ -55,6 +55,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc make \
     ripgrep fd-find \
     curl git ca-certificates \
+    # lsof + procps(pgrep)：重复实例检测（run_server 的 DB 同一性守卫、
+    # _find_conflicting_servers）靠它们判断「谁打开了同一个 sessions.db」。
+    # 没装时检测会静默降级为「无冲突」——服务照常起，但多实例互抢同一个
+    # DELETE 模式 sessions.db 时不会被拦住。
+    lsof procps \
     nodejs npm \
     && npm install -g @larksuite/cli \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
