@@ -384,48 +384,135 @@ def test_watchdog_retires_after_repeated_failed_resurrections(monkeypatch):
     assert starts["n"] == 2
 
 
-def test_watchdog_does_not_retire_when_resurrection_succeeds(monkeypatch):
-    """复活后端口有监听者 → 是正常接住崩溃进程，不该退役。"""
+def test_watchdog_counts_only_consecutive_failures(monkeypatch):
+    """复活**成功**时必须清零计数，否则计数退化成累计值。
+
+    这是个真 bug（本 PR 初版引入后被自己 review 出来）：退役判据若只在
+    「拉起来没健康」时 +1 而从不重置，一个正常跑几个月、偶发崩过 5 次的实例
+    会被永久退役。非 launchd 场景下 watchdog 是唯一的 supervisor，退役后就
+    再没人重启它了 —— 比它要修的问题更糟。
+
+    这里让每次复活都**成功**，但每轮之后 server 再崩一次（模拟长期偶发崩溃），
+    跑够远超 MAX_RESURRECT_ATTEMPTS 轮也不该退役。
+    """
     import ethan.watchdog as w
 
     monkeypatch.setattr(w, "HEALTH_CHECK_INTERVAL", 0)
     monkeypatch.setattr(w, "MAX_FAILURES", 2)
-    monkeypatch.setattr(w, "MAX_RESURRECT_ATTEMPTS", 2)
+    monkeypatch.setattr(w, "MAX_RESURRECT_ATTEMPTS", 3)
+
+    phase = {"dead": True}
+    monkeypatch.setattr(w, "_check_server_health", lambda _p: not phase["dead"])
+    monkeypatch.setattr(w, "_server_is_dead", lambda _p: phase["dead"])
+    monkeypatch.setattr(w, "_port_in_use", lambda _p: not phase["dead"])
+    monkeypatch.setattr(w, "_kill_server", lambda _p: None)
+    monkeypatch.setattr(w, "_check_lark_event_bus", lambda: True)
+    monkeypatch.setattr(w, "_write_pid", lambda *_a, **_k: None)
+    monkeypatch.setattr(w, "_write_watchdog_port", lambda *_a, **_k: None)
+
+    def _fake_start(_port=w.DEFAULT_PORT):
+        phase["dead"] = False  # 复活成功
+        return True
+
+    monkeypatch.setattr(w, "_start_server", _fake_start)
+
+    ticks = {"n": 0}
+
+    def _sleep(_s):
+        ticks["n"] += 1
+        if ticks["n"] % 4 == 0:  # 每 4 拍让 server 再崩一次
+            phase["dead"] = True
+        if ticks["n"] > 80:  # 防死循环：兜底退出
+            raise SystemExit(123)
+
+    monkeypatch.setattr(w.time, "sleep", _sleep)
+
+    with pytest.raises(SystemExit) as exc:
+        w.watchdog_main(port=8900)
+
+    # 必须是被 _sleep 的兜底退出，而不是退役（退役会 sys.exit(0)）
+    assert exc.value.code == 123, "复活成功却仍退役了 → 计数是累计而非连续"
+
+
+def test_watchdog_retires_only_after_consecutive_start_failures(monkeypatch):
+    """复活**失败**（拉起来 30s 内没健康）连续达到阈值 → 退役。
+
+    对应真实幽灵场景：端口上要的东西早没了，_start_server 每次都起不来。
+    """
+    import ethan.watchdog as w
+
+    monkeypatch.setattr(w, "HEALTH_CHECK_INTERVAL", 0)
+    monkeypatch.setattr(w, "MAX_FAILURES", 2)
+    monkeypatch.setattr(w, "MAX_RESURRECT_ATTEMPTS", 3)
+
     monkeypatch.setattr(w, "_check_server_health", lambda _p: False)
     monkeypatch.setattr(w, "_server_is_dead", lambda _p: True)
     monkeypatch.setattr(w, "_port_in_use", lambda _p: False)
     monkeypatch.setattr(w, "_kill_server", lambda _p: None)
     monkeypatch.setattr(w, "_check_lark_event_bus", lambda: True)
-
-    calls = {"n": 0}
-
-    def _sleep(_s):
-        calls["n"] += 1
-        if calls["n"] > 12:  # 防死循环
-            raise SystemExit(0)
-
-    monkeypatch.setattr(w.time, "sleep", _sleep)
-
-    # 关键：复活之后端口变成有人监听 → 下一次循环判定 _server_is_dead=False
-    state = {"started": False}
-
-    def _fake_start(_port=w.DEFAULT_PORT):
-        state["started"] = True
-
-    monkeypatch.setattr(w, "_start_server", _fake_start)
-    monkeypatch.setattr(
-        w, "_server_is_dead", lambda _p: not state["started"]
-    )
-    monkeypatch.setattr(w, "_port_in_use", lambda _p: state["started"])
+    monkeypatch.setattr(w.time, "sleep", lambda _s: None)
     monkeypatch.setattr(w, "_write_pid", lambda *_a, **_k: None)
     monkeypatch.setattr(w, "_write_watchdog_port", lambda *_a, **_k: None)
 
-    # 不抛 SystemExit（退役）即为通过；只由 _sleep 到次数上限退出
+    starts = {"n": 0}
+
+    def _fake_start(_port=w.DEFAULT_PORT):
+        starts["n"] += 1
+        return False  # 起不来
+
+    monkeypatch.setattr(w, "_start_server", _fake_start)
+
     with pytest.raises(SystemExit) as exc:
         w.watchdog_main(port=8900)
 
-    assert exc.value.code == 0  # 来自 _sleep 的防死循环退出，不是退役
-    assert state["started"] is True
+    assert exc.value.code == 0  # 退役
+    assert starts["n"] == 3
+
+
+# ── --force / ETHAN_NO_WATCHDOG 语义一致 ─────────────────────────────
+
+
+def test_run_server_force_bypasses_db_guard(monkeypatch):
+    """`ethan serve --force` 必须能真的绕过 DB 守卫。
+
+    否则 --force 完全失效：cli 层用 force 跳过了它那道检测，api 层又拦一次，
+    而错误提示里还在推荐 --force，属于自相矛盾。
+    """
+    monkeypatch.delenv("ETHAN_NO_WATCHDOG", raising=False)
+    monkeypatch.setattr(api, "_port_is_served", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        api, "_find_db_conflicts", lambda: [(12345, "/x/sessions.db")]
+    )
+
+    ran = {"uvicorn": False}
+
+    def _fake_uvicorn_run(*_a, **_k):
+        ran["uvicorn"] = True
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "uvicorn",
+        type("M", (), {"run": staticmethod(_fake_uvicorn_run)}),
+    )
+
+    api.run_server(host="0.0.0.0", port=8900, force=True)
+    assert ran["uvicorn"] is True
+
+
+def test_watchdog_disabled_only_accepts_one(monkeypatch):
+    """只认 "1"：`ETHAN_NO_WATCHDOG=0` 不该被当成「关闭」。
+
+    原先 cli.py 用真值判断、api.py 用 != "1"，`=0` 会出现
+    「过了 cli 检测却被 api 守卫拦下」的自相矛盾报错。
+    """
+    from ethan.watchdog import watchdog_disabled
+
+    monkeypatch.setenv("ETHAN_NO_WATCHDOG", "1")
+    assert watchdog_disabled() is True
+    monkeypatch.setenv("ETHAN_NO_WATCHDOG", "0")
+    assert watchdog_disabled() is False
+    monkeypatch.delenv("ETHAN_NO_WATCHDOG")
+    assert watchdog_disabled() is False
 
 
 # ── launchd plist 不再双重守护 ───────────────────────────────────────

@@ -375,8 +375,11 @@ ethan server uninstall  # uninstall
 >
 > A duplicate start is now **rejected immediately** (exit code 1) in either case:
 > the port already has a healthy instance, *or* another instance (even on a different
-> port) has the same `sessions.db` open. Set `ETHAN_NO_WATCHDOG=1` to bypass this in
-> dev/test (worktree tests share the live DB).
+> port) has the same `sessions.db` open. Bypass with `ETHAN_NO_WATCHDOG=1` in dev/test
+> (worktree tests share the live DB), or `ethan serve --force` when you really mean it
+> (not recommended — it really will lock-conflict).
+>
+> `ETHAN_NO_WATCHDOG` only accepts `1`; `=0` does not disable it.
 >
 > If the server won't start or keeps dropping, check: `ethan server status`,
 > `lsof -p <pid> | grep sessions.db`, `ls -la ~/.ethan/db/sessions.db-journal`
@@ -387,8 +390,10 @@ ethan server uninstall  # uninstall
 > watchdog that only knows a port, not its owner. If the serve that spawned it is gone
 > (e.g. replaced by a launchd-managed instance on another port), the watchdog would
 > otherwise keep resurrecting ghost instances on the stale port forever. It now exits
-> after `MAX_RESURRECT_ATTEMPTS` (5) failed resurrections. Real crashes are still
-> restarted by the outer supervisor (launchd `KeepAlive` / manual `ethan serve`).
+> after `MAX_RESURRECT_ATTEMPTS` (5) **consecutive** failed start attempts (spawned but
+> not healthy within 30s). A successful restart **resets the counter**, so an instance
+> that crashes occasionally is not wrongly retired. Real crashes are still restarted by
+> the outer supervisor (launchd `KeepAlive` / manual `ethan serve`).
 >
 > Note: launchd's default `maxfiles` is only **256**, which is low for ethan (Lark
 > listeners + WeChat polling + browser WebSockets + several SQLite connections).

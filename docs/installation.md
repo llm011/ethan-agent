@@ -255,16 +255,22 @@ tail -f ~/.ethan/logs/api.err.log      # 服务启动/绑定错误
 - 端口上已有健康实例 → 拒绝；
 - **另一个实例（哪怕端口不同）开着同一个 `sessions.db` → 同样拒绝**；
 - 开发/测试要绕过（worktree 跑测试时库和常驻服务是同一个文件）→ 设
-  `ETHAN_NO_WATCHDOG=1`。
+  `ETHAN_NO_WATCHDOG=1`；
+- 确认要强行启动 → `ethan serve --force`（**不推荐**，真的会锁冲突）。
+
+> `ETHAN_NO_WATCHDOG` **只认 `1`**。写 `=0` 不算关闭（早期 cli 与 api 两处判法
+> 不一致，`=0` 会「过了 cli 检测却被 api 守卫拦下」，现已统一）。
 
 保留唯一实例：`ethan server stop` 后重新启动，或 `ethan server uninstall` 卸掉
 launchd 服务再手动 `ethan serve`。
 
 > **watchdog 会退役。** 非 launchd 启动的实例会留下一个独立的 watchdog 进程，它只认
 > 端口、不认主人。若拉起它的那个 serve 已退出（典型：换成 launchd 托管在别的端口），
-> watchdog 会一直 ping 旧端口、判定「server 死亡」并无限复活幽灵实例。现在它连续
-> `MAX_RESURRECT_ATTEMPTS`（默认 5）次复活都起不来就会**主动退出**，不再制造重复实例。
-> 真正的崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）负责重启。
+> watchdog 会一直 ping 旧端口、判定「server 死亡」并无限复活幽灵实例。现在它**连续**
+> `MAX_RESURRECT_ATTEMPTS`（默认 5）次「拉起来但 30s 内没健康」就会**主动退出**，
+> 不再制造重复实例。**复活成功会清零计数**，所以偶发崩溃的正常实例不会被误退役
+> —— 真正的崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）或
+> 它自己继续重启。
 
 > **launchd 的 `maxfiles` 默认只有 256，对 ethan 偏低。** ethan 要同时持有 Lark
 > 事件监听、微信轮询、浏览器插件 WebSocket、多个 SQLite 连接等。fd 耗尽会报

@@ -370,7 +370,10 @@ ethan server uninstall  # 卸载
 >
 > 重复启动现在会**立刻被拒**（退出码 1），两种情况都挡：端口上已有健康实例，**或
 > 另一个实例（哪怕端口不同）开着同一个 `sessions.db`**。开发/测试要绕过（worktree
-> 跑测试时库和常驻服务是同一个文件）→ 设 `ETHAN_NO_WATCHDOG=1`。
+> 跑测试时库和常驻服务是同一个文件）→ 设 `ETHAN_NO_WATCHDOG=1`；确认要强行启动 →
+> `ethan serve --force`（**不推荐**，真的会锁冲突）。
+>
+> `ETHAN_NO_WATCHDOG` **只认 `1`**，写 `=0` 不算关闭。
 >
 > 服务起不来或反复掉线时依次排查：`ethan server status`、
 > `lsof -p <pid> | grep sessions.db`、`ls -la ~/.ethan/db/sessions.db-journal`
@@ -379,8 +382,9 @@ ethan server uninstall  # 卸载
 >
 > **watchdog 会退役**：非 launchd 启动会留下一个独立 watchdog，它只认端口、不认主人。
 > 若拉起它的那个 serve 已退出（典型：换成 launchd 托管在别的端口），它本来会无限复活
-> 幽灵实例。现在连续 `MAX_RESURRECT_ATTEMPTS`（默认 5）次复活都起不来就**主动退出**。
-> 真正的崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）负责重启。
+> 幽灵实例。现在**连续** `MAX_RESURRECT_ATTEMPTS`（默认 5）次「拉起来但 30s 内没健康」
+> 就**主动退出**。**复活成功会清零计数**，所以偶发崩溃的正常实例不会被误退役；真正的
+> 崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）或它自己继续重启。
 >
 > 另注：launchd 的 `maxfiles` 默认只有 **256**，对 ethan 偏低（Lark 监听 + 微信轮询 +
 > 浏览器 WebSocket + 多个 SQLite 连接）。耗尽会报 `Errno 24: Too many open files`，
