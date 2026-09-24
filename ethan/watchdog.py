@@ -39,6 +39,11 @@ DEFAULT_PORT = 8900
 HEALTH_CHECK_INTERVAL = 15  # 每15秒检查一次
 HEALTH_CHECK_TIMEOUT = 5    # HTTP 超时
 MAX_FAILURES = 3            # 连续N次失败才判定死亡
+# 连续复活失败多少次后判定「主人已不存在」并退役。见 watchdog_main 的说明：
+# 拉起 watchdog 的 serve 退出后，watchdog 会无限复活一个没人要的端口实例，
+# 与主实例双写 sessions.db。给几次机会（应对 server 真的连续崩溃后自愈），
+# 仍起不来就退出。默认 5 次 ≈ 5 个健康检查周期（每周期 15s）。
+MAX_RESURRECT_ATTEMPTS = 5
 
 
 def _pid_alive(pid: int) -> bool:
@@ -402,6 +407,19 @@ def watchdog_main(port: int = DEFAULT_PORT) -> None:
     # 启动后先等待一个周期，给 server 时间完成启动（绑端口）
     time.sleep(HEALTH_CHECK_INTERVAL)
 
+    # 因为「被 launchd 拉起（ETHAN_NO_WATCHDOG=1）」以外的任何一次 serve 启动都会
+    # 留下一个脱离会话的 watchdog，而它只认端口、不认「主人还在不在」，于是会出现：
+    # 拉起它的那个 serve 早退出了，watchdog 却继续 ping 那个端口、发现没人监听、
+    # 判定「server 死亡」并无限复活一个幽灵实例。
+    # 实测代价：幽灵实例跑完整个 lifespan（scheduler/heartbeat 全起）与主实例双写
+    # 同一个 DELETE 模式 sessions.db，把库锁死到连 SELECT 都 `database is locked`。
+    #
+    # 判据：连续 N 轮尝试重启、但每次重启出来的实例都活不过一个健康检查周期，
+    # 且端口上原本就没有任何「主实例」在监听（_port_in_use 为假）——说明没人需要
+    # 这个端口了，watchdog 应当退役，而不是继续制造实例。真正的 server 崩溃由
+    # 上一层的 supervisor（launchd KeepAlive / 用户手动 serve）负责重启。
+    _resurrect_failures = 0
+
     while True:
         try:
             healthy = _check_server_health(port)
@@ -429,10 +447,37 @@ def watchdog_main(port: int = DEFAULT_PORT) -> None:
                     )
 
                     if consecutive_failures >= MAX_FAILURES:
+                        # 先记录这次重启前端口上究竟有没有「活着的 server」：
+                        # _server_is_dead 为真意味着端口上没人监听，即这次重启是
+                        # 「从零复活」而不是「接住一个崩掉的进程」。
+                        resurrecting = _server_is_dead(port)
                         logger.error("[Watchdog] Server unresponsive, restarting...")
                         _kill_server(port)
                         _start_server(port)
                         consecutive_failures = 0
+
+                        # 复活次数守卫：反复复活又反复失败 = 没人需要这个端口了
+                        # （典型场景：拉起本 watchdog 的那个 serve 已退出/被换成
+                        # launchd 托管的另一个端口实例）。继续复活只会不断制造
+                        # 争抢同一个 sessions.db 的幽灵实例，必须退役。
+                        if resurrecting:
+                            _resurrect_failures += 1
+                            if _resurrect_failures >= MAX_RESURRECT_ATTEMPTS:
+                                logger.error(
+                                    "[Watchdog] 已连续 %d 次复活端口 %d 上的 server "
+                                    "但均未存活 —— 判定本 watchdog 的主人已不存在"
+                                    "（可能是被替代的旧实例遗留），停止复活并退出，"
+                                    "避免继续制造争抢同一 sessions.db 的重复实例。",
+                                    _resurrect_failures,
+                                    port,
+                                )
+                                _remove_pid(WATCHDOG_PID_FILE)
+                                _remove_watchdog_port()
+                                sys.exit(0)
+                        else:
+                            # 端口原本有监听 = 正常接住崩溃的进程，重置计数
+                            _resurrect_failures = 0
+
                         # 重启后等一个周期再检查
                         time.sleep(HEALTH_CHECK_INTERVAL)
                         continue

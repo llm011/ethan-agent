@@ -20,6 +20,19 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <!-- launchd 的 maxfiles 默认只有 256，对 ethan 偏低（Lark 监听 + 微信轮询 +
+         浏览器 WebSocket + 多个 SQLite 连接）。fd 耗尽的 Errno 24 可能落在 SQLite
+         提交路径上，导致写事务 journal 不释放、全库写锁卡死。显式放行到 65536。 -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>65536</integer>
+    </dict>
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>65536</integer>
+    </dict>
     <key>StandardOutPath</key>
     <string>__ETHAN_HOME__/logs/api.out.log</string>
     <key>StandardErrorPath</key>

@@ -33,6 +33,21 @@ _PLIST_TEMPLATE = """\
          变成刷屏，也给用户留出 `ethan server stop` 的时间。 -->
     <key>ThrottleInterval</key>
     <integer>60</integer>
+    <!-- launchd 的 maxfiles 默认只有 256，对 ethan 偏低：Lark 事件监听、微信轮询、
+         浏览器插件 WebSocket、多个 SQLite 连接加起来很容易接近上限。fd 耗尽的报错
+         是 `OSError: [Errno 24] Too many open files`，而它**可能落在 SQLite 提交
+         路径上**——写事务提交失败后 journal 不释放，会把全库写锁卡住，表现为
+         「打开会话一直加载」+ 日志刷 `database is locked`。这里显式放行到 65536。 -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>65536</integer>
+    </dict>
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>65536</integer>
+    </dict>
     <key>StandardOutPath</key>
     <string>{ethan_home}/logs/api.out.log</string>
     <key>StandardErrorPath</key>

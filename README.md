@@ -365,16 +365,36 @@ ethan server stop       # stop
 ethan server uninstall  # uninstall
 ```
 
-> ⚠️ **Only one ethan instance may own a port at a time.** The launchd plist sets
-> `ETHAN_NO_WATCHDOG=1` because launchd's `KeepAlive` is already the supervisor —
-> running both supervisors against one port makes the loser retry forever (thousands
-> of `address already in use`), and each retry drops the desktop client's WebSocket.
-> That is the usual cause of **"the desktop app keeps disconnecting"**.
+> ⚠️ **Only one ethan instance may run at a time.** The real conflict is **which
+> process holds `sessions.db` open — not the port.** `sessions.db` uses DELETE journal
+> mode, whose write lock is **whole-database exclusive**, so two instances on *different*
+> ports still deadlock each other. Symptoms: log spam of `database is locked`; worst
+> case a write transaction stalls, `sessions.db-journal` never gets released, and even
+> a plain `SELECT` returns `database is locked` — which users see as **"opening a
+> conversation hangs forever."**
+>
+> A duplicate start is now **rejected immediately** (exit code 1) in either case:
+> the port already has a healthy instance, *or* another instance (even on a different
+> port) has the same `sessions.db` open. Set `ETHAN_NO_WATCHDOG=1` to bypass this in
+> dev/test (worktree tests share the live DB).
 >
 > If the server won't start or keeps dropping, check: `ethan server status`,
-> `lsof -nP -iTCP:8900 -sTCP:LISTEN`, `cat /tmp/ethan/watchdog.log`, and
-> `tail -f ~/.ethan/logs/api.err.log`. A duplicate start now **exits immediately**
-> with a clear message instead of lingering as a zombie process.
+> `lsof -p <pid> | grep sessions.db`, `ls -la ~/.ethan/db/sessions.db-journal`
+> (present and long-lived = a stalled write transaction), `cat /tmp/ethan/watchdog.log`,
+> and `tail -f ~/.ethan/logs/api.err.log`.
+>
+> The watchdog also **retires itself**: a non-launchd start leaves behind a detached
+> watchdog that only knows a port, not its owner. If the serve that spawned it is gone
+> (e.g. replaced by a launchd-managed instance on another port), the watchdog would
+> otherwise keep resurrecting ghost instances on the stale port forever. It now exits
+> after `MAX_RESURRECT_ATTEMPTS` (5) failed resurrections. Real crashes are still
+> restarted by the outer supervisor (launchd `KeepAlive` / manual `ethan serve`).
+>
+> Note: launchd's default `maxfiles` is only **256**, which is low for ethan (Lark
+> listeners + WeChat polling + browser WebSockets + several SQLite connections).
+> Exhausting it raises `Errno 24: Too many open files`, which can land on the SQLite
+> commit path and stall a write transaction. The plist template now sets
+> `SoftResourceLimits`/`HardResourceLimits` to 65536.
 
 ---
 

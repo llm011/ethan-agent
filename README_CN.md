@@ -362,15 +362,30 @@ ethan server stop       # 停止
 ethan server uninstall  # 卸载
 ```
 
-> ⚠️ **同一端口同一时间只能有一个 ethan 实例。** launchd 的 plist 里设了
-> `ETHAN_NO_WATCHDOG=1`——因为 `KeepAlive` 本身已经是守护者。两个守护者盯同一个
-> 端口时，抢不到的那个会无限重试（实测可刷出上千次 `address already in use`），
-> 每次重试都会踢断桌面端 WebSocket——这正是**「桌面端反复失联」**的常见原因。
+> ⚠️ **同一时间只能有一个 ethan 实例在跑。真正的冲突判据是「谁打开了同一个
+> `sessions.db`」，不是端口。** `sessions.db` 用 DELETE journal 模式，写锁**全库
+> 排他**——两个实例哪怕端口不同照样互锁。表现：日志刷 `database is locked`；严重时
+> 一个写事务卡住不提交，`sessions.db-journal` 一直不释放，**连纯 SELECT 都
+> `database is locked`**——用户侧就是**「打开某个会话一直加载」**。
+>
+> 重复启动现在会**立刻被拒**（退出码 1），两种情况都挡：端口上已有健康实例，**或
+> 另一个实例（哪怕端口不同）开着同一个 `sessions.db`**。开发/测试要绕过（worktree
+> 跑测试时库和常驻服务是同一个文件）→ 设 `ETHAN_NO_WATCHDOG=1`。
 >
 > 服务起不来或反复掉线时依次排查：`ethan server status`、
-> `lsof -nP -iTCP:8900 -sTCP:LISTEN`、`cat /tmp/ethan/watchdog.log`、
-> `tail -f ~/.ethan/logs/api.err.log`。重复启动现在会**立刻退出**并给出明确提示，
-> 不会再挂成僵尸进程。
+> `lsof -p <pid> | grep sessions.db`、`ls -la ~/.ethan/db/sessions.db-journal`
+> （存在且长时间不消失 = 有卡死的写事务）、`cat /tmp/ethan/watchdog.log`、
+> `tail -f ~/.ethan/logs/api.err.log`。
+>
+> **watchdog 会退役**：非 launchd 启动会留下一个独立 watchdog，它只认端口、不认主人。
+> 若拉起它的那个 serve 已退出（典型：换成 launchd 托管在别的端口），它本来会无限复活
+> 幽灵实例。现在连续 `MAX_RESURRECT_ATTEMPTS`（默认 5）次复活都起不来就**主动退出**。
+> 真正的崩溃仍由上层 supervisor（launchd `KeepAlive` / 手动 `ethan serve`）负责重启。
+>
+> 另注：launchd 的 `maxfiles` 默认只有 **256**，对 ethan 偏低（Lark 监听 + 微信轮询 +
+> 浏览器 WebSocket + 多个 SQLite 连接）。耗尽会报 `Errno 24: Too many open files`，
+> 可能落在 SQLite 提交路径上把写事务卡住。plist 模板现在显式把
+> `SoftResourceLimits`/`HardResourceLimits` 放到 65536。
 
 ---
 

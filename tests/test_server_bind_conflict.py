@@ -229,6 +229,205 @@ def test_watchdog_default_port_is_8900():
     assert DEFAULT_PORT == 8900
 
 
+# ── DB 同一性守卫（端口不同也会互锁）─────────────────────────────────
+#
+# 真实故障：watchdog 被一个旧的 8900 实例拉起后，那个实例退出了，watchdog 却继续
+# 复活 8900 上的 server；同时 launchd 托管的 8989 实例在跑。两个进程各自跑完
+# lifespan（scheduler/heartbeat/reindex 全起），双写同一个 DELETE 模式
+# sessions.db（写锁全库排他）——表现是 journal 卡住不释放、连纯 SELECT 都
+# `database is locked`、前端「打开会话一直加载」。
+#
+# 端口判据（_port_is_served）挡不住这种情况：两个实例端口完全不同。
+
+
+def test_run_server_exits_when_db_conflict_on_other_port(monkeypatch):
+    """核心回归：另一个实例（不同端口）开着同一个 sessions.db → 必须秒退。
+
+    修复前只查端口，于是 watchdog 拉起的实例能穿透这里跑完整个 lifespan。
+    """
+    monkeypatch.delenv("ETHAN_NO_WATCHDOG", raising=False)
+    # 端口上没人（模拟「用另一个端口起」的场景）
+    monkeypatch.setattr(api, "_port_is_served", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        api, "_find_db_conflicts", lambda: [(12345, "/x/sessions.db")]
+    )
+
+    lifespan_entered = {"yes": False}
+
+    def _fake_lifespan(_app):
+        lifespan_entered["yes"] = True
+        raise AssertionError("不应进入 lifespan")
+
+    monkeypatch.setattr(api, "lifespan", _fake_lifespan)
+
+    with pytest.raises(SystemExit) as exc:
+        api.run_server(host="0.0.0.0", port=8900)
+
+    assert exc.value.code == 1
+    assert lifespan_entered["yes"] is False
+
+
+def test_run_server_proceeds_when_no_db_conflict(monkeypatch):
+    """无冲突时必须正常走下去（不能因为加了守卫就起不来）。"""
+    monkeypatch.delenv("ETHAN_NO_WATCHDOG", raising=False)
+    monkeypatch.setattr(api, "_port_is_served", lambda *_a, **_k: False)
+    monkeypatch.setattr(api, "_find_db_conflicts", lambda: [])
+
+    ran = {"uvicorn": False}
+
+    def _fake_uvicorn_run(*_a, **_k):
+        ran["uvicorn"] = True
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "uvicorn",
+        type("M", (), {"run": staticmethod(_fake_uvicorn_run)}),
+    )
+
+    api.run_server(host="0.0.0.0", port=8900)
+    assert ran["uvicorn"] is True
+
+
+def test_db_guard_skipped_with_no_watchdog_env(monkeypatch):
+    """ETHAN_NO_WATCHDOG=1 是开发/测试开关，必须放行。
+
+    worktree 里跑测试时 sessions.db 和常驻服务是同一个文件，不放行会把日常开发
+    流程整个堵死（CLAUDE.md 的多 worktree 规范）。
+    """
+    monkeypatch.setenv("ETHAN_NO_WATCHDOG", "1")
+    monkeypatch.setattr(api, "_port_is_served", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        api, "_find_db_conflicts", lambda: [(12345, "/x/sessions.db")]
+    )
+
+    ran = {"uvicorn": False}
+
+    def _fake_uvicorn_run(*_a, **_k):
+        ran["uvicorn"] = True
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "uvicorn",
+        type("M", (), {"run": staticmethod(_fake_uvicorn_run)}),
+    )
+
+    api.run_server(host="0.0.0.0", port=8900)
+    assert ran["uvicorn"] is True
+
+
+def test_find_db_conflicts_degrades_to_empty(monkeypatch):
+    """检测本身失败时降级为「无冲突」，不能让服务起不来。"""
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("lsof 不存在")
+
+    monkeypatch.setattr("ethan.interface.cli._find_conflicting_servers", _boom)
+    assert api._find_db_conflicts() == []
+
+
+def test_run_server_exits_when_port_already_served_unchanged(monkeypatch):
+    """端口守卫生效时仍应先于 DB 守卫退出（顺序不能反）。"""
+    monkeypatch.delenv("ETHAN_NO_WATCHDOG", raising=False)
+    monkeypatch.setattr(api, "_port_is_served", lambda *_a, **_k: True)
+
+    db_checked = {"yes": False}
+
+    def _fake_db_conflicts():
+        db_checked["yes"] = True
+        return []
+
+    monkeypatch.setattr(api, "_find_db_conflicts", _fake_db_conflicts)
+
+    with pytest.raises(SystemExit):
+        api.run_server(host="0.0.0.0", port=8900)
+
+    # 端口已占用时不必再查 DB（早退）
+    assert db_checked["yes"] is False
+
+
+# ── watchdog 退役（不再无限复活没人要的端口）─────────────────────────
+
+
+def test_watchdog_retires_after_repeated_failed_resurrections(monkeypatch):
+    """连续复活都起不来 → 判定主人已不存在，主动退出。
+
+    修复前 watchdog 会无限复活一个已无人管理的端口实例，持续制造与主实例
+    争抢同一 sessions.db 的幽灵进程。
+    """
+    import ethan.watchdog as w
+
+    monkeypatch.setattr(w, "HEALTH_CHECK_INTERVAL", 0)
+    monkeypatch.setattr(w, "MAX_FAILURES", 2)
+    monkeypatch.setattr(w, "MAX_RESURRECT_ATTEMPTS", 2)
+
+    # 端口永远没人监听（真死）→ resurrecting 恒为 True
+    monkeypatch.setattr(w, "_check_server_health", lambda _p: False)
+    monkeypatch.setattr(w, "_server_is_dead", lambda _p: True)
+    monkeypatch.setattr(w, "_port_in_use", lambda _p: False)
+    monkeypatch.setattr(w, "_kill_server", lambda _p: None)
+    monkeypatch.setattr(w, "_check_lark_event_bus", lambda: True)
+    monkeypatch.setattr(w.time, "sleep", lambda _s: None)
+
+    starts = {"n": 0}
+
+    def _fake_start(_port=w.DEFAULT_PORT):
+        starts["n"] += 1
+
+    monkeypatch.setattr(w, "_start_server", _fake_start)
+    # 别碰真实的 pid/port 文件
+    monkeypatch.setattr(w, "_write_pid", lambda *_a, **_k: None)
+    monkeypatch.setattr(w, "_write_watchdog_port", lambda *_a, **_k: None)
+
+    with pytest.raises(SystemExit):
+        w.watchdog_main(port=8900)
+
+    assert starts["n"] == 2
+
+
+def test_watchdog_does_not_retire_when_resurrection_succeeds(monkeypatch):
+    """复活后端口有监听者 → 是正常接住崩溃进程，不该退役。"""
+    import ethan.watchdog as w
+
+    monkeypatch.setattr(w, "HEALTH_CHECK_INTERVAL", 0)
+    monkeypatch.setattr(w, "MAX_FAILURES", 2)
+    monkeypatch.setattr(w, "MAX_RESURRECT_ATTEMPTS", 2)
+    monkeypatch.setattr(w, "_check_server_health", lambda _p: False)
+    monkeypatch.setattr(w, "_server_is_dead", lambda _p: True)
+    monkeypatch.setattr(w, "_port_in_use", lambda _p: False)
+    monkeypatch.setattr(w, "_kill_server", lambda _p: None)
+    monkeypatch.setattr(w, "_check_lark_event_bus", lambda: True)
+
+    calls = {"n": 0}
+
+    def _sleep(_s):
+        calls["n"] += 1
+        if calls["n"] > 12:  # 防死循环
+            raise SystemExit(0)
+
+    monkeypatch.setattr(w.time, "sleep", _sleep)
+
+    # 关键：复活之后端口变成有人监听 → 下一次循环判定 _server_is_dead=False
+    state = {"started": False}
+
+    def _fake_start(_port=w.DEFAULT_PORT):
+        state["started"] = True
+
+    monkeypatch.setattr(w, "_start_server", _fake_start)
+    monkeypatch.setattr(
+        w, "_server_is_dead", lambda _p: not state["started"]
+    )
+    monkeypatch.setattr(w, "_port_in_use", lambda _p: state["started"])
+    monkeypatch.setattr(w, "_write_pid", lambda *_a, **_k: None)
+    monkeypatch.setattr(w, "_write_watchdog_port", lambda *_a, **_k: None)
+
+    # 不抛 SystemExit（退役）即为通过；只由 _sleep 到次数上限退出
+    with pytest.raises(SystemExit) as exc:
+        w.watchdog_main(port=8900)
+
+    assert exc.value.code == 0  # 来自 _sleep 的防死循环退出，不是退役
+    assert state["started"] is True
+
+
 # ── launchd plist 不再双重守护 ───────────────────────────────────────
 
 
@@ -260,3 +459,21 @@ def test_plist_has_throttle_interval():
     )
     data = plistlib.loads(content.encode())
     assert data["ThrottleInterval"] >= 10
+
+
+def test_plist_raises_fd_limit():
+    """launchd 默认 maxfiles=256 对 ethan 偏低，必须显式放行。
+
+    fd 耗尽的 `Errno 24` 可能落在 SQLite 提交路径上，导致写事务 journal 不释放、
+    全库写锁卡死（表现为「打开会话一直加载」）。
+    """
+    import plistlib
+
+    from ethan.interface.commands.server import _PLIST_TEMPLATE
+
+    content = _PLIST_TEMPLATE.format(
+        ethan_exe="/tmp/x/ethan", bin_dir="/tmp/x", ethan_home="/tmp/x"
+    )
+    data = plistlib.loads(content.encode())
+    assert data["SoftResourceLimits"]["NumberOfFiles"] >= 8192
+    assert data["HardResourceLimits"]["NumberOfFiles"] >= 8192
