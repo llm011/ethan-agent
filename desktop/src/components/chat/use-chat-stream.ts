@@ -137,6 +137,12 @@ export async function consumeStream(
 
   let _rafId: number | null = null;
   let _flushTimer: ReturnType<typeof setTimeout> | null = null;
+  // 流式期间这条助手消息的稳定 id。
+  //
+  // 必须是**一条流一个**：占位气泡从第一帧起就拿它当 React key，后端落库后再由
+  // 定稿提升成真实数字 id。中途任何一次重建都不能把它丢掉 —— 见下面 flushAssistant
+  // 的注释（key 一塌，列表就会重挂甚至撞车出重复气泡）。
+  let liveId: number | string = placeholderId;
   const buildMsg = (extra?: Partial<Message>): Message => ({
     role: "assistant" as const,
     content: assistantContent,
@@ -146,18 +152,43 @@ export async function consumeStream(
     created_at: Date.now() / 1000,
     model: finalModel,
     intermediateOutput: intermediateOutput || undefined,
+    id: liveId,
     ...extra,
   });
+  /**
+   * 把当前累积状态刷进占位气泡。
+   *
+   * 语义是「**就地更新**最后一条 assistant 消息」，不是「用一条新消息替换它」。
+   * 差别全在 id 上：`buildMsg` 重建出来的对象即使带 `id: liveId`，也不能保证
+   * 覆盖到所有字段 —— 早前这里直接 `next[next.length - 1] = msg`，而 `buildMsg`
+   * 根本不带 `id`，于是**正文到达之前**的任何一次 flush（心跳「任务仍在运行中…」、
+   * 工具 start/done、顶层 cards）都会把占位气泡的 `tmp:xxx` 抹成 `undefined`。
+   *
+   * 后果（用户现象：同一条回复出现两份）：
+   *  - MessageList 的 `key={msg.id ?? \`idx-${startIdx + i}\`}` 退化成下标 key，
+   *    占位气泡被 React 卸载重建（markdown 重解析、代码块重高亮、滚动锚点丢失）；
+   *  - 下标 key 在同一列表里可能撞车，React 把两个兄弟节点折叠/重复渲染 ——
+   *    就是「同一条回复渲染了两次」。刷新后从 DB 重新拉历史，id 回来、重复消失，
+   *    与「点刷新就好了」的现象吻合；
+   *  - 丢失不可恢复：后续每次 flush 都基于上一次结果再替换，占位 id 再也回不来；
+   *    定稿的 `id: messageId ?? last.id` 此时 `last.id` 已是 `undefined`，而后端在
+   *    「无工具无正文」等路径下 `done` 不带 `message_id`，定稿后 id 仍是空。
+   *
+   * 所以这里沿用上一条消息的 id（`liveId`），保证「同一条回复」在整个生命周期里
+   * 始终是同一个 key。后端给出真实 id 时由定稿路径提升，并同步写回 `liveId`，
+   * 避免后续 flush 把真实 id 又退回临时 id。
+   */
   const flushAssistant = (extra?: Partial<Message>) => {
-    const msg = buildMsg(extra);
     writeMsgs(prev => {
-      if (!prev.length) return [...prev, msg];
       const next = [...prev];
-      if (next[next.length - 1]?.role === "assistant") {
-        next[next.length - 1] = msg;
-      } else {
-        next.push(msg);
+      const last = next.length > 0 ? next[next.length - 1] : undefined;
+      if (last?.role === "assistant") {
+        // 既有占位气泡：以它的 id 为准（`liveId` 是权威值，两边保持一致）
+        if (last.id != null) liveId = last.id;
+        next[next.length - 1] = buildMsg(extra);
+        return next;
       }
+      next.push(buildMsg(extra));
       return next;
     });
   };
@@ -597,10 +628,17 @@ export async function consumeStream(
 
   // 先落定稿再取消：反过来会留下一个「读到旧闭包状态、在定稿之后才执行」的定时 flush，
   // 把刚写好的定稿覆盖掉（表现为最后一条消息偶尔回退到中途状态）。
+  // 定稿时把 id 落到 liveId：后端给了真实 id 就提升（后续若还有迟到的 flush 也不会
+  // 退回临时 id）；没给就保留占位 id，**绝不能写成 undefined**（见 flushAssistant 注释）。
+  if (messageId != null) liveId = messageId;
   writeMsgs(prev => {
     const msgs = [...prev];
     const last = msgs[msgs.length - 1];
     if (last && last.role === "assistant") {
+      // 既有占位气泡沿用它的 id：`messageId ?? last.id ?? liveId` 里 last.id 可能已被
+      // 早前的替换抹掉，所以补一道 liveId 兜底，保证 key 始终稳定。
+      const settledId = messageId ?? last.id ?? liveId;
+      liveId = settledId;
       msgs[msgs.length - 1] = {
         ...last,
         content: assistantContent,
@@ -614,7 +652,7 @@ export async function consumeStream(
         mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
         cards: cardsCollected.length > 0 ? (cardsCollected as unknown as Message["cards"]) : undefined,
         matchedSkills: currentMatchedSkills,
-        id: messageId ?? last.id,
+        id: settledId,
         intermediateOutput: intermediateOutput || undefined,
         model: finalModel ?? last.model,
         error: lastError || undefined,
@@ -634,7 +672,7 @@ export async function consumeStream(
       mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
       cards: cardsCollected.length > 0 ? (cardsCollected as unknown as Message["cards"]) : undefined,
       matchedSkills: currentMatchedSkills,
-      // 兜底：没有占位气泡可改时新加一条，同样优先用真实 id
+      // 兜底：没有占位气泡可改时新加一条，同样优先用真实 id，再退回占位 id
       id: messageId ?? placeholderId,
       intermediateOutput: intermediateOutput || undefined,
       model: finalModel,
