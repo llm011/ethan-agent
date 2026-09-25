@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from ethan.core.services.file_jail import build_file_card
 from ethan.interface.routers import files as files_router
 from ethan.tools.builtin.deliver_file import DeliverFileTool
 
@@ -425,6 +426,37 @@ def test_view_endpoint_inline_media(client):
     doc = Path("/tmp/view_test.pptx")
     doc.write_bytes(b"x")
     assert client.get(f"/api/files/view?path={doc}&session_id=s1").status_code == 400
+
+
+def test_view_endpoint_inline_audio(client):
+    """/files/view 必须内联返回音频（mp3/m4a），供桌面端气泡内 <audio> 播放。
+
+    回归背景：桌面端音频卡片一直「音频加载中」。服务端这一侧本身没问题
+    （白名单 + audio/mpeg + Range 都在），真正的拦截发生在 Tauri 的 CSP
+    （缺 media-src）。这个用例把服务端约定钉住，避免以后有人把音频从
+    INLINE_VIEW_EXTS 里摘掉时，桌面端又被静默坑一次。
+    """
+    # m4a 的 content-type 由 mimetypes 决定（macOS 上是 audio/mp4a-latm），
+    # 只要是 audio/* 浏览器就能喂给 <audio>，不必钉死具体子类型。
+    for suffix, expected_type in ((".mp3", "audio/mpeg"), (".m4a", "audio/mp4a-latm")):
+        audio = Path(f"/tmp/view_test_audio{suffix}")
+        audio.write_bytes(b"ID3\x00\x00\x00\x00" + b"0123456789abcdef")
+        res = client.get(f"/api/files/view?path={audio}&session_id=s1")
+        assert res.status_code == 200, suffix
+        ctype = res.headers["content-type"]
+        assert ctype == expected_type or ctype.startswith("audio/"), (suffix, ctype)
+        assert "inline" in res.headers.get("content-disposition", ""), suffix
+        # <audio> 拖进度条依赖 Range，必须支持
+        ranged = client.get(
+            f"/api/files/view?path={audio}&session_id=s1",
+            headers={"Range": "bytes=0-2"},
+        )
+        assert ranged.status_code == 206, suffix
+        assert ranged.content == b"ID3", suffix
+
+        # 且允许作为交付物（deliver_file 白名单）
+        card = build_file_card(str(audio), "听书")
+        assert card is not None and card["kind"] == suffix.lstrip("."), suffix
 
 
 def test_view_endpoint_session_isolation(client, monkeypatch):
