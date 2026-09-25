@@ -126,12 +126,30 @@ class ChatViewModel(
     private var waitForUserCountdownJob: Job? = null
 
     /**
-     * [observeDraftPersistence] 最近一次落盘的 (key, 文本)，由 [clearDraft] 读写 ——
-     * 发送成功后要能把「已落盘的值」同步置空，否则 debounce 窗口里订阅者会拿陈旧的
-     * 非空文本把刚删掉的 key 写回来。
+     * [observeDraftPersistence] 最近一次落盘的 (槽位 key, 文本)。
+     *
+     * key 用来判「会话槽位切了没」：切了就说明旧槽位的草稿已经失去意义（要么刚发出去、
+     * 要么属于上一个会话），要显式删掉。
+     * 文本用来做写盘去重 —— 值没变、槽位没变就不必再打一次磁盘。
      */
     private var lastSavedKey: String? = null
     private var lastSavedText: String? = null
+
+    /**
+     * 最近一次被 [clearDraft] / [loadInitial] 消费掉的 (槽位 key, 文本)，即「已经交给
+     * 输入框、或已经发出去」的那份草稿。
+     *
+     * 必须记下来，不能靠「文本是不是空的」来判：草稿在恢复 / 发送那一刻就已经离开了
+     * 磁盘语义，但**旧 VM 的订阅者手里还攥着它**，debounce 一到就会拿陈旧 state 把它
+     * 写回磁盘 —— 下次打开 APP 又冒出来，这就是线上「输入框残留上一次 query」的成因。
+     *
+     * 匹配「槽位 + 文本」两者而不是只比 key：同一会话在消费之后用户还会接着打下一段
+     * 草稿，那是要正常落盘的，只按 key 拦会把该会话后续的草稿全丢掉。
+     * 比较用 trim 后的正文 —— 发送路径传进来的是 `inputText.trim()`，而订阅者看到的是
+     * 未 trim 的原值，两者必须归一化后才能对上。
+     */
+    private var consumedKey: String? = null
+    private var consumedText: String? = null
 
     init {
         loadInitial(sessionId)
@@ -199,8 +217,14 @@ class ChatViewModel(
             launch {
                 try {
                     val saved = repository.draft(sessionId)
-                    repository.saveDraft(sessionId, "")
                     if (saved.isNotBlank()) {
+                        // 先登记「这份草稿已消费」（把值攥在手里、同时记下来），再删盘上的
+                        // 记录，最后才回填输入框。顺序不能换：登记必须发生在删除之前，
+                        // 否则旧 VM 的订阅者可能在两者之间把这份文本写回磁盘。
+                        // 登记与删除之间没有挂起点（同在 Main.immediate），不会被打断。
+                        consumedKey = draftKeyOf(sessionId)
+                        consumedText = saved
+                        repository.saveDraft(sessionId, "")
                         _state.update { if (it.inputText.isBlank()) it.copy(inputText = saved) else it }
                     }
                 } catch (_: Exception) { }
@@ -339,24 +363,39 @@ class ChatViewModel(
                     }
                     lastSavedKey = key
                     lastSavedText = text
-                    if (text.isNotBlank()) runCatching { repository.saveDraft(sid, text) }
+                    // 被消费过的槽位、且正文仍是当初被消费的那一份 —— 说明这是「陈旧
+                    // state 的写回」（旧 VM 订阅者手上那份恢复了却没清掉的值，debounce
+                    // 到点），不能再落盘把它复活。只拦这一种：用户在消费之后接着打的
+                    // **新**草稿必须能存下来，所以必须比对正文，不能只比槽位。
+                    // 归一化 trim：发送路径传进 clearDraft 的是 `inputText.trim()`。
+                    val isStaleWriteBack = key == consumedKey && text.trim() == consumedText
+                    if (!isStaleWriteBack) {
+                        // 不是陈旧写回 —— 消费标记已完成使命，清掉；正文为空则交给
+                        // 「切槽位」那条路径去删，这里不写空串（见本函数头部说明）。
+                        consumedKey = null
+                        consumedText = null
+                        if (text.isNotBlank()) runCatching { repository.saveDraft(sid, text) }
+                    }
                 }
         }
     }
 
     /**
-     * 清掉某个会话槽位的持久化草稿。发送成功后由 [sendInternal] 显式调用。
+     * 清掉某个会话槽位的持久化草稿，并把它登记为「已消费」（见 [consumedKey]）。
+     *
+     * 调用点：[sendInternal]（消息发出去 / 转成排队消息之后）与 `/new`。
      *
      * 不能只靠「inputText 归零 → 订阅者把空串写下去」：那条链路会经过 400ms 的 debounce，
      * 期间进程被杀 / 被回收，输入框下次打开就又把刚发出去的那条 query 回填了 ——
      * 也就是「发送过的历史 query 被当成草稿恢复」。
-     * 同时把 [lastSavedText] 同步置空，避免订阅者随后用陈旧的非空文本把 key 写回来。
+     *
+     * @param text 被消费掉的那份草稿正文。写回守卫靠它区分「陈旧的写回」和「用户新打的
+     *   草稿」，传错会让守卫失效或误伤，调用方必须传实际消费掉的那一份。
      */
     private suspend fun clearDraft(sessionId: String?, text: String) {
         runCatching { repository.saveDraft(sessionId, "") }
-        if (draftKeyOf(sessionId) == lastSavedKey && text == lastSavedText) {
-            lastSavedText = ""
-        }
+        consumedKey = draftKeyOf(sessionId)
+        consumedText = text
     }
 
     private fun draftKeyOf(sid: String?): String = sid ?: "@new"
@@ -466,8 +505,11 @@ class ChatViewModel(
                     quote = null,
                 )
             }
-            // 内容已经变成排队消息，不再是草稿 —— 立刻删掉持久化记录（debounce 不可靠）
-            viewModelScope.launch { clearDraft(current.sessionId, text) }
+            // 内容已经变成排队消息，不再是草稿 —— 立刻删掉持久化记录（debounce 不可靠）。
+            // `text.isNotBlank()` 同 sendInternal：只有空白的内容不当成草稿删。
+            if (text.isNotBlank()) {
+                viewModelScope.launch { clearDraft(current.sessionId, text) }
+            }
             return
         }
 
@@ -499,12 +541,24 @@ class ChatViewModel(
                     error = null,
                 )
             }
-            // 发出去了就不再是草稿 —— 上面把 inputText 清空后，
-            // observeDraftPersistence 会把空串写下去（等于删掉这条记录）。
-            // 但那条链路要过 400ms 的 debounce，进程若在窗口里被杀，「已发送的历史 query」
-            // 就还躺在磁盘上，下次打开 APP 又被回填。所以这里再显式删一次（幂等）。
-            // 出队直发没动输入框，草稿属于用户正在写的新内容，不能清。
-            if (!fromQueue) clearDraft(current.sessionId, text)
+            // 清掉「已发出去的那条 query」，否则它下次打开 APP 还会被回填成 draft。
+            // 不靠「inputText 归零 → 订阅者写空串」那条链路：它要过 400ms 的 debounce，
+            // 进程在窗口里被杀就清不掉了（这正是线上残留的来源），所以这里显式删（幂等）。
+            //
+            // 删完立刻把**当前**输入框内容（流式期间用户接着打的那段）补写一份，
+            // 它是真正的「未发送草稿」：此刻它既不在输入框里（已被清空）、也没被订阅者
+            // 落盘（debounce 还没到），不补写就等于丢字。出队直发没动输入框，跳过。
+            //
+            // 两个条件缺一不可：`text.isNotBlank()` —— 发送传进来的是 trim 过的内容，
+            // 用户敲空白/误触发送时不该把已有草稿删掉；补写的 `remaining` 天然是非空白的
+            // （含空白就交给订阅者去删）。
+            val remainingDraft = _state.value.inputText
+            if (!fromQueue && text.isNotBlank()) {
+                clearDraft(current.sessionId, text)
+                if (remainingDraft.isNotBlank()) {
+                    runCatching { repository.saveDraft(current.sessionId, remainingDraft) }
+                }
+            }
 
             var sessionId = current.sessionId
             if (sessionId == null) {
@@ -949,18 +1003,23 @@ class ChatViewModel(
         viewModelScope.launch {
             when (cmd) {
                 "/new" -> {
-                    // /new 是「彻底开一个新对话」：输入框连同它残留的草稿一起丢掉。
-                    // 下面把 state 整个换掉后，observeDraftPersistence 会因为 sessionId
-                    // 变成 null 而去清旧槽位，但那条链路要过 400ms debounce ——
-                    // 先删一次，避免窗口期里进程退出又把旧 query 留在磁盘上。
+                    // /new 是「彻底开一个新对话、输入框清空」。输入框里那段文字不一定
+                    // 已经落过盘（debounce 可能还没到），所以两个槽位都得处理：
+                    //   ① 旧会话槽位：里面可能是更早存下的、或刚好落盘的那份文本；
+                    //   ② `@new` 槽位：新建会话场景就存在这里。漏了它，下次 `loadInitial(null)`
+                    //      会把输入框里那段文字又读回来（「清空输入框 → 重启又冒出来」）。
+                    // 两处都要**登记被消费的正文**，否则订阅者随后那次 debounce 写回
+                    // 会把它们复活。正文取此刻输入框的值 —— 正是接下来要被丢掉的那份。
                     val previousSessionId = _state.value.sessionId
+                    val discarded = _state.value.inputText
+                    clearDraft(previousSessionId, discarded)
+                    clearDraft(null, discarded)
                     _state.value = ChatUiState(
                         models = _state.value.models,
                         modes = _state.value.modes,
                         selectedModel = _state.value.selectedModel,
                         selectedMode = _state.value.selectedMode,
                     )
-                    clearDraft(previousSessionId, "")
                 }
                 "/compact" -> {
                     val id = _state.value.sessionId ?: return@launch
