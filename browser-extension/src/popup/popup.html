@@ -101,12 +101,37 @@
       .cmd-btn .cmd-icon {
         font-size: 20px; line-height: 1;
       }
+      .cmd-empty {
+        grid-column: 1 / -1;
+        font-size: 12px; color: #9aa0aa; line-height: 1.5;
+        padding: 10px 12px; border-radius: 10px;
+        background: rgba(127,127,127,0.07);
+        border: 1px dashed #d7dbe5;
+      }
+      .quick-btn {
+        display: flex; align-items: center; gap: 8px; width: 100%;
+        padding: 10px 12px; border-radius: 10px; cursor: pointer;
+        font-size: 13px; font-weight: 500; text-align: left;
+        border: 1px solid #eceef3; background: #f7f8fb; color: #1f2430;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .quick-btn:hover { background: #eef1f8; border-color: #d7dbe5; }
+      .quick-btn .quick-label { flex: 1; }
+      .quick-kbd {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10px; padding: 2px 6px; border-radius: 5px;
+        background: rgba(127,127,127,0.14); color: #6b7280; flex: none;
+      }
       @media (prefers-color-scheme: dark) {
         .cmd-btn {
           background: #262a33; border-color: #323744; color: #e6e8ec;
           box-shadow: 0 1px 2px rgba(0,0,0,0.3);
         }
         .cmd-btn:hover { background: #2f343f; border-color: #3d4350; }
+        .cmd-empty { border-color: #3a3f4a; color: #8b909a; }
+        .quick-btn { background: #262a33; border-color: #323744; color: #e6e8ec; }
+        .quick-btn:hover { background: #2f343f; border-color: #3d4350; }
+        .quick-kbd { background: rgba(255,255,255,0.1); color: #9aa0aa; }
       }
     </style>
   </head>
@@ -147,6 +172,15 @@
       <div id="commandList" class="cmd-list"></div>
     </div>
 
+    <div class="cmd-section">
+      <div class="cmd-title"><span>快捷操作</span></div>
+      <button id="quickSearchTab" class="quick-btn" title="在当前页面打开标签页搜索面板">
+        <span class="cmd-icon">🔎</span>
+        <span class="quick-label">打开搜索 Tab</span>
+        <kbd id="quickSearchKbd" class="quick-kbd"></kbd>
+      </button>
+    </div>
+
     <div class="toggle-row">
       <div>
         <div class="label">Cookie 弹窗自动关闭</div>
@@ -180,10 +214,6 @@
         <button id="paletteReset" style="flex:none;width:auto;padding:8px 10px;background:#eef1f8;color:#3a4150">恢复默认</button>
       </div>
       <div class="hint" id="paletteShortcutHint">点上面的输入框，然后直接按下你想要的组合键</div>
-    </div>
-
-    <div class="row">
-      <button id="openPalette">打开标签页搜索</button>
     </div>
 
     <script type="module" src="popup.js"></script>

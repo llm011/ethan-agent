@@ -61,6 +61,41 @@
       font-size: 11px; padding: 1px 6px; border-radius: 4px; cursor: pointer;
       background: var(--bg); border: 1px solid var(--border); color: var(--muted);
     }
+    /* ── 弹窗展示设置 ── */
+    .panel-box {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px; margin-bottom: 16px;
+    }
+    .panel-box .row-inline { align-items: center; }
+    .panel-box .limit-in { width: 90px; text-align: center; }
+    .panel-box .desc { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+    .panel-box .summary { font-size: 12px; color: var(--primary); margin-left: 10px; }
+    /* ── 排序与移出状态 ── */
+    .card.dragging { opacity: 0.45; }
+    .card.drop-target { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(13,148,136,0.18); }
+    .drag-handle {
+      cursor: grab; font-size: 15px; color: var(--muted); user-select: none;
+      padding: 0 2px; line-height: 1;
+    }
+    .drag-handle:active { cursor: grabbing; }
+    .pos {
+      font-size: 11px; color: var(--muted); min-width: 18px; text-align: center;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 1px 4px;
+    }
+    .badge-hidden { background: rgba(217,119,6,0.14); color: #b45309; border-color: rgba(217,119,6,0.3); }
+    .card.hidden-cmd { opacity: 0.72; }
+    .card.hidden-cmd .name { text-decoration: line-through; text-decoration-color: var(--muted); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .card-actions button { padding: 6px 10px; font-size: 12px; }
+    /* ── 已移出区 ── */
+    #hiddenSection {
+      background: var(--card); border: 1px dashed var(--border); border-radius: 12px;
+      padding: 12px 14px; margin-bottom: 16px;
+    }
+    .hidden-head { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .hidden-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+    .hidden-name { flex: 1; font-size: 13px; }
+    .hidden-row button { padding: 4px 10px; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -70,6 +105,25 @@
       指令从插件弹窗、右键菜单、选中工具条触发，结果流式展示在页面右上角。
       模板占位符：<code>{content}</code> 页面正文 · <code>{selection}</code> 选中文字 · <code>{query}</code> 补充提问（可空）
     </div>
+
+    <div class="panel-box">
+      <div class="row-inline" style="justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:600">弹窗里展示的数量</div>
+          <div class="desc">
+            只展示排在最前面的 N 条（0 = 全部展示）。用下方向上/向下移动，或直接拖动卡片，
+            把最常用的指令排到前面。
+          </div>
+        </div>
+        <div style="display:flex;align-items:center">
+          <input id="limitInput" class="limit-in" type="number" min="0" step="1" value="0" />
+          <span class="summary" id="limitSummary"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="hiddenSection" style="display:none"></div>
+
     <div class="toolbar">
       <button id="add" class="primary">+ 新建指令</button>
       <button id="reset">恢复默认</button>

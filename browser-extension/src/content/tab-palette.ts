@@ -7,6 +7,20 @@
 //
 // 通信：面板不直接调 chrome.tabs（它是页面上下文，调用要走 background）。
 // 面板只负责 UI 和按键，数据通过 chrome.runtime.sendMessage 发给 background。
+//
+// 经典脚本不能 import，但快捷键组合的解析/匹配必须和单测共用同一份实现——
+// 构建时把下面标记的模块内联进本文件（见 vite.config.ts 的 @inline 处理）。
+/* @inline: shared/shortcut-match */
+//
+// 内联意味着这些名字在**运行时**已经在本文件的 IIFE 作用域里，但类型检查器看不到
+// （它只读源码，不做构建期的拼接）。所以这里补一份**仅类型**的声明：用 `declare`
+// 把 shared 模块的导出按别名映射进来，`tsc` 就能解析，且编译后不会留下任何运行时代码
+// ——真正提供实现的是内联进去的那份源码。`typeof import(...)` 保证签名不会各写一份。
+declare const parseComboSpec: typeof import('../shared/shortcut-match').parseComboSpec;
+declare const isMacPlatform: typeof import('../shared/shortcut-match').isMacPlatform;
+declare const comboMatches: typeof import('../shared/shortcut-match').comboMatches;
+declare const hasRealModifier: typeof import('../shared/shortcut-match').hasRealModifier;
+declare const isEditableTargetIn: typeof import('../shared/shortcut-match').isEditableTargetIn;
 
 interface PaletteMatch {
   tab: {
@@ -185,43 +199,43 @@ type ElProps = Record<string, unknown>;
     }
   }
 
-  /** 把 "Cmd+Shift+K" 之类的串解析成匹配函数。空串 → null（禁用）。 */
+  // ---- 快捷键解析：全部走 shared/shortcut-match（构建时内联，见文件头）----
+  //
+  // 这些函数（parseCombo / comboMatches / isMacPlatform / isEditableTarget /
+  // shouldYieldToEditable）**不是本地实现的副本**，而是构建时把
+  // `shared/shortcut-match.ts` 内联进来的同一份代码。早期这里手抄过一份，结果
+  // shared 那份只剩单测在引用、两边会各自漂移——「某个按键落进了哪条 early return」
+  // 只看代码看不出来，必须让页面里跑的和你测的是同一段。
+
+  /** 把 "mod+shift+k" 之类的串解析成匹配函数。空串 → null（禁用）。 */
   function parseCombo(combo?: string): ((e: KeyboardEvent) => boolean) | null {
-    if (!combo || typeof combo !== 'string') return null;
-    var parts = combo
-      .split('+')
-      .map(function (p) {
-        return p.trim().toLowerCase();
-      })
-      .filter(Boolean);
-    if (!parts.length) return null;
-    const need = { mod: false, shift: false, alt: false, ctrl: false, meta: false };
-    let key = '';
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i]!;
-      if (p === 'mod') need.mod = true;
-      else if (p === 'cmd' || p === 'meta' || p === 'command') need.meta = true;
-      else if (p === 'ctrl' || p === 'control') need.ctrl = true;
-      else if (p === 'shift') need.shift = true;
-      else if (p === 'alt' || p === 'option') need.alt = true;
-      else key = p;
-    }
-    if (!key) return null;
+    const parsed = parseComboSpec(combo);
+    if (!parsed) return null;
+    const mac = isMacPlatform(navigator.platform, navigator.userAgent);
     return function (e: KeyboardEvent) {
-      if (e.key.toLowerCase() !== key) return false;
-      if (!!e.shiftKey !== need.shift) return false;
-      if (!!e.altKey !== need.alt) return false;
-      // mod = 当前平台的命令键（mac 上是 Cmd，其它是 Ctrl）
-      const wantMeta = need.meta || (need.mod && isMac());
-      const wantCtrl = need.ctrl || (need.mod && !isMac());
-      if (!!e.metaKey !== wantMeta) return false;
-      if (!!e.ctrlKey !== wantCtrl) return false;
-      return true;
+      return comboMatches(parsed, e, mac);
     };
   }
 
-  function isMac(): boolean {
-    return /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '');
+  /** 组合串里是否含真修饰键（mod/ctrl/meta/alt）——只有 shift 不算。 */
+  function comboHasRealModifier(combo?: string): boolean {
+    return hasRealModifier(parseComboSpec(combo));
+  }
+
+  /**
+   * 事件目标是否落在「会吞掉普通按键」的可编辑区域（含 shadow DOM 与可编辑伪装）。
+   *
+   * 能拿到 `document.activeElement` 就一并交给 shared 判：跨 shadow 边界时
+   * `e.target` 是宿主元素，真正聚焦的输入框在它内部，只看 target 会漏判。
+   */
+  function isEditableTarget(target: unknown): boolean {
+    let deep: unknown = null;
+    try {
+      deep = (document as Document).activeElement;
+    } catch (_) {
+      deep = null;
+    }
+    return isEditableTargetIn(target, deep);
   }
 
   /** 历史条目右侧的标记：能算出时间就显示 HH:MM，否则只写「已关闭」。 */
@@ -594,6 +608,73 @@ type ElProps = Record<string, unknown>;
 
   function applyShortcut(combo?: string) {
     comboMatcher = parseCombo(combo);
+    comboHasRealMod = comboHasRealModifier(combo);
+  }
+
+  // 当前配置是否含真修饰键：决定焦点在输入框时让不让路。见下面 keydown 的注释。
+  let comboHasRealMod = true;
+
+  /**
+   * 这一层框架当前是否「有焦点」。
+   *
+   * 脚本会注入到**每个**框架（见 background 的 allFrames 注入），但焦点同一时刻只
+   * 属于一条焦点链：跨框架边界时每层各有一个 `document.hasFocus()` 为真（顶层为真，
+   * 且 activeElement 是那个 iframe）。所以判据要把这两件事分开：
+   *   - 我这一层自己没焦点 → 不是我
+   *   - 我这一层有焦点，但焦点被某个子框架拿走了 → 也不是我（是那个子框架里的事）
+   *
+   * 不做这个区分的话，一次按键会让**每个**框架各开一个面板：用户看到顶层那个，
+   * 但输入其实进了 iframe 里那个被裁掉的面板——比「没反应」更糟。
+   */
+  function frameHasFocus(): boolean {
+    if (!document.hasFocus()) return false;
+    return true;
+  }
+
+  /**
+   * 焦点是否落进了我这层的某个**子框架**里。
+   *
+   * 焦点链跨框架时，外层文档的 `document.hasFocus()` 仍为真、且 `activeElement`
+   * 是那个 `<iframe>` 元素——所以「我这层有焦点」并不等于「这次按键归我处理」。
+   * 此时按键实际发生在子框架内部，由子框架自己那一份脚本接手。
+   *
+   * 注意不能只看 `tagName === 'IFRAME'` 就一律让出去：activeElement 是 iframe
+   * 但焦点并未进入其内部文档时（比如脚本刚设了 activeElement、或子框架还没加载完），
+   * 没有任何一层会接手，表现就是「按键没反应」。所以再问一次 `hasFocus()`：
+   * 真的进去了，子框架的脚本自己会答 `document.hasFocus() === true`。
+   */
+  function focusIsInChildFrame(): boolean {
+    const active = document.activeElement;
+    if (!active || active.tagName !== 'IFRAME') return false;
+    try {
+      // 同源才能读 contentDocument；跨源会抛，按「可能进去了」让给子框架更安全：
+      // 让出去最多是子框架不接手（它自己 hasFocus() 为真就会接），误抢则必然重复开面板。
+      const inner = (active as HTMLIFrameElement).contentDocument;
+      if (!inner) return true;
+      return inner.hasFocus();
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * toggle 的应答语义：返回 true 表示「这层框架接手了这次切换」。
+   *
+   * background 发 toggle 时不带 frameId（那样要自己算焦点在哪层，跨进程不可靠），
+   * 而是让每层自行判断。只有真正接手的框架会 `sendResponse({ handled: true })`，
+   * background 据此确认「有人接住了」。
+   */
+  function handleToggleRequest(): boolean {
+    // 已经开着面板的那层：这次就是「关掉它」，总是接手
+    if (state.open) {
+      toggle();
+      return true;
+    }
+    // 焦点在子框架里 → 那层才是主体，让给它
+    if (focusIsInChildFrame()) return false;
+    if (!frameHasFocus()) return false;
+    toggle();
+    return true;
   }
 
   document.addEventListener(
@@ -603,10 +684,19 @@ type ElProps = Record<string, unknown>;
       if (e.repeat) return;
       if (!comboMatcher) return;
       // 别抢输入框里的按键（用户正在页面里打字）
-      const t = e.target as HTMLElement | null;
-      if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName || ''))) {
-        return;
-      }
+      // 焦点在输入框/可编辑区时**不再无条件放弃**。
+      //
+      // 早期版本在这里见到 input/textarea/contenteditable 就直接 return，等于
+      // 「只要焦点落在任意搜索框、评论框、聊天输入框里，页面内快捷键就失效」——
+      // 而现实里用户多数时候焦点正是在某个输入框里，这正是「很多页面上按不出来」
+      // 的主因（真实浏览器实测：input/textarea/select/contenteditable 四种聚焦场景
+      // 全部打不开，而 body 聚焦时正常）。
+      //
+      // 正确判据是「这个组合会不会和用户的输入冲突」：
+      //   - 带真修饰键（mod/Cmd/Ctrl/Alt + 主键）**不会往输入框插入文字**，正是
+      //     Cmd+K 这类「命令」的通用形态 → 放行；
+      //   - 只有 Shift、或裸键的组合会真的输入字符（Shift+字母=大写）→ 让路。
+      if (isEditableTarget(e.target) && !comboHasRealMod) return;
       if (!comboMatcher(e)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -619,8 +709,16 @@ type ElProps = Record<string, unknown>;
     (msg: { target?: string; type?: string; combo?: string }, _sender, sendResponse) => {
       if (!msg || msg.target !== 'tabPalette') return undefined;
       if (msg.type === 'toggle') {
-        toggle();
-        sendResponse({ ok: true });
+        // 只有真正接手的那一层报告 handled，background 据此知道「有人开了」，
+        // 不至于因为「没一个框架响应」就误判成注入失败
+        sendResponse({ ok: true, handled: handleToggleRequest() });
+        return undefined;
+      }
+      if (msg.type === 'close') {
+        // 广播给每层：**只有开着的那一层**会真的关，其它层静默返回。
+        // 用来清理「上一次按键留在 iframe 里、用户看不见的那个面板」。
+        if (state.open) close();
+        sendResponse({ ok: true, handled: true });
         return undefined;
       }
       if (msg.type === 'setShortcut') {

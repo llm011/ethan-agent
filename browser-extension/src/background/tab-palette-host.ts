@@ -46,18 +46,63 @@ chrome.tabs.onRemoved.addListener(tabId => {
  * 用 content_scripts 声明式注入也行，但那样每个页面加载都要跑一遍脚本；
  * 「按需注入」只有在用户真的按快捷键时才付出成本，页面加载不受影响。
  * 代价是要处理注入失败（chrome:// 等特权页无法注入）。
+ *
+ * `allFrames: true` 是必须的：页面里键盘焦点落进 iframe 时，外层文档根本收不到
+ * keydown，只有 iframe 自己的 content script 才看得到。只注主框架的话，表现就是
+ * 「在嵌了输入框的 iframe 里按快捷键没反应」。注入到所有子框架后，哪一层有焦点
+ * 就由哪一层打开面板。
  */
 async function ensurePaletteInjected(tabId: number): Promise<boolean> {
   if (injectedTabs.has(tabId)) return true;
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
       files: [PALETTE_FILE],
     });
+    // 一个框架都没注入成功（比如整页都是特权上下文）才算失败
+    if (!results || results.length === 0) return false;
     injectedTabs.add(tabId);
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * 让「该接手的那个框架」切换面板。
+ *
+ * 面板注入到了每个框架（见 ensurePaletteInjected），消息也不带 frameId——因为焦点
+ * 在哪一层只有那一层自己知道（`document.hasFocus()` + activeElement 是不是 iframe），
+ * 在 background 侧去算跨进程的焦点归属既不可靠也没必要。
+ *
+ * 所以这里是「广播问一遍，谁有焦点谁接手」：每层自行判断，只有接手的返回
+ * `handled: true`。**必须只让一层接手**——都接手的话一次按键会在每层各开一个面板，
+ * 用户看到顶层那个、输入却进了 iframe 里被裁掉的那个，比「没反应」更难自查。
+ */
+async function requestToggle(tabId: number): Promise<{ responded: boolean; handled: boolean }> {
+  try {
+    const res = (await chrome.tabs.sendMessage(tabId, {
+      target: 'tabPalette', type: 'toggle',
+    })) as { handled?: boolean } | undefined;
+    // 有框架应答就说明注入是活的，即使它选择不接手（比如焦点在别的框架里）
+    return { responded: true, handled: res?.handled === true };
+  } catch {
+    return { responded: false, handled: false };
+  }
+}
+
+/**
+ * 让所有框架关掉自己的面板。
+ *
+ * `close` 不带 handled 语义——每层都广播一遍，开着的那个自己会关。用途是清理
+ * 「上一次按键留在某个 iframe 里、当前不可见」的面板：这类残留只有再次按快捷键
+ * 才会被发现，用户看到的是「按了两次才有反应」。
+ */
+async function requestClose(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, { target: 'tabPalette', type: 'close' });
+  } catch {
+    /* 没有框架应答：本来就没有面板要关，忽略 */
   }
 }
 
@@ -68,18 +113,16 @@ export async function openPaletteInTab(tabId: number): Promise<void> {
     await notifyCannotInject(tabId);
     return;
   }
-  try {
-    await chrome.tabs.sendMessage(tabId, { target: 'tabPalette', type: 'toggle' });
-  } catch {
-    // 注入成功但消息发不过去（页面刚导航走）：重试一次注入
-    injectedTabs.delete(tabId);
-    if (await ensurePaletteInjected(tabId)) {
-      try {
-        await chrome.tabs.sendMessage(tabId, { target: 'tabPalette', type: 'toggle' });
-      } catch {
-        /* 放弃 */
-      }
-    }
+  // 先把可能残留在别的框架里的面板收掉：面板只该有一份，且它可能正开在
+  // 上次有焦点的那个 iframe 里（用户看不见）。不清的话第二次按键看起来像
+  // 「没反应」——其实关掉的是那个隐藏面板。
+  await requestClose(tabId);
+  // 有框架应答就算成功（它可能出于「焦点不在我这层」而选择不接手）
+  if ((await requestToggle(tabId)).responded) return;
+  // 注入成功但消息发不过去（页面刚导航走）：重试一次注入
+  injectedTabs.delete(tabId);
+  if (await ensurePaletteInjected(tabId)) {
+    await requestToggle(tabId);
   }
 }
 
@@ -113,12 +156,14 @@ async function openPaletteInActiveTab(): Promise<void> {
   }
 }
 
-/** 把最新快捷键广播给所有已注入的 tab，popup 改完立刻生效。 */
+/** 把最新快捷键广播给所有已注入的 tab（含子框架），popup 改完立刻生效。 */
 export async function broadcastShortcut(combo: string): Promise<void> {
   const targets = Array.from(injectedTabs);
   await Promise.all(
     targets.map(async tabId => {
       try {
+        // 注入时是 allFrames，这里也必须不带 frameId 广播，否则 iframe 里那份
+        // 用的一直是启动时读到的旧快捷键
         await chrome.tabs.sendMessage(tabId, {
           target: 'tabPalette',
           type: 'setShortcut',
@@ -265,14 +310,7 @@ export async function openPaletteFromExtensionUI(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && typeof tab.id === 'number') {
     const ok = await ensurePaletteInjected(tab.id);
-    if (ok) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, { target: 'tabPalette', type: 'toggle' });
-        return;
-      } catch {
-        /* 落到下面 */
-      }
-    }
+    if (ok && (await requestToggle(tab.id)).responded) return;
   }
   // 活动 tab 是特权页：没法注入，那就让用户看到原因
   if (tab && typeof tab.id === 'number') {

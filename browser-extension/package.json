@@ -9,7 +9,11 @@
     "dev": "vite build --watch --mode development",
     "type-check": "tsc -b tsconfig.json --pretty false",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "e2e:shortcut": "node scripts/e2e-shortcut.mjs",
+    "e2e:commands": "node scripts/e2e-commands.mjs",
+    "e2e": "npm run build && npm run e2e:shortcut && npm run e2e:commands && npm run e2e:record",
+    "e2e:record": "node scripts/e2e-shortcut-record.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.270",
