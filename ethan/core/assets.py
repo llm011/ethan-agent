@@ -100,51 +100,70 @@ def image_file_path(relative_path: str) -> Path:
 # ── 用户头像 ──────────────────────────────────────────────────────
 #
 # 头像与「会话附图」分开存：附图是 sessions 的资产（~/.ethan/assets/images/<sid>/），
-# 会随会话清理一起消失；头像是用户级资产，放在 images 根目录下（img_avatar.png）。
-# 文件名带固定前缀 + 扩展名，正好落在 /api/images/<filename> 的白名单内
-# （要求 img_ 前缀 + 图片扩展名），复用既有的 header/cookie/签名三通道鉴权。
+# 会随会话清理一起消失；头像是用户级资产，借 `_profile` 这个「伪 session」目录
+# 放在同一棵树下（`images/_profile/img_avatar.png`）。
+#
+# 为什么必须放在 images/ 的子目录而不是根目录：唯一能服务 IMAGES_DIR 的路由是
+# `/api/assets/images/{session_id}/{filename}`，路径里必须带一段 session_id；
+# 而 `/api/images/{filename}` 服务的是 image_search 的下载目录 `/tmp/ethan_images/`，
+# 不是这里。放在根目录会得到两条 404 的 URL（上传成功但三端都取不到图）。
+# 文件名仍保留 `img_` 前缀 + 图片扩展名，与图片白名单惯例一致。
 
 AVATAR_PREFIX = "img_avatar"
+# 头像所在的「伪 session」目录名。下划线开头，不会与真实 session_id 冲突
+# （session_id 形如 s_20260723_abc1）。
+AVATAR_DIRNAME = "_profile"
 # 头像展示尺寸很小（气泡里 28px、设置页预览 ~64px）。按视网膜屏 4x 留量、再给
 # 任意 DPR 留点余量，512px 足够，也让每张头像稳定落在几十 KB。
 AVATAR_MAX_DIM = 512
-# 头像允许的扩展名（与 /api/images 白名单一致）
+# 头像允许的扩展名
 AVATAR_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
 
+def _avatar_dir() -> Path:
+    """头像所在目录（`images/_profile/`）。"""
+    return IMAGES_DIR / AVATAR_DIRNAME
+
+
 def avatar_path() -> Path:
-    """当前 profile 的头像文件路径（按扩展名在主目录下搜索）。
+    """当前 profile 的头像文件路径（按扩展名在头像目录下搜索）。
 
     没有头像时返回一个不存在的 `img_avatar` 路径（供写入方使用），调用方用
     `avatar_url()` 判断「有没有头像」而不是这个函数的返回值。
     """
-    return _find_avatar() or (IMAGES_DIR / f"{AVATAR_PREFIX}.png")
+    return _find_avatar() or (_avatar_dir() / f"{AVATAR_PREFIX}.png")
 
 
 def _find_avatar() -> Path | None:
     """扫描头像文件；存在多个扩展名时取修改时间最新的一个。"""
+    avatar_dir = _avatar_dir()
     try:
-        if not IMAGES_DIR.is_dir():
+        if not avatar_dir.is_dir():
             return None
     except OSError:
         return None
     best: Path | None = None
-    for p in IMAGES_DIR.glob(f"{AVATAR_PREFIX}.*"):
-        if not p.is_file() or p.suffix.lower() not in AVATAR_EXTS:
+    for p in avatar_dir.glob(f"{AVATAR_PREFIX}.*"):
+        try:
+            if not p.is_file() or p.suffix.lower() not in AVATAR_EXTS:
+                continue
+            mtime = p.stat().st_mtime
+        except OSError:
             continue
-        if best is None or p.stat().st_mtime > best.stat().st_mtime:
+        if best is None or mtime > best.stat().st_mtime:
             best = p
     return best
 
 
 def avatar_url() -> str:
-    """当前 profile 的头像相对 URL（`images/img_avatar.png`）；无头像返回空串。
+    """当前 profile 的头像相对 URL（`assets/images/_profile/img_avatar.png`）。
 
-    前缀 `images/` 与 /api/assets 路由拼成 `/api/images/<filename>` —— 该路由
-    已支持 header/cookie/签名三种鉴权，前端用 assetUrl() 拼绝对地址即可。
+    无头像返回空串。前缀 `assets/` 与前端 assetUrl() 拼成
+    `/api/assets/images/_profile/<filename>` —— 该路由走 header/cookie/?token=
+    三通道鉴权，`<img>` 标签也能直接取到。
     """
     p = _find_avatar()
-    return f"images/{p.name}" if p else ""
+    return f"assets/images/{AVATAR_DIRNAME}/{p.name}" if p else ""
 
 
 def save_avatar(data: bytes, media_type: str = "") -> str:
@@ -153,8 +172,9 @@ def save_avatar(data: bytes, media_type: str = "") -> str:
     非图片、无法解码、或解码后不是图片的数据一律拒绝（ValueError），避免把任意
     文件塞进公共静态目录。GIF/SVG 之类可能带脚本或动画的格式统一转成 PNG 存。
 
-    Pillow 是可选依赖（只有 computer extra 会带上），缺失时不能 500 —— 退回
-    「只做扩展名 + 体积校验、原样落盘」，至少不影响主流程可用性。
+    Pillow 缺失时同样拒绝（而不是原样落盘）：头像落在公开可访问的静态目录里，
+    「没装解码库就跳过校验」等于给任意内容开了个后门；而且 pillow 已是正式依赖，
+    这种环境不在支持范围内，宁可返回 400 让用户看到明确错误。
     """
     if not data:
         raise ValueError("empty avatar data")
@@ -162,52 +182,52 @@ def save_avatar(data: bytes, media_type: str = "") -> str:
         raise ValueError(f"avatar too large (max {MAX_AVATAR_BYTES // 1024}KB)")
 
     ext = _MIME_TO_EXT.get(media_type.split(";")[0].strip().lower(), "")
-    payload = data
-    if ext and ext in AVATAR_EXTS:
-        try:
-            import io as _io  # noqa: PLC0415
-
-            from PIL import Image  # noqa: PLC0415
-
-            img = Image.open(_io.BytesIO(data))
-            img.load()  # 触发真实解码：截断/损坏文件在这里就会抛
-            # 统一存 PNG：a) 一张头像只可能有一个文件，免去扩展名歧义；
-            # b) 避免把 GIF/SVG 原样落到静态目录；c) 头像带 alpha，PNG 比 JPEG 合适。
-            if img.mode not in ("RGB", "RGBA"):
-                img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
-            if max(img.size) > AVATAR_MAX_DIM:
-                ratio = AVATAR_MAX_DIM / max(img.size)
-                img = img.resize(
-                    (max(1, int(img.size[0] * ratio)), max(1, int(img.size[1] * ratio))),
-                    Image.LANCZOS,
-                )
-            buf = _io.BytesIO()
-            img.save(buf, format="PNG", optimize=True)
-            payload, ext = buf.getvalue(), ".png"
-        except ImportError:
-            logger.warning("Pillow unavailable; storing avatar without validation")
-        except Exception as exc:  # noqa: BLE001 — PIL 的各类解码异常统一转成 400
-            raise ValueError("unsupported or corrupted image") from exc
-    else:
+    if not (ext and ext in AVATAR_EXTS):
         raise ValueError("unsupported image type")
 
-    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    target = IMAGES_DIR / f"{AVATAR_PREFIX}{ext}"
+    try:
+        import io as _io  # noqa: PLC0415
+
+        from PIL import Image  # noqa: PLC0415
+
+        img = Image.open(_io.BytesIO(data))
+        img.load()  # 触发真实解码：截断/损坏文件在这里就会抛
+        # 统一存 PNG：a) 一张头像只可能有一个文件，免去扩展名歧义；
+        # b) 避免把 GIF/SVG 原样落到静态目录；c) 头像带 alpha，PNG 比 JPEG 合适。
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+        if max(img.size) > AVATAR_MAX_DIM:
+            ratio = AVATAR_MAX_DIM / max(img.size)
+            img = img.resize(
+                (max(1, int(img.size[0] * ratio)), max(1, int(img.size[1] * ratio))),
+                Image.LANCZOS,
+            )
+        buf = _io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        payload, ext = buf.getvalue(), ".png"
+    except ImportError as exc:  # pragma: no cover — pillow 是正式依赖，正常装不上才走到
+        raise ValueError("image support unavailable") from exc
+    except Exception as exc:  # noqa: BLE001 — PIL 的各类解码异常统一转成 400
+        raise ValueError("unsupported or corrupted image") from exc
+
+    avatar_dir = _avatar_dir()
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    target = avatar_dir / f"{AVATAR_PREFIX}{ext}"
     # 清掉历史遗留的其他扩展名，否则 _find_avatar 可能取到旧文件
-    for p in IMAGES_DIR.glob(f"{AVATAR_PREFIX}.*"):
+    for p in avatar_dir.glob(f"{AVATAR_PREFIX}.*"):
         if p != target:
             try:
                 p.unlink()
             except OSError:
                 logger.warning("failed to remove old avatar: %s", p, exc_info=True)
     target.write_bytes(payload)
-    return f"images/{target.name}"
+    return f"assets/images/{AVATAR_DIRNAME}/{target.name}"
 
 
 def delete_avatar() -> bool:
     """删除当前 profile 的头像，返回是否真的删掉了文件。"""
     removed = False
-    for p in IMAGES_DIR.glob(f"{AVATAR_PREFIX}.*"):
+    for p in _avatar_dir().glob(f"{AVATAR_PREFIX}.*"):
         try:
             p.unlink()
             removed = True

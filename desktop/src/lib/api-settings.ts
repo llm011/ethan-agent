@@ -131,7 +131,7 @@ export async function updateSystemSettings(patch: Partial<SystemSettings>): Prom
 export interface UserProfileData {
   content: string;
   display_name: string;
-  /** 相对 URL（`images/img_avatar.<ext>`）；未设置头像时为空串 */
+  /** 相对 URL（`assets/images/_profile/img_avatar.<ext>`）；未设置头像时为空串 */
   avatar_url: string;
 }
 

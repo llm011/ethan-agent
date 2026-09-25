@@ -9,6 +9,6 @@ export interface UserIdentity {
   user_id: string;
   /** 显示名；未设置时为空串，气泡按「不显示名字」处理 */
   display_name: string;
-  /** 相对 URL（`images/img_avatar.<ext>`）；未设置时为空串，气泡走兜底头像 */
+  /** 相对 URL（`assets/images/_profile/img_avatar.<ext>`）；未设置时为空串，气泡走兜底头像 */
   avatar_url: string;
 }

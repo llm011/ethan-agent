@@ -257,8 +257,9 @@ class UserProfilePatch(BaseModel):
 async def get_user_profile(user_id: str = Depends(verify_token)):
     """读取当前用户的画像：user_profile.md 正文 + 头像/显示名。
 
-    avatar_url 是相对 URL（`images/img_avatar.png`），走 /api/images 静态路由
-    （header/cookie/签名三通道鉴权），前端用 assetUrl() 拼成绝对地址。
+    avatar_url 是相对 URL（`assets/images/_profile/img_avatar.png`），走
+    /api/assets/images/{session_id}/{filename} 静态路由（header/cookie/?token=
+    三通道鉴权），前端用 assetUrl() 拼成绝对地址。
     """
     from ethan.core.assets import avatar_url
     from ethan.core.paths import user_profile_path

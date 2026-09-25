@@ -165,11 +165,39 @@ def test_save_avatar_writes_png_and_returns_url(profile_env):
 
     url = save_avatar(_png_bytes(1024, 1024), "image/png")
 
-    assert url == "images/img_avatar.png"
+    assert url == "assets/images/_profile/img_avatar.png"
     assert avatar_url() == url
     from ethan.core.assets import avatar_path
 
     assert avatar_path().is_file()
+
+
+def test_avatar_url_is_actually_servable(profile_env, monkeypatch):
+    """返回的 URL 必须真的能被路由取到。
+
+    这是个回归测试：头像一度存在 IMAGES_DIR 根目录、URL 拼成 `images/img_avatar.png`
+    并声称走 /api/images —— 那个路由服务的是 image_search 的 /tmp/ethan_images，
+    结果上传成功但三端全是 404，单元测试却「看着都对」。所以这里把真实的
+    assets 路由挂起来，按前端 assetUrl() 的拼法实际请求一次。
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from ethan.core.assets import save_avatar
+    from ethan.interface.routers import assets as assets_router
+    from ethan.interface.routers.assets import _verify_token_or_cookie
+
+    url = save_avatar(_png_bytes(), "image/png")
+
+    app = FastAPI()
+    app.include_router(assets_router.router, prefix="/api")
+    app.dependency_overrides[_verify_token_or_cookie] = lambda: "u"
+
+    # 前端 assetUrl() = `${API_URL}/${relativePath}`，API_URL 已经含 /api
+    res = TestClient(app).get(f"/api/{url}")
+
+    assert res.status_code == 200, f"{url} 取不到（{res.status_code}）"
+    assert res.headers["content-type"].startswith("image/")
 
 
 def test_save_avatar_downscales_to_bound(profile_env):
@@ -184,16 +212,16 @@ def test_save_avatar_downscales_to_bound(profile_env):
 
 
 def test_save_avatar_replaces_previous_file(profile_env):
-    from ethan.core.assets import AVATAR_PREFIX, IMAGES_DIR, save_avatar
+    from ethan.core.assets import AVATAR_PREFIX, _avatar_dir, save_avatar
 
     save_avatar(_png_bytes(), "image/png")
     # 手造一个历史遗留的其他扩展名，模拟旧版本或手工放进去的文件
-    stale = IMAGES_DIR / f"{AVATAR_PREFIX}.jpeg"
+    stale = _avatar_dir() / f"{AVATAR_PREFIX}.jpeg"
     stale.write_bytes(_png_bytes())
 
     save_avatar(_png_bytes(), "image/png")
 
-    leftovers = [p.name for p in IMAGES_DIR.glob(f"{AVATAR_PREFIX}.*")]
+    leftovers = [p.name for p in _avatar_dir().glob(f"{AVATAR_PREFIX}.*")]
     assert leftovers == ["img_avatar.png"], leftovers
 
 
@@ -205,6 +233,32 @@ def test_save_avatar_rejects_non_image(profile_env):
 
     # 拒绝之后不能留下半个文件
     assert avatar_url() == ""
+
+
+def test_save_avatar_rejects_when_pillow_missing(profile_env, monkeypatch):
+    """Pillow 缺失时必须拒绝，而不是「原样落盘」。
+
+    头像落在公开静态目录里，跳过解码校验就等于允许任意字节以 image/png 存进去。
+    pillow 已是正式依赖，这条路径正常不该走到；这里显式钉住它的语义，
+    避免以后有人为了「兼容」把它改回静默通过。
+    """
+    import builtins
+
+    from ethan.core.assets import avatar_url, save_avatar
+
+    real_import = builtins.__import__
+
+    def _no_pil(name, *args, **kwargs):
+        if name == "PIL" or name.startswith("PIL."):
+            raise ImportError("simulated missing Pillow")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _no_pil)
+
+    with pytest.raises(ValueError):
+        save_avatar(b"<script>alert(1)</script>", "image/png")
+
+    assert avatar_url() == ""  # 一个字节都不该留下
 
 
 def test_save_avatar_rejects_empty_and_oversized(profile_env):
@@ -268,7 +322,7 @@ def test_avatar_is_per_profile(profile_env, monkeypatch):
     finally:
         ETHAN_USER_ID.reset(token)
 
-    assert a_url == b_url == "images/img_avatar.png"
+    assert a_url == b_url == "assets/images/_profile/img_avatar.png"
     assert config_mod.CONFIG_DIR == tmp  # 确认测试没有把 CONFIG_DIR 改乱
 
 
@@ -302,8 +356,8 @@ def test_upload_avatar_then_identity_reports_it(profile_env, monkeypatch):
     res = client.put("/api/user/avatar", files={"file": ("a.png", _png_bytes(), "image/png")})
 
     assert res.status_code == 200, res.text
-    assert res.json()["avatar_url"] == "images/img_avatar.png"
-    assert client.get("/api/user/identity").json()["avatar_url"] == "images/img_avatar.png"
+    assert res.json()["avatar_url"] == "assets/images/_profile/img_avatar.png"
+    assert client.get("/api/user/identity").json()["avatar_url"] == "assets/images/_profile/img_avatar.png"
 
 
 def test_upload_avatar_rejects_non_image(profile_env, monkeypatch):
@@ -366,7 +420,7 @@ def test_profile_get_includes_identity_fields(profile_env, monkeypatch):
 
     body = client.get("/api/settings/profile").json()
 
-    assert body["avatar_url"] == "images/img_avatar.png"
+    assert body["avatar_url"] == "assets/images/_profile/img_avatar.png"
     assert body["display_name"] == "小明"
     assert "## 基础特征" in body["content"]
 
@@ -413,7 +467,7 @@ def test_default_profile_does_not_query_user_store(profile_env, monkeypatch):
 
 def test_concurrent_avatar_uploads_leave_exactly_one_file(profile_env):
     """并发上传不能留下两个头像文件（否则 _find_avatar 取哪个看 mtime，行为不定）。"""
-    from ethan.core.assets import AVATAR_PREFIX, IMAGES_DIR, save_avatar
+    from ethan.core.assets import AVATAR_PREFIX, _avatar_dir, save_avatar
 
     def _do(i: int) -> None:
         save_avatar(_png_bytes(color=(i % 255, 0, 0, 255)), "image/png")
@@ -423,5 +477,5 @@ def test_concurrent_avatar_uploads_leave_exactly_one_file(profile_env):
 
     asyncio.run(_main())
 
-    leftovers = [p.name for p in IMAGES_DIR.glob(f"{AVATAR_PREFIX}.*")]
+    leftovers = [p.name for p in _avatar_dir().glob(f"{AVATAR_PREFIX}.*")]
     assert leftovers == ["img_avatar.png"], leftovers

@@ -268,7 +268,7 @@ data class ProfileResponse(
     val content: String = "",
     /** 画像文档里的显示名（`- 显示名：…`），未设置时为空串 */
     val displayName: String = "",
-    /** 头像相对路径（`images/img_avatar.png`），未设置时为空串 */
+    /** 头像相对路径（`assets/images/_profile/img_avatar.png`），未设置时为空串 */
     val avatarUrl: String = "",
 )
 

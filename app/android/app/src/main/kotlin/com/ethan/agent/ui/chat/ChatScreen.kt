@@ -1324,7 +1324,7 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
 }
 
 /**
- * 把头像的相对路径（`images/img_avatar.png`）拼成 Coil 能取的绝对 URL。
+ * 把头像的相对路径（`assets/images/_profile/img_avatar.png`）拼成绝对 URL。
  *
  * 空串不拼（否则会拼出一个悬空 URL 再白白请求一次），已经是 http(s) 的原样返回。
  */
