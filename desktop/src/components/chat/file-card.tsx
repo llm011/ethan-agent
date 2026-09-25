@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type SyntheticEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { AudioLines, FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Eye, Video } from "lucide-react";
+import { AudioLines, FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Eye, RotateCw, Video } from "lucide-react";
 import { getApiUrl, getAuthToken } from "@/lib/api-base";
 import { openUrl } from "@/lib/external-link";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
@@ -28,6 +28,11 @@ const KIND_ICON: Record<string, typeof FileIcon> = {
 
 const AUDIO_KINDS = new Set(["mp3", "m4a"]);
 
+// 音频加载看门狗超时：超过此时长仍未 canplay/loadedmetadata 即判失败。
+// <audio> 在请求被 CSP 拦掉、或连接半死时不会触发 error 事件（只有 done/网络错误才触发），
+// 只依赖事件会永久停在「音频加载中…」；这个定时器是错误态的兜底出口。
+const AUDIO_LOAD_TIMEOUT_MS = 15_000;
+
 function fmtSize(kb: number | null): string {
   if (kb == null) return "";
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${Math.round(kb)} KB`;
@@ -42,11 +47,16 @@ async function downloadSignedUrl(path: string, sid: string): Promise<string> {
   return `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}${sid}${sigQ}`;
 }
 
-// 内联查看媒体的签名 URL（走 /files/view，供图片 Lightbox 与 MP4 播放器共用）
+// 内联查看媒体的签名 URL（走 /files/view，供图片 Lightbox 与 MP4/音频播放器共用）
+//
+// 注意 signFileUrl 的失败语义：它内部 try/catch 后**返回 {}**，不抛异常。所以拿不到签名时
+// 必须在这里主动抛错——否则会拼出一个没有 user/sig 的直链，服务端必然 401，而 <audio>/<img>
+// 拿到 401 的行为是「静默失败」，UI 只会永远停在加载态。抛错让调用方走明确的错误分支。
 async function signedViewUrl(path: string, sid: string): Promise<string> {
   const sig = await signFileUrl(getApiUrl(), getAuthToken(), [path]);
   const s = sig[path];
-  const sigQ = s ? `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}` : "";
+  if (!s) throw new Error("failed to sign file url");
+  const sigQ = `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}`;
   return `${getApiUrl()}/files/view?path=${encodeURIComponent(path)}${sid}${sigQ}`;
 }
 
@@ -54,11 +64,15 @@ async function signedViewUrl(path: string, sid: string): Promise<string> {
 function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const [url, setUrl] = useState<string>("");
   const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
     const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
-    void signedViewUrl(card.path, sid).then((u) => { if (alive) setUrl(u); });
+    void signedViewUrl(card.path, sid)
+      .then((u) => { if (alive) setUrl(u); })
+      // 签名失败不再产生 unhandled rejection：降级为明确失败态 + 下载入口
+      .catch(() => { if (alive) setFailed(true); });
     return () => { alive = false; };
   }, [card.path, sessionId]);
 
@@ -72,8 +86,9 @@ function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
         {url ? (
           <img src={url} alt={card.title || card.filename} className="block max-w-full max-h-[240px] object-contain bg-muted/30" />
         ) : (
-          <span className="flex items-center justify-center w-[240px] h-[160px] bg-muted/30 text-muted-foreground">
+          <span className="flex flex-col items-center justify-center gap-1 w-[240px] h-[160px] bg-muted/30 text-muted-foreground">
             <ImageIcon className="w-6 h-6" />
+            {failed && <span className="text-xs text-destructive">图片加载失败</span>}
           </span>
         )}
         <span className="block px-3 py-1.5 text-xs text-muted-foreground truncate border-t border-border/50">
@@ -96,8 +111,27 @@ function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
 function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const [url, setUrl] = useState<string>("");
   const [ratio, setRatio] = useState<string | null>(null); // 检测到的宽高比，竖屏用 9/16 否则用 16/9
+  const [failed, setFailed] = useState(false); // 永久失败（签名拿不到 / 解码不了）时显示明确错误
   const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
   const refreshCountRef = useRef(0); // 防止 onError 无限循环：最多刷新一次签名，仍失败则降级
+  // 与音频同款看门狗：被 CSP 拦截/连接挂死时 video 不触发 error，只靠事件会永久停在加载态。
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+  const armTimer = () => {
+    clearTimer();
+    timerRef.current = setTimeout(() => {
+      setUrl((current) => {
+        if (!current) setFailed(true);
+        return current;
+      });
+    }, AUDIO_LOAD_TIMEOUT_MS);
+  };
+  useEffect(() => clearTimer, []);
 
   const refreshUrl = async (): Promise<string | undefined> => {
     try {
@@ -111,28 +145,35 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
 
   useEffect(() => {
     let alive = true;
+    setFailed(false);
+    armTimer();
     void signedViewUrl(card.path, sid)
       .then((u) => { if (alive) setUrl(u); })
-      .catch(() => {});
-    return () => { alive = false; };
+      .catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; clearTimer(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.path, sid]);
 
   // 签名 URL 有 10 分钟 TTL；用户点播放时若已过期会 401/403，此时换一次新签名再播。
-  // refreshCountRef 保证只刷新一次：刷新后仍失败说明视频永久损坏，清空 url 降级为下载。
+  // refreshCountRef 保证只刷新一次：刷新后仍失败说明视频永久损坏，清空 url 降级为错误态。
   const handlePlay = (e: SyntheticEvent<HTMLVideoElement>) => {
     const video = e.currentTarget;
     if (video.readyState === 0 || video.error) {
       if (refreshCountRef.current >= 1) {
-        setUrl(""); // 第二次失败，清空降级为下载按钮
+        setUrl(""); // 第二次失败，提示错误 + 保留下载按钮
+        setFailed(true);
         return;
       }
       refreshCountRef.current += 1;
       void refreshUrl().then((fresh) => {
         if (fresh) {
+          armTimer();
           const t = video.currentTime;
           video.src = fresh;
           video.currentTime = t;
           video.play().catch(() => {});
+        } else {
+          setFailed(true);
         }
       });
     }
@@ -140,6 +181,7 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
 
   const onLoadedMetadata = (e: SyntheticEvent<HTMLVideoElement>) => {
     const v = e.currentTarget;
+    clearTimer();
     if (v.videoWidth && v.videoHeight) {
       setRatio(`${v.videoWidth} / ${v.videoHeight}`);
     }
@@ -170,8 +212,9 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
           onError={handlePlay}
         />
       ) : (
-        <div className="flex items-center justify-center bg-black/90 text-muted-foreground" style={{ aspectRatio: ratio ?? "16 / 9" }}>
+        <div className="flex flex-col items-center justify-center gap-2 bg-black/90 text-muted-foreground" style={{ aspectRatio: ratio ?? "16 / 9" }}>
           <Video className="h-8 w-8" />
+          {failed && <span className="text-xs text-destructive">视频加载失败</span>}
         </div>
       )}
       <div className="flex items-center gap-3 border-t border-border/50 px-3 py-2">
@@ -194,13 +237,30 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
 }
 
 // 交付的音频（book-audio-digest 听书 MP3）：内嵌原生 audio 播放器 + 下载按钮。
-// （签名续播逻辑同 VideoFileCard，见下方组件）
-// 签名过期续播策略与 VideoFileCard 一致：点播放 401 时换一次新签名，仍失败降级下载。
-function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
+// 加载状态机：signing → loading → ready / error，任一分支都有出口，绝不无限 loading。
+// 签名过期续播策略与 VideoFileCard 一致：点播放 401 时换一次新签名，仍失败降级错误态。
+export function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
   const [url, setUrl] = useState<string>("");
+  // 状态机：signing/loading 都显示加载中，ready 显示播放器，error 显示明确错误 + 重试。
+  const [state, setState] = useState<"signing" | "loading" | "ready" | "error">("signing");
   const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
   const refreshCountRef = useRef(0);
+  // 加载看门狗：<audio> 在「请求被拦/连接挂死」时既不触发 error 也不触发 canplay，
+  // 光靠事件会永远停在 loading（历史 bug）。超时即判失败，保证错误态一定有出口。
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+  const armTimer = () => {
+    clearTimer();
+    timerRef.current = setTimeout(() => setState((s) => (s === "ready" ? s : "error")), AUDIO_LOAD_TIMEOUT_MS);
+  };
+  useEffect(() => clearTimer, []);
 
+  // 签名失败（network / 401）不再静默吞掉：直接进错误态，而不是留一个加载不出来的 src。
   const refreshUrl = async (): Promise<string | undefined> => {
     try {
       const u = await signedViewUrl(card.path, sid);
@@ -213,29 +273,58 @@ function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
 
   useEffect(() => {
     let alive = true;
+    refreshCountRef.current = 0;
+    setState("signing");
     void signedViewUrl(card.path, sid)
-      .then((u) => { if (alive) setUrl(u); })
-      .catch(() => {});
-    return () => { alive = false; };
+      .then((u) => {
+        if (!alive) return;
+        setUrl(u);
+        setState("loading");
+        armTimer();
+      })
+      .catch(() => { if (alive) setState("error"); });
+    return () => {
+      alive = false;
+      clearTimer();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.path, sid]);
 
+  // 播放失败/被拒（含签名过期 401）时换一次新签名重试；再失败就落到错误态。
   const handlePlay = (e: SyntheticEvent<HTMLAudioElement>) => {
     const audio = e.currentTarget;
     if (audio.readyState === 0 || audio.error) {
       if (refreshCountRef.current >= 1) {
-        setUrl("");
+        setState("error");
         return;
       }
       refreshCountRef.current += 1;
       void refreshUrl().then((fresh) => {
         if (fresh) {
+          armTimer();
           const t = audio.currentTime;
           audio.src = fresh;
           audio.currentTime = t;
-          audio.play().catch(() => {});
+          audio.play().catch(() => setState("error"));
+        } else {
+          setState("error");
         }
       });
     }
+  };
+
+  const handleRetry = () => {
+    refreshCountRef.current = 0;
+    setUrl("");
+    setState("signing");
+    void refreshUrl().then((u) => {
+      if (!u) {
+        setState("error");
+        return;
+      }
+      setState("loading");
+      armTimer();
+    });
   };
 
   const handleDownload = async () => {
@@ -260,13 +349,27 @@ function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
           </div>
         </div>
       </div>
-      {url ? (
+      {state === "error" ? (
+        <div className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
+          <span className="min-w-0 flex-1 text-destructive">音频加载失败</span>
+          <button
+            type="button"
+            onClick={handleRetry}
+            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary/10"
+          >
+            <RotateCw className="h-3.5 w-3.5" />
+            重试
+          </button>
+        </div>
+      ) : url && state !== "signing" ? (
         <audio
           src={url}
           controls
           preload="metadata"
           className="block w-full px-3 py-2"
           aria-label={card.title || card.filename}
+          onLoadedMetadata={() => { clearTimer(); setState("ready"); }}
+          onCanPlay={() => { clearTimer(); setState("ready"); }}
           onPlay={handlePlay}
           onError={handlePlay}
         />
