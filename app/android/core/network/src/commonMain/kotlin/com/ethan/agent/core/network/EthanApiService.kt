@@ -55,6 +55,10 @@ import com.ethan.agent.core.model.SkillsResponse
 import com.ethan.agent.core.model.SystemPromptPreview
 import com.ethan.agent.core.model.SystemSettings
 import com.ethan.agent.core.model.UploadResponse
+import com.ethan.agent.core.model.UserAvatarRequest
+import com.ethan.agent.core.model.UserAvatarResponse
+import com.ethan.agent.core.model.UserIdentity
+import com.ethan.agent.core.model.UserNameRequest
 import com.ethan.agent.core.model.AnnotationCreateRequest
 import com.ethan.agent.core.model.AnnotationCreateResponse
 import com.ethan.agent.core.model.AnnotationsResponse
@@ -294,6 +298,37 @@ class EthanApiService(
     suspend fun updateUserProfile(body: ProfileRequest) {
         client.patch(url("settings/profile")) { jsonBody(body) }
     }
+
+    // ── 用户身份（显示名 / 头像） ──────────────────────────────────────────
+
+    /** 只取身份三件套，不拉整份画像文档（气泡和设置页头部用）。 */
+    suspend fun getUserIdentity(): UserIdentity = client.get(url("user/identity")).body()
+
+    suspend fun setUserName(body: UserNameRequest): UserIdentity =
+        client.patch(url("user/name")) { jsonBody(body) }.body()
+
+    /** 清空头像。改头像必须走 [uploadAvatar]，后端不接受直接写 URL。 */
+    suspend fun clearUserAvatar(): OkResponse =
+        client.patch(url("user/avatar")) { jsonBody(UserAvatarRequest()) }.body()
+
+    /** 上传头像（multipart，字段名与 web/desktop 一致为 `file`）。 */
+    suspend fun uploadAvatar(bytes: ByteArray, fileName: String, mimeType: String): UserAvatarResponse =
+        client.put(url("user/avatar")) {
+            setBody(
+                MultiPartFormDataContent(
+                    formData {
+                        append(
+                            "file",
+                            bytes,
+                            Headers.build {
+                                append(HttpHeaders.ContentType, mimeType)
+                                append(HttpHeaders.ContentDisposition, "filename=\"$fileName\"")
+                            },
+                        )
+                    },
+                ),
+            )
+        }.body()
 
     suspend fun getSystemPromptPreview(): SystemPromptPreview =
         client.get(url("system-prompt-preview")).body()

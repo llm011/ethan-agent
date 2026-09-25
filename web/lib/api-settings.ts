@@ -1,6 +1,7 @@
 /** Settings 相关类型和 API（Agent/Provider/System/Profile/ToolTiers/FastRules）。 */
 
-import { API_URL, fetchWithTimeout, headers } from "./api-base";
+import { API_URL, fetchWithTimeout, getAuthToken, headers } from "./api-base";
+import type { UserIdentity } from "@ethan/shared/chat/user-identity";
 
 // ── Agent Settings ────────────────────────────────────────────────
 
@@ -123,10 +124,29 @@ export async function updateSystemSettings(patch: Partial<SystemSettings>): Prom
 
 // ── User Profile (我的画像) ───────────────────────────────────────
 
+export interface UserProfileData {
+  content: string;
+  display_name: string;
+  /** 相对 URL（`images/img_avatar.<ext>`）；未设置头像时为空串 */
+  avatar_url: string;
+}
+
 export async function fetchUserProfile(): Promise<string> {
   const res = await fetchWithTimeout(`${API_URL}/settings/profile`, { headers: headers() });
   if (!res.ok) throw new Error("Failed to fetch user profile");
   return (await res.json()).content;
+}
+
+/** 与 fetchUserProfile 同源，但一并取回头像/显示名（设置页预览用）。 */
+export async function fetchUserProfileData(): Promise<UserProfileData> {
+  const res = await fetchWithTimeout(`${API_URL}/settings/profile`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch user profile");
+  const data = await res.json();
+  return {
+    content: data.content ?? "",
+    display_name: data.display_name ?? "",
+    avatar_url: data.avatar_url ?? "",
+  };
 }
 
 export async function updateUserProfile(content: string): Promise<void> {
@@ -135,6 +155,64 @@ export async function updateUserProfile(content: string): Promise<void> {
     headers: headers(),
     body: JSON.stringify({ content }),
   });
+}
+
+// ── 气泡身份（头像 / 显示名） ─────────────────────────────────────
+
+export type { UserIdentity } from "@ethan/shared/chat/user-identity";
+
+/** 对话气泡用的身份信息。轻量接口，聊天页挂载时读一次。 */
+export async function fetchUserIdentity(): Promise<UserIdentity> {
+  const res = await fetchWithTimeout(`${API_URL}/user/identity`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch user identity");
+  const data = await res.json();
+  return {
+    user_id: data.user_id ?? "",
+    display_name: data.display_name ?? "",
+    avatar_url: data.avatar_url ?? "",
+  };
+}
+
+/** 上传头像（唯一设置头像的途径），返回新的相对 URL。 */
+export async function uploadAvatar(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  // 多部分请求不能手写 Content-Type —— 必须让浏览器补上带 boundary 的那个，
+  // 否则后端 multipart 解析拿不到文件。
+  const h: HeadersInit = {};
+  const token = getAuthToken();
+  if (token) h["Authorization"] = `Bearer ${token}`;
+  const res = await fetchWithTimeout(`${API_URL}/user/avatar`, {
+    method: "PUT",
+    headers: h,
+    body: form,
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail || "头像上传失败");
+  }
+  return (await res.json()).avatar_url;
+}
+
+/** 清除头像，回到默认占位。 */
+export async function clearAvatar(): Promise<void> {
+  const res = await fetchWithTimeout(`${API_URL}/user/avatar`, {
+    method: "PATCH",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ avatar_url: "" }),
+  });
+  if (!res.ok) throw new Error("清除头像失败");
+}
+
+/** 设置显示名（空串 = 清除）。名字会写进画像文档，气泡随即生效。 */
+export async function updateDisplayName(displayName: string): Promise<string> {
+  const res = await fetchWithTimeout(`${API_URL}/user/name`, {
+    method: "PATCH",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: displayName }),
+  });
+  if (!res.ok) throw new Error("保存名字失败");
+  return (await res.json()).display_name;
 }
 
 // ── System Prompt Preview ─────────────────────────────────────────

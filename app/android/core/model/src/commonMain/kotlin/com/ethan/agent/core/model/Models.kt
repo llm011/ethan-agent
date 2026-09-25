@@ -264,10 +264,41 @@ data class SystemSettings(
 )
 
 @Serializable
-data class ProfileResponse(val content: String = "")
+data class ProfileResponse(
+    val content: String = "",
+    /** 画像文档里的显示名（`- 显示名：…`），未设置时为空串 */
+    val displayName: String = "",
+    /** 头像相对路径（`images/img_avatar.png`），未设置时为空串 */
+    val avatarUrl: String = "",
+)
 
 @Serializable
 data class ProfileRequest(val content: String)
+
+/**
+ * 用户身份（显示名 + 头像），气泡和设置页共用。
+ *
+ * 与 [ProfileResponse] 分开：画像文档可能很长（几 KB），全量拉进来只为拿一个名字
+ * 太浪费，接口也只返回身份三件套。
+ */
+@Serializable
+data class UserIdentity(
+    val userId: String = "",
+    val displayName: String = "",
+    val avatarUrl: String = "",
+)
+
+/** 设置显示名（`PATCH /user/name`） */
+@Serializable
+data class UserNameRequest(val displayName: String)
+
+/** 清除头像（`PATCH /user/avatar`，只允许清空，改头像走上传） */
+@Serializable
+data class UserAvatarRequest(val avatarUrl: String = "")
+
+/** 上传头像的返回（`PUT /user/avatar`） */
+@Serializable
+data class UserAvatarResponse(val avatarUrl: String = "")
 
 @Serializable
 data class Fact(

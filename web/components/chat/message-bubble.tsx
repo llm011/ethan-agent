@@ -20,7 +20,10 @@ import { applyHighlights } from "@/lib/highlight";
 import { fetchMessageIntermediate, fetchToolRaw } from "@/lib/api-sessions";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 import { ActionConfirmBar } from "@ethan/shared/chat/action-confirm-bar";
+import { UserAvatar } from "@ethan/shared/chat/user-avatar";
+import { useUserIdentity } from "@ethan/shared/chat/use-user-identity";
 import type { CardData, Message } from "@ethan/shared/chat/types";
+import { assetUrl, fetchUserIdentity } from "@/lib/api";
 import type { Annotation } from "@/lib/api";
 
 const URL_RE = /https?:\/\/[^\s<>"')\]\u0000-\u001f\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+/g;
@@ -269,6 +272,8 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
   const [userImages, setUserImages] = useState<LightboxImage[]>([]);
   const [userImageIndex, setUserImageIndex] = useState(0);
   const [userLightboxOpen, setUserLightboxOpen] = useState(false);
+  // 用户头像/显示名。走缓存 + 多实例共享同一 key，列表里几十条气泡只会打一次接口。
+  const { identity: userIdentity } = useUserIdentity(fetchUserIdentity);
 
   // 把已保存的标注以「淡显」方式画回气泡正文（阅读模式是完整强度）。
   useEffect(() => {
@@ -300,6 +305,17 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
       {msg.role === "assistant" && (
         <div className="flex-shrink-0 mt-1">
           <Image src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/logo-avatar.png`} alt="Ethan" width={28} height={28} className="rounded-full" />
+        </div>
+      )}
+      {/* 用户侧头像：与 assistant 侧 logo 对称（同一尺寸/同一 mt-1 基线），
+          让「我」和 Ethan 在视觉上等价。放在气泡右侧 —— 与 justify-end 同向。 */}
+      {msg.role === "user" && (
+        <div className="flex-shrink-0 mt-1 order-last">
+          <UserAvatar
+            url={userIdentity.avatar_url}
+            name={userIdentity.display_name}
+            resolveUrl={(p) => assetUrl(p)}
+          />
         </div>
       )}
       <div className="relative max-w-[90%] md:max-w-[85%]">
@@ -388,6 +404,13 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
         >
           {msg.role === "user" ? (
             <>
+              {/* 气泡顶部的名字：只在设置过显示名时出现，未设置时保持原样不占位，
+                  避免老用户的气泡凭空多一行空白。 */}
+              {userIdentity.display_name && (
+                <div className="text-[11px] font-medium opacity-60 mb-1">
+                  {userIdentity.display_name}
+                </div>
+              )}
               {msg.quote && (
                 <div className="mb-1.5 pl-2 border-l-2 border-foreground/30 text-xs opacity-80">
                   <div className="font-medium opacity-70">

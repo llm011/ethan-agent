@@ -55,6 +55,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import android.widget.Toast
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,6 +73,10 @@ import com.ethan.agent.core.model.KnowledgeValidateRequest
 import com.ethan.agent.core.model.ModelEntry
 import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemSettings
+import com.ethan.agent.core.model.UserIdentity
+import com.ethan.agent.ui.chat.UserAvatarImage
+import com.ethan.agent.ui.chat.avatarAbsoluteUrl
+import com.ethan.agent.ui.chat.queryDisplayName
 import com.ethan.agent.ui.components.EthanCard
 import com.ethan.agent.ui.components.EthanSectionHeader
 import com.ethan.agent.ui.components.ErrorSnackbar
@@ -121,6 +128,11 @@ fun SettingsScreen(
     onClearCache: () -> Unit = {},
     onClearCacheCleared: () -> Unit = {},
     onClearError: () -> Unit,
+    // 身份区（显示名 / 头像）：放在末尾集中管理，避免夹在既有参数中间打乱位置参数调用
+    onUploadAvatar: (ByteArray, String, String) -> Unit = { _, _, _ -> },
+    onClearAvatar: () -> Unit = {},
+    onSaveUserName: (String) -> Unit = {},
+    onClearIdentityToast: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
@@ -136,6 +148,14 @@ fun SettingsScreen(
         LaunchedEffect(msg) {
             snackbar.showSnackbar(msg)
             onClearKnowledgeResult()
+        }
+    }
+
+    // 身份操作（上传/清除头像、存名字）的结果用 snackbar 一句话交代，不弹对话框
+    state.identityToast?.let { msg ->
+        LaunchedEffect(msg) {
+            snackbar.showSnackbar(msg)
+            onClearIdentityToast()
         }
     }
 
@@ -260,7 +280,14 @@ fun SettingsScreen(
                         SettingsTab.Heartbeat -> SystemTextTab("心跳 (heartbeat.md)", state.systemSettings?.heartbeat ?: "", {
                             onUpdateSystem(state.systemSettings?.copy(heartbeat = it) ?: SystemSettings(heartbeat = it))
                         }, onSaveSystem)
-                        SettingsTab.Profile -> ProfileTab(state.profile, onProfileChange, onSaveProfile)
+                        SettingsTab.Profile -> ProfileTab(
+                            state = state,
+                            onChange = onProfileChange,
+                            onSave = onSaveProfile,
+                            onUploadAvatar = onUploadAvatar,
+                            onClearAvatar = onClearAvatar,
+                            onSaveUserName = onSaveUserName,
+                        )
                         SettingsTab.PromptPreview -> PromptPreviewTab(state, onLoadPromptPreview)
                         SettingsTab.ApiKeys -> ApiKeysTab(state, onCreateApiKey, onDeleteApiKey)
                         SettingsTab.FastRules -> FastRulesTab(state)
@@ -750,14 +777,120 @@ private fun SystemTextTab(title: String, content: String, onChange: (String) -> 
 }
 
 @Composable
-private fun ProfileTab(content: String, onChange: (String) -> Unit, onSave: () -> Unit) {
+private fun ProfileTab(
+    state: SettingsUiState,
+    onChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onUploadAvatar: (ByteArray, String, String) -> Unit,
+    onClearAvatar: () -> Unit,
+    onSaveUserName: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val identity = state.userIdentity
+
+    // 名字是「显式保存」而不是边打边存：画像文档是 agent 也在读的文件，
+    // 每敲一个字就写盘既浪费又会和 agent 的写入打架。
+    var nameDraft by remember(identity.displayName) { mutableStateOf(identity.displayName) }
+
+    // 选中的文件读不出内容时给用户一句话，别静默什么都不发生
+    var pickError by remember { mutableStateOf<String?>(null) }
+
+    // 头像选择器：复用聊天页同一套 GetContent + contentResolver 读取方式
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri ?: return@rememberLauncherForActivityResult
+        val mime = context.contentResolver.getType(uri) ?: "image/png"
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        if (bytes == null || bytes.isEmpty()) {
+            // 读不到字节就没必要往后端跑一趟（后端也会拒），本地直接提示
+            pickError = "读取图片失败，换一张试试"
+            return@rememberLauncherForActivityResult
+        }
+        pickError = null
+        onUploadAvatar(bytes, queryDisplayName(context, uri), mime)
+    }
+
+    // 本地错误（读文件失败）也走 snackbar，和 VM 的 identityToast 同一处出口
+    pickError?.let { msg ->
+        LaunchedEffect(msg) {
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            pickError = null
+        }
+    }
+
     CuteCard {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text("我的画像", style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = MaterialTheme.shapes.small)
+
+            // ── 身份区：头像 + 显示名 ────────────────────────────────
+            // 放在画像正文之上：这两项决定「气泡里长什么样」，比文档本体更常改。
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ProfileAvatarPreview(identity = identity, serverUrl = state.serverUrl)
+                Column(Modifier.weight(1f)) {
+                    OutlinedTextField(
+                        nameDraft,
+                        { nameDraft = it },
+                        label = { Text("显示名") },
+                        singleLine = true,
+                        enabled = !state.identityBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.small,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        EthanSecondaryButton(
+                            "更换头像",
+                            onClick = { avatarPicker.launch("image/*") },
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (identity.avatarUrl.isNotBlank()) {
+                            EthanSecondaryButton(
+                                "恢复默认",
+                                onClick = onClearAvatar,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            }
+            EthanPrimaryButton(
+                if (state.identityBusy) "上传中…" else "保存名字",
+                onClick = { onSaveUserName(nameDraft) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "头像与名字会显示在聊天页的用户气泡上；留空则用首字母 / 默认图标。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+
+            OutlinedTextField(content = state.profile, onValueChange = onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = MaterialTheme.shapes.small)
             EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
         }
     }
+}
+
+/**
+ * 设置页的头像预览：比气泡里大一圈（64dp）。
+ *
+ * 复用气泡那套 [UserAvatarImage]，兜底顺序天然一致 —— 预览里看到什么，
+ * 气泡里就是什么，不会出现「设置页有首字母、气泡里没有」这种对不上的情况。
+ */
+@Composable
+private fun ProfileAvatarPreview(identity: UserIdentity, serverUrl: String) {
+    UserAvatarImage(
+        url = avatarAbsoluteUrl(identity.avatarUrl, serverUrl),
+        name = identity.displayName,
+        size = 64.dp,
+    )
 }
 
 @Composable

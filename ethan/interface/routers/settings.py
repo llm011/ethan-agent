@@ -255,11 +255,16 @@ class UserProfilePatch(BaseModel):
 
 @router.get("/settings/profile")
 async def get_user_profile(user_id: str = Depends(verify_token)):
-    """读取当前用户的 user_profile.md(不存在则生成含全部 section 的空模板)。"""
+    """读取当前用户的画像：user_profile.md 正文 + 头像/显示名。
+
+    avatar_url 是相对 URL（`images/img_avatar.png`），走 /api/images 静态路由
+    （header/cookie/签名三通道鉴权），前端用 assetUrl() 拼成绝对地址。
+    """
+    from ethan.core.assets import avatar_url
     from ethan.core.paths import user_profile_path
-    from ethan.core.services.profile import ensure_profile
+    from ethan.core.services.profile import ensure_profile, get_display_name
     content = ensure_profile(user_profile_path())
-    return {"content": content}
+    return {"content": content, "display_name": get_display_name(content), "avatar_url": avatar_url()}
 
 
 @router.patch("/settings/profile")
@@ -270,6 +275,86 @@ async def update_user_profile(req: UserProfilePatch, user_id: str = Depends(veri
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(req.content, encoding="utf-8")
     return {"ok": True}
+
+
+# ── 头像 / 显示名（对话气泡用） ────────────────────────────────────
+#
+# 单独一组的理由：气泡头像要在渲染每条消息时都能拿到，前端不能每次都把整篇
+# 画像文档读下来解析；而且这两项改了要立刻反映到气泡上，与「画像文档编辑」
+# 的保存时机不同。所以给一个窄接口，只读写这两个字段。
+
+
+class UserAvatarPatch(BaseModel):
+    avatar_url: str | None = None  # 相对 URL；空串或 None = 清除
+
+
+class UserNamePatch(BaseModel):
+    display_name: str
+
+
+@router.put("/user/avatar")
+async def upload_user_avatar(file: UploadFile = File(...), user_id: str = Depends(verify_token)):
+    """上传/替换当前用户的头像，返回新的相对 URL。"""
+    from ethan.core.assets import save_avatar
+
+    data = await file.read()
+    try:
+        url = save_avatar(data, file.content_type or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "avatar_url": url}
+
+
+@router.patch("/user/avatar")
+async def patch_user_avatar(req: UserAvatarPatch, user_id: str = Depends(verify_token)):
+    """删除当前用户的头像（唯一支持的修改是清除）。"""
+    if req.avatar_url:
+        # 只支持清空：改头像必须走 PUT 上传，避免前端把任意 URL 写进来当头像。
+        raise HTTPException(status_code=400, detail="only clearing is supported; upload a file instead")
+    from ethan.core.assets import delete_avatar
+
+    delete_avatar()
+    return {"ok": True, "avatar_url": ""}
+
+
+@router.patch("/user/name")
+async def patch_user_name(req: UserNamePatch, user_id: str = Depends(verify_token)):
+    """设置/清空当前用户的显示名（写进画像的「基础特征」章节）。"""
+    from ethan.core.paths import user_profile_path
+    from ethan.core.services.profile import ensure_profile, set_display_name
+
+    name = req.display_name.strip()
+    # 气泡里名字只是辅助信息，过长会挤坏布局；用一个宽松但有界的上限兜住。
+    if len(name) > 64:
+        raise HTTPException(status_code=400, detail="display_name too long (max 64)")
+
+    p = user_profile_path()
+    content = ensure_profile(p)
+    p.write_text(set_display_name(content, name), encoding="utf-8")
+    return {"ok": True, "display_name": name}
+
+
+@router.get("/user/identity")
+async def get_user_identity(user_id: str = Depends(verify_token)):
+    """气泡与设置页共用的身份信息（头像 + 显示名）。
+
+    单独一个 GET 而不是复用 /settings/profile：聊天页每次挂载都要读，画像文档
+    可能很大，没有必要整篇传输。default profile 没有 config 条目，显示名回落到
+    画像里的设置值（两者都空时前端用占位头像兜底）。
+    """
+    from ethan.core.assets import avatar_url
+    from ethan.core.paths import user_profile_path
+    from ethan.core.services.profile import ensure_profile, get_display_name
+    from ethan.core.users import get_user_store
+
+    content = ensure_profile(user_profile_path())
+    display_name = get_display_name(content)
+    if not display_name and user_id:
+        # 命名 profile 在 config.yaml 里有 name，作为画像未设置时的回落；
+        # default profile（user_id=""）没有 config 条目，只能靠画像。
+        user = get_user_store().get_user(user_id)
+        display_name = (user.name if user else "") or ""
+    return {"user_id": user_id, "display_name": display_name, "avatar_url": avatar_url()}
 
 
 # ── Provider settings ─────────────────────────────────────────────

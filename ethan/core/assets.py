@@ -97,6 +97,129 @@ def image_file_path(relative_path: str) -> Path:
     return IMAGES_DIR / relative_path
 
 
+# ── 用户头像 ──────────────────────────────────────────────────────
+#
+# 头像与「会话附图」分开存：附图是 sessions 的资产（~/.ethan/assets/images/<sid>/），
+# 会随会话清理一起消失；头像是用户级资产，放在 images 根目录下（img_avatar.png）。
+# 文件名带固定前缀 + 扩展名，正好落在 /api/images/<filename> 的白名单内
+# （要求 img_ 前缀 + 图片扩展名），复用既有的 header/cookie/签名三通道鉴权。
+
+AVATAR_PREFIX = "img_avatar"
+# 头像展示尺寸很小（气泡里 28px、设置页预览 ~64px）。按视网膜屏 4x 留量、再给
+# 任意 DPR 留点余量，512px 足够，也让每张头像稳定落在几十 KB。
+AVATAR_MAX_DIM = 512
+# 头像允许的扩展名（与 /api/images 白名单一致）
+AVATAR_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+
+def avatar_path() -> Path:
+    """当前 profile 的头像文件路径（按扩展名在主目录下搜索）。
+
+    没有头像时返回一个不存在的 `img_avatar` 路径（供写入方使用），调用方用
+    `avatar_url()` 判断「有没有头像」而不是这个函数的返回值。
+    """
+    return _find_avatar() or (IMAGES_DIR / f"{AVATAR_PREFIX}.png")
+
+
+def _find_avatar() -> Path | None:
+    """扫描头像文件；存在多个扩展名时取修改时间最新的一个。"""
+    try:
+        if not IMAGES_DIR.is_dir():
+            return None
+    except OSError:
+        return None
+    best: Path | None = None
+    for p in IMAGES_DIR.glob(f"{AVATAR_PREFIX}.*"):
+        if not p.is_file() or p.suffix.lower() not in AVATAR_EXTS:
+            continue
+        if best is None or p.stat().st_mtime > best.stat().st_mtime:
+            best = p
+    return best
+
+
+def avatar_url() -> str:
+    """当前 profile 的头像相对 URL（`images/img_avatar.png`）；无头像返回空串。
+
+    前缀 `images/` 与 /api/assets 路由拼成 `/api/images/<filename>` —— 该路由
+    已支持 header/cookie/签名三种鉴权，前端用 assetUrl() 拼绝对地址即可。
+    """
+    p = _find_avatar()
+    return f"images/{p.name}" if p else ""
+
+
+def save_avatar(data: bytes, media_type: str = "") -> str:
+    """保存用户头像并返回新的相对 URL。旧头像先删再写，保证目录里只有一个。
+
+    非图片、无法解码、或解码后不是图片的数据一律拒绝（ValueError），避免把任意
+    文件塞进公共静态目录。GIF/SVG 之类可能带脚本或动画的格式统一转成 PNG 存。
+
+    Pillow 是可选依赖（只有 computer extra 会带上），缺失时不能 500 —— 退回
+    「只做扩展名 + 体积校验、原样落盘」，至少不影响主流程可用性。
+    """
+    if not data:
+        raise ValueError("empty avatar data")
+    if len(data) > MAX_AVATAR_BYTES:
+        raise ValueError(f"avatar too large (max {MAX_AVATAR_BYTES // 1024}KB)")
+
+    ext = _MIME_TO_EXT.get(media_type.split(";")[0].strip().lower(), "")
+    payload = data
+    if ext and ext in AVATAR_EXTS:
+        try:
+            import io as _io  # noqa: PLC0415
+
+            from PIL import Image  # noqa: PLC0415
+
+            img = Image.open(_io.BytesIO(data))
+            img.load()  # 触发真实解码：截断/损坏文件在这里就会抛
+            # 统一存 PNG：a) 一张头像只可能有一个文件，免去扩展名歧义；
+            # b) 避免把 GIF/SVG 原样落到静态目录；c) 头像带 alpha，PNG 比 JPEG 合适。
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+            if max(img.size) > AVATAR_MAX_DIM:
+                ratio = AVATAR_MAX_DIM / max(img.size)
+                img = img.resize(
+                    (max(1, int(img.size[0] * ratio)), max(1, int(img.size[1] * ratio))),
+                    Image.LANCZOS,
+                )
+            buf = _io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            payload, ext = buf.getvalue(), ".png"
+        except ImportError:
+            logger.warning("Pillow unavailable; storing avatar without validation")
+        except Exception as exc:  # noqa: BLE001 — PIL 的各类解码异常统一转成 400
+            raise ValueError("unsupported or corrupted image") from exc
+    else:
+        raise ValueError("unsupported image type")
+
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    target = IMAGES_DIR / f"{AVATAR_PREFIX}{ext}"
+    # 清掉历史遗留的其他扩展名，否则 _find_avatar 可能取到旧文件
+    for p in IMAGES_DIR.glob(f"{AVATAR_PREFIX}.*"):
+        if p != target:
+            try:
+                p.unlink()
+            except OSError:
+                logger.warning("failed to remove old avatar: %s", p, exc_info=True)
+    target.write_bytes(payload)
+    return f"images/{target.name}"
+
+
+def delete_avatar() -> bool:
+    """删除当前 profile 的头像，返回是否真的删掉了文件。"""
+    removed = False
+    for p in IMAGES_DIR.glob(f"{AVATAR_PREFIX}.*"):
+        try:
+            p.unlink()
+            removed = True
+        except OSError:
+            logger.warning("failed to delete avatar: %s", p, exc_info=True)
+    return removed
+
+
+# 头像上传大小上限（前端也会拦一道，这里是后端的权威校验）
+MAX_AVATAR_BYTES = 5 * 1024 * 1024
+
+
 # RGB565 缩略图宽度边界：过小无意义，过大撑爆设备内存
 _RGB565_MIN_W, _RGB565_MAX_W = 16, 480
 

@@ -89,6 +89,7 @@ import com.ethan.agent.core.model.TimelineValidateRequest
 import com.ethan.agent.core.model.ToolTiersResponse
 import com.ethan.agent.core.model.UpdateRecordRequest
 import com.ethan.agent.core.model.UpdateRecordResponse
+import com.ethan.agent.core.model.UserIdentity
 import com.ethan.agent.core.network.ApiException
 import com.ethan.agent.core.network.ChatSseClient
 import com.ethan.agent.core.network.EthanApiService
@@ -410,6 +411,20 @@ class EthanRepository(
     suspend fun updateUserProfile(content: String) {
         api.updateUserProfile(com.ethan.agent.core.model.ProfileRequest(content))
     }
+
+    // ── 用户身份（显示名 / 头像） ──────────────────────────────────────────
+
+    suspend fun getUserIdentity(): UserIdentity = api.getUserIdentity()
+
+    suspend fun setUserName(name: String): UserIdentity =
+        api.setUserName(com.ethan.agent.core.model.UserNameRequest(name))
+
+    suspend fun clearUserAvatar() {
+        api.clearUserAvatar()
+    }
+
+    suspend fun uploadAvatar(bytes: ByteArray, fileName: String, mimeType: String): String =
+        api.uploadAvatar(bytes, fileName, mimeType).avatarUrl
 
     suspend fun getSystemPromptPreview(): SystemPromptPreview {
         return api.getSystemPromptPreview()

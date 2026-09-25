@@ -265,7 +265,11 @@ recall runner 已迁回本仓 `tests/memory_eval/eval_runner_recall.py`（测试
 ## 卫星组件
 
 - **User Profile**（`user_profile.md`）：7 个固定 section 的手写画像层，
-  Web 编辑页 + `profile_update` 工具写入；heartbeat 每日分区压缩
+  Web 编辑页 + `profile_update` 工具写入；heartbeat 每日分区压缩。
+  其中「基础特征」section 里有一条约定的锚点 bullet `- 显示名：<name>`，
+  供设置页的显示名读写（`get_display_name` / `set_display_name`）—— 放在既有
+  section 内而不是新开 section，避免打乱 `PROFILE_GROUP_*` 的每日分区压缩。
+  头像不进画像文档，作为用户级资产存在 `assets/images/img_avatar.*`
 - **Playbook**（`playbook.json`）：agent 行为准则，由 `procedure_write` 工具 /
   `Consolidator` 从用户纠正中显式写入（`success_patterns` 已退役）
 - **Working Memory**（REPL）：进程内 rolling summary 会话内压缩 +
