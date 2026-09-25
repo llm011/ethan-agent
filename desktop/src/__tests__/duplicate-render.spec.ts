@@ -23,14 +23,23 @@ function mockActions(overrides: Partial<ConsumeStreamActions> = {}): ConsumeStre
   };
 }
 
-/** 把 setMessages 的多次调用归约成最终消息数组（模拟 React 的函数式更新链）。 */
+/**
+ * 把 setMessages 的多次调用归约成最终消息数组。
+ *
+ * 必须模拟 React 的**单一累加器**语义：调用 updater 时传入「上一次调用的返回值」，
+ * 而不是每次都从空数组起步。updater 天然是纯函数（`setMessages(prev => next)`），
+ * 所以只要调用序列一致，累加结果就与真实渲染一致。
+ *
+ * 注意不能改成「每条 updater 都拿初始值跑一遍再取最后一个」——那会漏掉本流内多次
+ * 写入之间的叠加（例如先 push 占位、再就地更新同一条），得出「只有一条消息」的假象。
+ */
 function finalMessages(setMessages: ConsumeStreamActions["setMessages"]): Message[] {
   const calls = vi.mocked(setMessages).mock.calls;
-  return calls.reduce<Message[]>((acc, [next]) => {
-    return typeof next === "function"
-      ? (next as (p: Message[]) => Message[])(acc)
-      : (next as Message[]);
-  }, []);
+  let acc: Message[] = [];
+  for (const [next] of calls) {
+    acc = typeof next === "function" ? (next as (p: Message[]) => Message[])(acc) : (next as Message[]);
+  }
+  return acc;
 }
 
 async function* chunksToStream(chunks: StreamChunk[]): AsyncGenerator<StreamChunk> {
@@ -213,10 +222,12 @@ describe("consumeStream 重复渲染回归（同一条回复出现两个气泡�
     await consumeStream(stream, [], actions);
     await settle();
 
-    expect(seenIds.length).toBeGreaterThan(1);
+    expect(seenIds.length).toBeGreaterThan(3);
     // 只要有 id 出现过，后续每一次写入都必须带着同一个 id
     const firstDefined = seenIds.find((id) => id != null);
     expect(firstDefined).toBeDefined();
+    // 初始化时 liveId 就是 placeholderId，因此这里等价于「全程等于 placeholderId」
+    expect(seenIds[0]).toBe(firstDefined);
     for (const id of seenIds) {
       expect(id).toBe(firstDefined);
     }
@@ -328,5 +339,74 @@ describe("consumeStream 重复渲染回归（同一条回复出现两个气泡�
     const msgs = finalMessages(actions.setMessages);
     expect(msgs.filter((m) => m.role === "assistant")).toHaveLength(1);
     expect(msgs.filter((m) => m.content === "只应出现一次")).toHaveLength(1);
+  });
+});
+
+/**
+ * `chunk.new_message` 旁路消息（getnote 推送）回归。
+ *
+ * 这条分支往列表末尾 push 一条 assistant 气泡。若它不带自己的 id，就会与占位气泡
+ * 一起退化成下标 key；更严重的是「按末位更新」的 flushAssistant / 定稿会**改错对象**：
+ * 把主流的正文写进旁路消息、把占位 id 盖上去 —— 两条兄弟节点同 key，
+ * React 折叠/重复渲染，正是本 PR 要修的那类现象。
+ */
+describe("consumeStream new_message 旁路消息回归", () => {
+  it("旁路消息必须有自己的 id，不能与占位气泡撞 key", async () => {
+    const actions = mockActions();
+    const stream = chunksToStream([
+      { content: "主回复" },
+      { new_message: true, content: "推送的新消息" },
+      { done: true, usage: { input: 1, output: 1, cache: 0 }, message_id: 55 },
+    ]);
+
+    await consumeStream(stream, [], actions);
+    await settle();
+
+    const assistants = finalMessages(actions.setMessages).filter((m) => m.role === "assistant");
+    const ids = assistants.map((m) => m.id ?? null);
+    // 任何人都不能没有 id（否则 key 退化成下标）
+    expect(ids.every((v) => v != null)).toBe(true);
+    // 且 id 必须两两互不相同（同 key 会让 React 折叠/重复渲染）
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("旁路消息不得被主流的正文覆盖（flushAssistant 不能改错对象）", async () => {
+    const actions = mockActions();
+    const stream = chunksToStream([
+      { content: "主回复" },
+      { new_message: true, content: "推送的新消息" },
+      { content: "续写" },
+      { done: true, usage: { input: 1, output: 1, cache: 0 }, message_id: 55 },
+    ]);
+
+    await consumeStream(stream, [], actions);
+    await settle();
+
+    const msgs = finalMessages(actions.setMessages);
+    // 旁路消息保持自己的内容
+    const pushed = msgs.filter((m) => m.content === "推送的新消息");
+    expect(pushed).toHaveLength(1);
+    // 主流正文完整落在同一个气泡里（没有被拆到两条上）
+    expect(msgs.filter((m) => m.content.includes("主回复")).length).toBeGreaterThanOrEqual(1);
+    expect(msgs.filter((m) => m.content === "主回复续写")).toHaveLength(1);
+  });
+
+  it("主流气泡拿到真实 id，旁路消息仍保持自己的 id", async () => {
+    const actions = mockActions();
+    const stream = chunksToStream([
+      { content: "主回复" },
+      { new_message: true, content: "推送" },
+      { done: true, usage: { input: 1, output: 1, cache: 0 }, message_id: 55 },
+    ]);
+
+    await consumeStream(stream, [], actions);
+    await settle();
+
+    const assistants = finalMessages(actions.setMessages).filter((m) => m.role === "assistant");
+    // 主流那条提升为真实 id；旁路消息不是 55，也不能被 55 覆盖
+    expect(assistants.filter((m) => m.id === 55)).toHaveLength(1);
+    expect(assistants.filter((m) => m.content === "推送")).toHaveLength(1);
+    const pushed = assistants.find((m) => m.content === "推送")!;
+    expect(pushed.id).not.toBe(55);
   });
 });

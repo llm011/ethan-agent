@@ -181,11 +181,15 @@ export async function consumeStream(
   const flushAssistant = (extra?: Partial<Message>) => {
     writeMsgs(prev => {
       const next = [...prev];
-      const last = next.length > 0 ? next[next.length - 1] : undefined;
-      if (last?.role === "assistant") {
-        // 既有占位气泡：以它的 id 为准（`liveId` 是权威值，两边保持一致）
-        if (last.id != null) liveId = last.id;
-        next[next.length - 1] = buildMsg(extra);
+      // 必须按 **id** 定位本次流自己的那条气泡，不能假设「最后一条就是它」。
+      // `chunk.new_message` 会往列表末尾追加一条旁路消息（见下面 new_message 分支），
+      // 此时最后一条已经不是本流的占位气泡了；若仍按「末位」更新，就会：
+      //   1. 把占位气泡的 `liveId` 盖到那条旁路消息上 → 两条兄弟节点 **同 key**
+      //      （React 折叠/重复渲染，正是本 PR 要修的现象）；
+      //   2. 本流已累积的正文被写进旁路消息，真正的占位气泡则永远停在旧内容上。
+      const idx = next.findIndex(m => m.role === "assistant" && m.id === liveId);
+      if (idx >= 0) {
+        next[idx] = buildMsg(extra);
         return next;
       }
       next.push(buildMsg(extra));
@@ -292,10 +296,13 @@ export async function consumeStream(
       }
       if (chunk.new_message) {
         setBgPolling(null);
+        // 旁路消息必须带**自己的** id：不生成的话它是无 id 的，会与占位气泡一起退化成
+        // 下标 key（同 key → 重复渲染）；更要命的是不能拿占位气泡的 id（会撞成同 key）。
         writeMsgs(prev => [...prev, {
           role: "assistant",
           content: chunk.content || "",
           created_at: Date.now() / 1000,
+          id: makeTempId(),
         }]);
         if (!document.hasFocus()) {
           // 按 grapheme 截断前 80 字符，避免切断 surrogate pairs（emoji 等）
@@ -628,18 +635,24 @@ export async function consumeStream(
 
   // 先落定稿再取消：反过来会留下一个「读到旧闭包状态、在定稿之后才执行」的定时 flush，
   // 把刚写好的定稿覆盖掉（表现为最后一条消息偶尔回退到中途状态）。
-  // 定稿时把 id 落到 liveId：后端给了真实 id 就提升（后续若还有迟到的 flush 也不会
-  // 退回临时 id）；没给就保留占位 id，**绝不能写成 undefined**（见 flushAssistant 注释）。
-  if (messageId != null) liveId = messageId;
+  //
+  // 定稿时按 id 定位气泡，并把 id 落到 liveId（后端给了真实 id 就提升，后续迟到的
+  // flush 也不会退回临时 id；没给就保留占位 id，**绝不能写成 undefined**）。
+  //
+  // 提升必须发生在**拿到数组之后、就地改写那条气泡时**：`liveId` 与数组里那条气泡的
+  // `id` 是同一份身份，若提前把 `liveId` 改成真实 id，`findIndex` 就再也匹配不到仍带
+  // 临时 id 的占位气泡，会走 push 分支**凭空多出一条**（表现为同一条回复两个气泡）。
   writeMsgs(prev => {
     const msgs = [...prev];
-    const last = msgs[msgs.length - 1];
-    if (last && last.role === "assistant") {
-      // 既有占位气泡沿用它的 id：`messageId ?? last.id ?? liveId` 里 last.id 可能已被
-      // 早前的替换抹掉，所以补一道 liveId 兜底，保证 key 始终稳定。
+    // 与 flushAssistant 同理：只能按 **id** 定位本次流自己的那条气泡。
+    // `chunk.new_message` 会在末尾追加旁路消息，若这里仍按「末位」定稿，就会把
+    // 主流的正文 / 真实 message_id 写到旁路消息上，真正的占位气泡则永远停在空内容上。
+    const idx = msgs.findIndex(m => m.role === "assistant" && m.id === liveId);
+    if (idx >= 0) {
+      const last = msgs[idx];
       const settledId = messageId ?? last.id ?? liveId;
       liveId = settledId;
-      msgs[msgs.length - 1] = {
+      msgs[idx] = {
         ...last,
         content: assistantContent,
         thought: assistantThought,
