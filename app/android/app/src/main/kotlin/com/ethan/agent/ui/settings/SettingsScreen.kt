@@ -872,7 +872,7 @@ private fun ProfileTab(
 
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
 
-            OutlinedTextField(content = state.profile, onValueChange = onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = MaterialTheme.shapes.small)
+            OutlinedTextField(state.profile, onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = MaterialTheme.shapes.small)
             EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
         }
     }
