@@ -116,25 +116,66 @@ export function shouldYieldToEditable(
  * 注意 shadow DOM：`e.target` 会是**宿主元素**（比如 `<my-widget>`），它本身不是
  * input，但它内部可能有聚焦的输入框。`shadowRoot.activeElement` 能穿透一层，
  * 所以要沿这条链往下找，否则「组件库里的搜索框」会被误判成普通元素。
+ *
+ * 前两个参数之外的那条链（宿主自己的 shadowRoot → activeElement → shadowRoot …）
+ * 由本函数自己走完，调用方只要把 `e.target` 和 `document.activeElement` 传进来即可。
  */
 export function isEditableTarget(target: unknown, deepActiveElement?: unknown): boolean {
-  const check = (node: unknown): boolean => {
-    if (!node || typeof node !== 'object') return false;
-    const el = node as {
-      tagName?: string;
-      isContentEditable?: boolean;
-      getAttribute?: (n: string) => string | null;
-    };
-    const tag = (el.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
-    if (el.isContentEditable) return true;
-    // 有些站点把输入伪装成 div；`role=textbox` 是可靠信号
-    const role = el.getAttribute ? el.getAttribute('role') : null;
-    if (role === 'textbox' || role === 'combobox' || role === 'searchbox') return true;
-    return false;
-  };
-  if (check(target)) return true;
-  // 宿主元素内部已聚焦的真实元素
-  if (check(deepActiveElement)) return true;
+  if (isEditableElement(target)) return true;
+  if (shadowChainHasEditable(target)) return true;
+  if (isEditableElement(deepActiveElement)) return true;
+  if (shadowChainHasEditable(deepActiveElement)) return true;
   return false;
 }
+
+/**
+ * 沿 shadow DOM 的 `activeElement` 链往下找可编辑元素。
+ *
+ * 组件库常见的形态是 `<my-widget>` 宿主里套 `<my-input>` 再套真正的 `<input>`，
+ * `shadowRoot.activeElement` 每次只穿透一层，所以要循环。
+ *
+ * **带步数上限**：这条链跟着页面里任意深度的 shadow 树走，而 `activeElement`
+ * 是可以被页面脚本设成任意元素的。不设上限的话，一段构造出来的深层嵌套（甚至环）
+ * 就能让 keydown 处理器转不完——每次按键都卡住页面。真实组件嵌套远少于 10 层。
+ */
+const MAX_SHADOW_DEPTH = 10;
+
+function shadowChainHasEditable(start: unknown): boolean {
+  let node: unknown = start;
+  for (let i = 0; i < MAX_SHADOW_DEPTH; i++) {
+    if (!node || typeof node !== 'object') return false;
+    const shadow = (node as { shadowRoot?: { activeElement?: unknown } | null }).shadowRoot;
+    const active = shadow ? shadow.activeElement : null;
+    if (!active) return false;
+    if (isEditableElement(active)) return true;
+    node = active;
+  }
+  return false;
+}
+
+/** 单个节点是不是「会吞掉普通按键」的可编辑元素。 */
+function isEditableElement(node: unknown): boolean {
+  if (!node || typeof node !== 'object') return false;
+  const el = node as {
+    tagName?: string;
+    isContentEditable?: boolean;
+    getAttribute?: (n: string) => string | null;
+  };
+  const tag = (el.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+  if (el.isContentEditable) return true;
+  // 有些站点把输入伪装成 div；`role=textbox` 是可靠信号
+  const role = el.getAttribute ? el.getAttribute('role') : null;
+  if (role === 'textbox' || role === 'combobox' || role === 'searchbox') return true;
+  return false;
+}
+
+/**
+ * 供「经典脚本内联」场景使用的别名。
+ *
+ * content script 编译后与这些函数**同处一个 IIFE 作用域**，它自己又要保留同名包装
+ * （`parseCombo` / `isEditableTarget`），直接内联会重名冲突。所以这里再导出带后缀的
+ * 别名，让页面侧调别名、单测调原名，两边指向同一实现。
+ */
+export const parseComboSpec = parseCombo;
+export const isEditableTargetIn = isEditableTarget;

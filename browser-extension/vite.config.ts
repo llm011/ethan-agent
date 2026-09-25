@@ -70,6 +70,22 @@ export default defineConfig({
             src = readFileSync(resolve(__dirname, `src/content/${name}`), 'utf8')
               .replace(/^\s*export\s*\{\s*\}\s*;?\s*$/m, '');  // 移除 export {} 避免 CJS interop
           }
+          // 经典脚本不能 import，但「快捷键组合的解析/匹配」这类纯逻辑必须和单测用
+          // 的是同一份代码——早期把它在 content script 里手抄了一遍，于是 shared 那份
+          // 成了「只有测试引用的死代码」，两边会各自漂移。这里按同样的思路内联进来：
+          // 入口文件标记 `/* @inline: <module> */`，构建时把该模块源码去掉 export 后
+          // 拼在前面（同一个 IIFE 作用域，所以函数名直接可见）。
+          const inlineMarkers = [...src.matchAll(/\/\*\s*@inline:\s*([\w./-]+)\s*\*\//g)];
+          if (inlineMarkers.length) {
+            const inlined = inlineMarkers.map(m => {
+              const modPath = resolve(__dirname, 'src', `${m[1]}.ts`);
+              return readFileSync(modPath, 'utf8')
+                .replace(/^export\s+(function|const|let|class|interface|type)\b/gm, '$1')
+                .replace(/^export\s+\{[^}]*\}\s*;?\s*$/gm, '')
+                .replace(/^import\s[^;]*;\s*$/gm, '');
+            });
+            src = inlined.join('\n') + '\n' + src;
+          }
           const { outputText } = ts.transpileModule(src, {
             compilerOptions: {
               target: ts.ScriptTarget.ES2020,

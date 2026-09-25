@@ -14,6 +14,8 @@ import {
   normalizeEventKey,
   shouldYieldToEditable,
   isEditableTarget,
+  parseComboSpec,
+  isEditableTargetIn,
 } from './shortcut-match';
 
 const ev = (o: Partial<{ key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>) => ({
@@ -205,5 +207,51 @@ describe('isEditableTarget', () => {
     expect(isEditableTarget(null)).toBe(false);
     expect(isEditableTarget(undefined)).toBe(false);
     expect(isEditableTarget('str')).toBe(false);
+  });
+
+  it('shadow DOM 链：宿主 → 内部 shadowRoot 里聚焦的输入框', () => {
+    // <my-widget> 的 shadowRoot.activeElement 是 <my-input>，它自己的 shadowRoot
+    // 里才是真正的 <input>。只穿透一层会漏判，组件库里很常见。
+    const input = { tagName: 'INPUT' };
+    const inner = { tagName: 'MY-INPUT', shadowRoot: { activeElement: input } };
+    const host = { tagName: 'MY-WIDGET', shadowRoot: { activeElement: inner } };
+    expect(isEditableTarget(host)).toBe(true);
+  });
+
+  it('shadow DOM 链：链上没有输入框 → 不可编辑', () => {
+    const inner = { tagName: 'SPAN' };
+    const host = { tagName: 'MY-WIDGET', shadowRoot: { activeElement: inner } };
+    expect(isEditableTarget(host)).toBe(false);
+  });
+
+  it('shadow DOM 链带深度上限：构造一个环不会死循环', () => {
+    // activeElement 可以被页面脚本设成任意元素。如果没有步数上限，这种自指的环
+    // 会让 keydown 处理器永远转不完 —— 一次按键就把页面卡死。
+    const node: Record<string, unknown> = { tagName: 'DIV' };
+    node.shadowRoot = { activeElement: node };
+    const t0 = Date.now();
+    expect(isEditableTarget(node)).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(200);
+  });
+
+  it('别名与原名指向同一实现（供经典脚本内联使用）', () => {
+    expect(parseComboSpec).toBe(parseCombo);
+    expect(isEditableTargetIn).toBe(isEditableTarget);
+  });
+
+  it('mac 上 ctrl+k 不该被 Cmd+K 命中（popup 录入曾把两者折叠成同一个）', () => {
+    // 回归：popup 的录入器曾经把 meta/ctrl 一律写成 mod，于是「录 Ctrl+K」存成
+    // mod+k，而 mod 在 mac 上解析为 Cmd —— 录进去的键永远按不出来。
+    const parsed = parseCombo('ctrl+k');
+    expect(comboMatches(parsed, ev({ ctrlKey: true }), true)).toBe(true);
+    expect(comboMatches(parsed, ev({ metaKey: true }), true)).toBe(false);
+  });
+
+  it('mod+k 在 mac 上只认 Cmd，在其它平台只认 Ctrl', () => {
+    const parsed = parseCombo('mod+k');
+    expect(comboMatches(parsed, ev({ metaKey: true }), true)).toBe(true);
+    expect(comboMatches(parsed, ev({ ctrlKey: true }), true)).toBe(false);
+    expect(comboMatches(parsed, ev({ ctrlKey: true }), false)).toBe(true);
+    expect(comboMatches(parsed, ev({ metaKey: true }), false)).toBe(false);
   });
 });

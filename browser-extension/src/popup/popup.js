@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { wsToHttp, readCommands, readPopupCommands } from '../shared';
+import { wsToHttp, readPopupCommands } from '../shared';
 import {
   TAB_PALETTE_SHORTCUT_KEY as SHORTCUT_KEY,
   DEFAULT_TAB_PALETTE_SHORTCUT as DEFAULT_SHORTCUT,
@@ -298,10 +298,22 @@ function eventToCombo(e) {
   const hasRealMod = e.metaKey || e.ctrlKey || e.altKey;
   if (!hasRealMod) return null;
 
-  // meta/ctrl 在 mac 上语义重叠，统一成一个 "mod" 让配置可跨平台理解：
-  // mac 用户按 Cmd 存成 mod，Windows 用户按 Ctrl 也存成 mod。
+  // 把「本平台的主修饰键」存成 "mod"，让配置可跨平台理解：mac 按 Cmd、Windows
+  // 按 Ctrl，两边都存成 mod。
+  //
+  // 但不能把 meta 和 ctrl 一律折叠成 mod —— 那样 mac 上按 Ctrl+K 会存成 mod+k，
+  // 而 mod 在 mac 解析为 Cmd：录进去的是 Ctrl+K，之后按 Ctrl+K 不触发、反倒要按
+  // Cmd+K，用户会以为「录了没用」。非主修饰键原样保留成 meta/ctrl。
+  const modIsMeta = IS_MAC;
+  const primaryMod = modIsMeta ? e.metaKey : e.ctrlKey;
+  // 非主修饰键：mac 上按 Ctrl、或 Windows 上按 Win/Cmd
+  const secondaryMeta = !modIsMeta && e.metaKey;
+  const secondaryCtrl = modIsMeta && e.ctrlKey;
+
   let normalizedMods = [];
-  if (e.metaKey || e.ctrlKey) normalizedMods.push('mod');
+  if (primaryMod) normalizedMods.push('mod');
+  if (secondaryMeta) normalizedMods.push('meta');
+  if (secondaryCtrl) normalizedMods.push('ctrl');
   if (e.altKey) normalizedMods.push('alt');
   if (e.shiftKey) normalizedMods.push('shift');
 

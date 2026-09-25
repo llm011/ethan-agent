@@ -229,3 +229,24 @@ describe('moveItem', () => {
     expect(list).toEqual(['a', 'b', 'c', 'd']);
   });
 });
+
+describe('normalizeHiddenIds 去重', () => {
+  it('重复 id 只留一份', () => {
+    // 管理界面的「已移出」区按这个数组逐行渲染：重复项会让同一条指令显示两行，
+    // 点一次「加回」只消失一行，用户看着像没生效。
+    expect(normalizeHiddenIds(['a', 'b', 'a'])).toEqual(['a', 'b']);
+  });
+
+  it('空串/非字符串被丢掉', () => {
+    expect(normalizeHiddenIds(['a', '', 3, null, 'b'])).toEqual(['a', 'b']);
+  });
+
+  it('保持首次出现的次序', () => {
+    expect(normalizeHiddenIds(['z', 'a', 'z'])).toEqual(['z', 'a']);
+  });
+
+  it('不是数组时返回空', () => {
+    expect(normalizeHiddenIds('a')).toEqual([]);
+    expect(normalizeHiddenIds(undefined)).toEqual([]);
+  });
+});

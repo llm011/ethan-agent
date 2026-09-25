@@ -22,6 +22,13 @@ const pages = {
   '/iframe': '<!doctype html><html><body><p id="p">outer</p><iframe id="f" src="/inner"></iframe></body></html>',
   '/inner': '<!doctype html><html><body><input id="iq"><p>inner</p></body></html>',
   '/scrolled': '<!doctype html><html><body style="height:3000px"><p id="p" style="margin-top:2000px">deep</p></body></html>',
+  // 两个子框架：用来钉住「一次按键只在有焦点的那一层开一个面板」。
+  // 脚本注入到每个框架，如果切换消息被每层都执行了，这里会开出 3 个面板。
+  '/multi': `<!doctype html><html><body><p id="p">outer</p>
+    <iframe id="f1" src="/inner1" width="180" height="60"></iframe>
+    <iframe id="f2" src="/inner2" width="180" height="60"></iframe></body></html>`,
+  '/inner1': '<!doctype html><html><body><input id="iq"><p>one</p></body></html>',
+  '/inner2': '<!doctype html><html><body><input id="iq2"><p>two</p></body></html>',
 };
 
 const srv = createServer((req, res) => {
@@ -57,12 +64,31 @@ try {
     });
   }
 
-  async function openPanelReported() {
-    // 面板开在「有焦点的那一层」——焦点在 iframe 里时就开在内层，所以所有框架都要查
+  /**
+   * 数一遍**所有框架**里各开了几个面板。
+   *
+   * 不能用「找到一个就 return true」：脚本会注入到每个框架，一次按键如果在每层都
+   * 开了一个面板，只查「有没有」是查不出来的（顶层那个总会命中），而这正是最要命
+   * 的那种失败——用户看到顶层面板、输入却进了 iframe 里被裁掉的那个。所以按框架
+   * 计数，正常结果必须**恰好是 1**。
+   */
+  async function countPanels() {
+    const per = [];
     for (const fr of page.frames()) {
-      try { if ((await fr.locator('#__ethan_tab_palette').count()) > 0) return true; } catch { /* 框架已销毁 */ }
+      try {
+        per.push({ url: fr.url().slice(-6), n: await fr.locator('#__ethan_tab_palette').count() });
+      } catch { /* 框架已销毁 */ }
     }
-    return false;
+    return per;
+  }
+
+  async function openPanelReported() {
+    const per = await countPanels();
+    const total = per.reduce((a, x) => a + x.n, 0);
+    if (total > 1) {
+      log(`   !! 一次按键开了 ${total} 个面板: ${per.map(x => x.url + ':' + x.n).join(' ')}`);
+    }
+    return { opened: total === 1, total };
   }
 
   /** 用例模板：先关掉可能残留的面板，再按快捷键。 */
@@ -72,18 +98,21 @@ try {
     await page.waitForTimeout(150);
     const inj = await inject();
     try { await prep(); } catch (e) { /* 焦点准备失败也继续 */ }
-    let opened = false, note = '';
+    let opened = false, note = '', panels = 0;
     if (!inj.startsWith('ok')) {
       note = 'inject failed';
     } else {
       try {
         await page.keyboard.press(keys, { timeout: 6000 });
         await page.waitForTimeout(250);
-        opened = await openPanelReported();
+        const r = await openPanelReported();
+        opened = r.opened;
+        panels = r.total;
+        if (r.total > 1) note = `multi-frame:${r.total}`;
       } catch (e) { note = 'press:' + String(e).slice(0, 60); }
     }
-    log(`${name.padEnd(34)} inject=${inj.padEnd(6)} opened=${opened} ${note}`);
-    results.push({ name, inj, opened: String(opened), note });
+    log(`${name.padEnd(34)} inject=${inj.padEnd(6)} opened=${opened} panels=${panels} ${note}`);
+    results.push({ name, inj, opened: String(opened), panels: String(panels), note });
     await page.keyboard.press('Escape').catch(() => {});
     await page.waitForTimeout(150);
     return opened;
@@ -120,6 +149,20 @@ try {
     await page.mouse.wheel(0, 1500);
     await page.waitForTimeout(200);
     await page.locator('#p').click({ timeout: 4000 });
+  });
+
+  // 9. 多框架页面：一次按键必须**只**开一个面板。
+  //    注入是 allFrames + 消息不带 frameId，所以每层都会收到 toggle；如果每层都
+  //    自己开一个，用户会看到顶层那个、而输入进了 iframe 里被裁掉的那个。
+  //    countPanels 会数出总数，runCase 要求它恰好为 1。
+  await runCase('多 iframe 焦点在外层', `${BASE}/multi`, async () => { await page.locator('#p').click({ timeout: 4000 }); });
+  await runCase('多 iframe 焦点在第一个 iframe', `${BASE}/multi`, async () => {
+    const f = page.frames().find(fr => fr.url().includes('/inner1'));
+    if (f) await f.locator('#iq').click({ timeout: 4000 });
+  });
+  await runCase('多 iframe 焦点在第二个 iframe', `${BASE}/multi`, async () => {
+    const f = page.frames().find(fr => fr.url().includes('/inner2'));
+    if (f) await f.locator('#iq2').click({ timeout: 4000 });
   });
 
   log('--- summary ---');

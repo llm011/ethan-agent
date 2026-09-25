@@ -44,7 +44,18 @@ export function normalizeLimit(raw: unknown): number {
 /** 把 storage 里的原始值解析成 id 列表（过滤掉非字符串项）。 */
 export function normalizeHiddenIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of raw) {
+    if (typeof id !== 'string' || id.length === 0) continue;
+    // 去重：storage 里的集合可能因「隐藏→恢复→再隐藏」累积出重复项。重复项本身
+    // 不影响 popup 筛选（Set 去重），但管理界面的「已移出」区会按它逐行渲染，
+    // 同一条指令出现两行、点一次「加回」只消失一行，看着像没生效。
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 /** 从 storage 读到的对象里解析出完整偏好。 */
