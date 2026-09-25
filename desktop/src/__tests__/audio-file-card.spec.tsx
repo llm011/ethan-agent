@@ -112,4 +112,35 @@ describe("AudioFileCard 加载状态机", () => {
       expect(screen.queryByText("音频加载失败")).toBeNull();
     });
   });
+
+  it("ready 之后再点播放不应重新签名（onPlay 每次播放都会触发）", async () => {
+    // 回归：早前用 readyState===0 当判据，而 onPlay 在正常播放时也会触发、
+    // 起播瞬间 readyState 仍可能是 0，于是每次播放都白重签 + 重设 src，
+    // 把正在播的音频打回开头。判据必须是 audio.error。
+    signFileUrlMock.mockResolvedValue(signed(AUDIO_CARD.path));
+    const { container } = render(<AudioFileCard card={AUDIO_CARD} sessionId="s1" />);
+    await waitFor(() => expect(container.querySelector("audio")).toBeTruthy());
+    const audio = container.querySelector("audio")!;
+
+    await act(async () => { audio.dispatchEvent(new Event("loadedmetadata")); });
+    const callsAfterReady = signFileUrlMock.mock.calls.length;
+
+    await act(async () => { audio.dispatchEvent(new Event("play")); });
+
+    expect(signFileUrlMock.mock.calls.length).toBe(callsAfterReady);
+  });
+
+  it("带 error 的播放事件才触发换签名重试", async () => {
+    signFileUrlMock.mockResolvedValue(signed(AUDIO_CARD.path));
+    const { container } = render(<AudioFileCard card={AUDIO_CARD} sessionId="s1" />);
+    await waitFor(() => expect(container.querySelector("audio")).toBeTruthy());
+    const audio = container.querySelector("audio")!;
+    const before = signFileUrlMock.mock.calls.length;
+
+    // 模拟签名过期：置上 error 后再触发 play/error，应走一次换签名
+    Object.defineProperty(audio, "error", { value: { code: 4 }, configurable: true });
+    await act(async () => { audio.dispatchEvent(new Event("error")); });
+
+    await waitFor(() => expect(signFileUrlMock.mock.calls.length).toBeGreaterThan(before));
+  });
 });

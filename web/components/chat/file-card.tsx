@@ -124,13 +124,14 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
       timerRef.current = null;
     }
   };
+  // 用 ref 读最新 url，避免在 setUrl 的 updater 里调 setFailed（updater 应是纯函数，
+  // StrictMode 下可能被调用两次，副作用会重复触发）。
+  const urlRef = useRef("");
+  urlRef.current = url;
   const armTimer = () => {
     clearTimer();
     timerRef.current = setTimeout(() => {
-      setUrl((current) => {
-        if (!current) setFailed(true);
-        return current;
-      });
+      if (!urlRef.current) setFailed(true);
     }, MEDIA_LOAD_TIMEOUT_MS);
   };
   useEffect(() => clearTimer, []);
@@ -157,28 +158,31 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
   }, [card.path, sid]);
 
   // 签名 URL 有 10 分钟 TTL；用户点播放时若已过期会 401/403，此时换一次新签名再播。
-  // refreshCountRef 保证只刷新一次：刷新后仍失败说明视频永久损坏，清空 url 降级为下载。
-  const handlePlay = (e: SyntheticEvent<HTMLVideoElement>) => {
-    const video = e.currentTarget;
-    if (video.readyState === 0 || video.error) {
-      if (refreshCountRef.current >= 1) {
-        setUrl(""); // 第二次失败，降级为错误态 + 下载按钮
-        setFailed(true);
-        return;
-      }
-      refreshCountRef.current += 1;
-      void refreshUrl().then((fresh) => {
+  // refreshCountRef 保证只刷新一次：刷新后仍失败说明视频永久损坏，降级为错误态。
+  // 判据用 video.error 而不是 readyState===0——onPlay 每次正常播放都触发，
+  // 刚起播时 readyState 仍可能是 0，用它会白白重签 + 重设 src 把播放打回开头。
+  const recoverFromError = () => {
+    if (refreshCountRef.current >= 1) {
+      setUrl(""); // 第二次失败，降级为错误态 + 下载按钮
+      setFailed(true);
+      return;
+    }
+    refreshCountRef.current += 1;
+    void refreshUrl()
+      .then((fresh) => {
         if (fresh) {
+          // refreshUrl 已 setUrl(newUrl)，React 用新 src 重挂 <video>
           armTimer();
-          const t = video.currentTime;
-          video.src = fresh;
-          video.currentTime = t;
-          video.play().catch(() => {});
         } else {
           setFailed(true);
         }
-      });
-    }
+      })
+      .catch(() => setFailed(true));
+  };
+
+  const handlePlay = (e: SyntheticEvent<HTMLVideoElement>) => {
+    if (!e.currentTarget.error) return; // 正常播放不做事
+    recoverFromError();
   };
 
   const onLoadedMetadata = (e: SyntheticEvent<HTMLVideoElement>) => {
@@ -203,7 +207,7 @@ function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
           aria-label={card.title || card.filename}
           onLoadedMetadata={onLoadedMetadata}
           onPlay={handlePlay}
-          onError={handlePlay}
+          onError={recoverFromError}
         />
       ) : (
         <div className="flex flex-col items-center justify-center gap-2 bg-black/90 text-muted-foreground" style={{ aspectRatio: ratio ?? "16 / 9" }}>
@@ -283,40 +287,50 @@ function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.path, sid]);
 
-  const handlePlay = (e: SyntheticEvent<HTMLAudioElement>) => {
-    const audio = e.currentTarget;
-    if (audio.readyState === 0 || audio.error) {
-      if (refreshCountRef.current >= 1) {
-        setState("error");
-        return;
-      }
-      refreshCountRef.current += 1;
-      void refreshUrl().then((fresh) => {
+  // 只在真正出错时换签名重试（含签名过期 401/403）。注意别用 readyState===0 当判据：
+  // onPlay 在每次正常播放时都会触发，此时 readyState 可能仍是 0（刚起播还没缓冲完），
+  // 会白白重签 + 重设 src，把正在播的音频打回开头。以 audio.error 为准。
+  const recoverFromError = () => {
+    if (refreshCountRef.current >= 1) {
+      setState("error");
+      return;
+    }
+    refreshCountRef.current += 1;
+    void refreshUrl()
+      .then((fresh) => {
         if (fresh) {
+          // refreshUrl 已 setUrl(newUrl)，React 会用新 src 重新挂载 <audio>；
+          // 重新武装看门狗，等 loadedmetadata/canplay 再判 ready。
           armTimer();
-          const t = audio.currentTime;
-          audio.src = fresh;
-          audio.currentTime = t;
-          audio.play().catch(() => setState("error"));
+          setState("loading");
         } else {
           setState("error");
         }
-      });
-    }
+      })
+      .catch(() => setState("error"));
+  };
+
+  const handlePlay = (e: SyntheticEvent<HTMLAudioElement>) => {
+    // 已经在播的正常播放不做事——只有带着 error 的播放才算失败重试。
+    if (!e.currentTarget.error) return;
+    recoverFromError();
   };
 
   const handleRetry = () => {
     refreshCountRef.current = 0;
-    setUrl("");
     setState("signing");
-    void refreshUrl().then((u) => {
-      if (!u) {
-        setState("error");
-        return;
-      }
-      setState("loading");
-      armTimer();
-    });
+    // 留空 url 让 <audio> 卸载再挂载，确保浏览器真的重新发起请求（同 src 不会重载）。
+    setUrl("");
+    void refreshUrl()
+      .then((u) => {
+        if (!u) {
+          setState("error");
+          return;
+        }
+        setState("loading");
+        armTimer();
+      })
+      .catch(() => setState("error"));
   };
 
   return (
@@ -355,7 +369,7 @@ function AudioFileCard({ card, sessionId }: { card: FileCard; sessionId?: string
           onLoadedMetadata={() => { clearTimer(); setState("ready"); }}
           onCanPlay={() => { clearTimer(); setState("ready"); }}
           onPlay={handlePlay}
-          onError={handlePlay}
+          onError={recoverFromError}
         />
       ) : (
         <div className="flex items-center justify-center h-10 text-xs text-muted-foreground">
