@@ -14,6 +14,7 @@ import com.ethan.agent.core.model.OnboardingStatus
 import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.ToolStep
 import com.ethan.agent.core.model.Usage
+import com.ethan.agent.core.model.UserIdentity
 import com.ethan.agent.core.model.WaitForUserInfo
 import com.ethan.agent.core.model.ambiguousCandidates
 import com.ethan.agent.core.model.fullId
@@ -97,6 +98,12 @@ data class ChatUiState(
     val userInfo: String = "",
     val autoConsent: Boolean = false,
     val serverUrl: String = "",
+    /**
+     * 用户身份（显示名 / 头像），用于用户气泡的头像与名字行。
+     *
+     * 未设置时是空对象 —— 气泡回落成首字母 / 人形图标，不会因为拿不到而空一块。
+     */
+    val userIdentity: UserIdentity = UserIdentity(),
 ) {
     /**
      * 旧会话/默认模型存的纯 id/alias 命中多个同名模型：歧义，需用户显式选择。
@@ -282,6 +289,15 @@ class ChatViewModel(
             // 取 serverUrl 用于拼接历史消息里的图片相对路径
             val serverUrl = repository.config.first().serverUrl
             _state.update { it.copy(serverUrl = serverUrl) }
+
+            // 用户身份（气泡头像 / 名字行）。与设置页共用同一个接口，改完回来 pull 一次
+            // 就能看到新头像 —— 拿不到就保持空对象，气泡回落成首字母，不当成错误。
+            launch {
+                try {
+                    val identity = repository.getUserIdentity()
+                    _state.update { it.copy(userIdentity = identity) }
+                } catch (_: Exception) { }
+            }
 
             // session 详情：cached flow 先秒出缓存数据，再网络刷新
             if (sessionId != null) {
@@ -1019,6 +1035,9 @@ class ChatViewModel(
                         modes = _state.value.modes,
                         selectedModel = _state.value.selectedModel,
                         selectedMode = _state.value.selectedMode,
+                        // 身份是「用户级」的，不随会话切换而失效 —— 忘了带上它，
+                        // /new 之后气泡头像会突然变回人形图标，直到重新进页面才恢复。
+                        userIdentity = _state.value.userIdentity,
                     )
                 }
                 "/compact" -> {

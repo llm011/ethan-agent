@@ -217,6 +217,64 @@ def write_section(profile_path: Path, section: str, entry: str, mode: str = "mer
     profile_path.write_text(updated, encoding="utf-8")
 
 
+# ── 显示名（对话气泡头像/名字用） ──────────────────────────────────
+#
+# 章节锚点：把「显示名」作为独立事实独占一条 bullet 存在「基础特征」里。
+# 之所以不新开 section：SECTIONS 顺序即 user_profile.md 的渲染顺序，
+# consolidator 的压缩分组（PROFILE_GROUP_*）也按 section 归属工作 —— 加一个
+# 只放一个名字的 section 会打断这些分组，且老用户的画像文件不会自动补上新 header。
+# 用前缀锚点则对老文件天然兼容（下次写入时自动补上这一行）。
+
+NAME_PREFIX = "显示名："
+_DISPLAY_NAME_SECTION = "基础特征"
+
+
+def get_display_name(content: str) -> str:
+    """读取画像里的显示名；未设置返回空串。带前缀锚点的第一条 bullet 为准。"""
+    for b in _section_bullets(content, _DISPLAY_NAME_SECTION):
+        if b.startswith(NAME_PREFIX):
+            return b[len(NAME_PREFIX):].strip()
+    return ""
+
+
+def set_display_name(content: str, name: str) -> str:
+    """设置/清空画像里的显示名，返回新文本（不写盘）。空名则删除该条 bullet。"""
+    name = " ".join((name or "").split())  # 折叠换行/连续空白，避免把 bullet 拆断
+    lines = content.splitlines(keepends=True)
+    start_idx, end_idx = _locate_section(lines, _DISPLAY_NAME_SECTION)
+
+    if start_idx < 0:
+        # 章节不存在（老文件被手工删过）：退化成通用 section 写入
+        if not name:
+            return content
+        return update_profile_section(content, _DISPLAY_NAME_SECTION, f"{NAME_PREFIX}{name}", mode="append")
+
+    hit = -1
+    for i in range(start_idx + 1, end_idx):
+        if lines[i].strip().startswith(f"- {NAME_PREFIX}"):
+            hit = i
+            break
+
+    if not name:
+        # 清空显示名：删掉这条 bullet（保留 section 本身）
+        if hit < 0:
+            return content
+        return "".join(lines[:hit] + lines[hit + 1:])
+
+    entry = f"- {NAME_PREFIX}{name}\n"
+    if hit >= 0:
+        lines[hit] = entry
+        return "".join(lines)
+
+    # 插到 section 内最后一条非空行之后（与 update_profile_section 的 append 语义一致）
+    insert_at = end_idx
+    for i in range(end_idx - 1, start_idx, -1):
+        if lines[i].strip():
+            insert_at = i + 1
+            break
+    return "".join(lines[:insert_at] + [entry] + lines[insert_at:])
+
+
 def _user_profile_path() -> Path:
     """延迟 import 避免循环依赖(ethan.core.paths ↔ config)。"""
     from ethan.core.paths import user_profile_path

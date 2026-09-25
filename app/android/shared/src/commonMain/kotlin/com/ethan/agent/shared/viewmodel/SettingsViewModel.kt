@@ -16,6 +16,7 @@ import com.ethan.agent.core.model.ProviderConfig
 import com.ethan.agent.core.model.SystemPromptPreview
 import com.ethan.agent.core.model.SystemSettings
 import com.ethan.agent.core.model.ToolTiersResponse
+import com.ethan.agent.core.model.UserIdentity
 import com.ethan.agent.shared.EthanRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -43,6 +44,12 @@ data class SettingsUiState(
     val models: List<ModelEntry> = emptyList(),
     val systemSettings: SystemSettings? = null,
     val profile: String = "",
+    /** 用户身份（显示名 / 头像），画像 tab 顶部编辑，与气泡共用后端数据 */
+    val userIdentity: UserIdentity = UserIdentity(),
+    /** 身份保存结果提示（上传头像 / 改名字），UI 消费后清空 */
+    val identityToast: String? = null,
+    /** 身份操作进行中（上传头像），用来禁用按钮防重复提交 */
+    val identityBusy: Boolean = false,
     val channels: List<ChannelInfo> = emptyList(),
     val apiKeys: List<ApiKeyInfo> = emptyList(),
     val promptPreview: SystemPromptPreview? = null,
@@ -144,6 +151,7 @@ class SettingsViewModel(
                     val versionDef = async { runCatching { repository.checkHealth() }.getOrNull() }
                     val providersDef = async { runCatching { repository.getProviderSettings() }.getOrDefault(emptyMap()) }
                     val profileDef = async { runCatching { repository.getUserProfile() }.getOrDefault("") }
+                    val identityDef = async { runCatching { repository.getUserIdentity() }.getOrNull() }
                     val channelsDef = async { runCatching { repository.getChannels() }.getOrDefault(emptyList()) }
                     // API Keys 单独加载，失败不阻塞其他设置
                     val keysDef = async { runCatching { repository.getApiKeys() }.getOrDefault(emptyList()) }
@@ -151,6 +159,7 @@ class SettingsViewModel(
                     val version = versionDef.await()
                     val providers = providersDef.await()
                     val profile = profileDef.await()
+                    val identity = identityDef.await()
                     val channels = channelsDef.await()
                     val keys = keysDef.await()
 
@@ -159,6 +168,9 @@ class SettingsViewModel(
                             serverVersion = version,
                             providers = providers,
                             profile = profile,
+                            // 身份拉不到就保留旧值：老版本后端的 404 不该把用户已经
+                            // 看到的头像和名字抹成空（两个前端会重复出现同一份数据）。
+                            userIdentity = identity ?: it.userIdentity,
                             channels = channels,
                             apiKeys = keys,
                             isLoading = false,
@@ -385,6 +397,81 @@ class SettingsViewModel(
                 _state.update { it.copy(saved = true) }
             } catch (e: Exception) {
                 _state.update { it.copy(error = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    // ── 用户身份（显示名 / 头像） ──────────────────────────────────────────
+
+    fun clearIdentityToast() {
+        _state.update { it.copy(identityToast = null) }
+    }
+
+    /**
+     * 保存显示名。
+     *
+     * 空串是「清空」的合法语义（后端会删掉画像里的锚点），所以这里不拦空值 ——
+     * 用户清空输入框再保存，就该回到「只显示头像 / 图标」的状态。
+     */
+    fun saveUserName(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.length > 64) {
+            _state.update { it.copy(identityToast = "名字最多 64 个字符") }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val saved = repository.setUserName(trimmed)
+                _state.update { st ->
+                    st.copy(
+                        userIdentity = saved.copy(
+                            // 名字由后端从画像文档里读回来；后端若是老版本只回 content，
+                            // 就用本地输入兜底，避免「改完名字却显示空的」。
+                            displayName = saved.displayName.ifBlank { trimmed },
+                            // 名字接口不回头像，头像沿用当前值，别被空串抹掉
+                            avatarUrl = saved.avatarUrl.ifBlank { st.userIdentity.avatarUrl },
+                        ),
+                        identityToast = if (trimmed.isEmpty()) "已清空名字" else "名字已保存",
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(identityToast = repository.friendlyError(e)) }
+            }
+        }
+    }
+
+    fun uploadAvatar(bytes: ByteArray, fileName: String, mimeType: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(identityBusy = true) }
+            try {
+                val url = repository.uploadAvatar(bytes, fileName, mimeType)
+                _state.update { st ->
+                    st.copy(
+                        userIdentity = st.userIdentity.copy(avatarUrl = url),
+                        identityToast = "头像已更新",
+                        identityBusy = false,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(identityToast = repository.friendlyError(e), identityBusy = false) }
+            }
+        }
+    }
+
+    fun clearAvatar() {
+        viewModelScope.launch {
+            _state.update { it.copy(identityBusy = true) }
+            try {
+                repository.clearUserAvatar()
+                _state.update { st ->
+                    st.copy(
+                        userIdentity = st.userIdentity.copy(avatarUrl = ""),
+                        identityToast = "已恢复默认头像",
+                        identityBusy = false,
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(identityToast = repository.friendlyError(e), identityBusy = false) }
             }
         }
     }
