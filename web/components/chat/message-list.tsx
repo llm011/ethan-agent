@@ -13,6 +13,15 @@ const INITIAL_VISIBLE = 10;
 // 每次向上加载更多的条数
 const LOAD_MORE_COUNT = 10;
 
+// 认为「视图在底部」的容差（px）。小于它就算在底部，跟随态成立。
+const BOTTOM_EPSILON = 40;
+// 程序触发滚动后，忽略 scroll 事件的时长（ms）。
+//
+// 不能只看「滚完是不是还在底部」：smooth 滚动会持续发 scroll 事件，中途必然经过
+// near=false，用户手势的 scroll 也混在同一条事件流里，无法从事件本身区分。所以这里
+// 用一个短暂的时间窗把「自己发起的滚动」整体吞掉，之后的事件才算用户操作。
+const PROGRAMMATIC_IGNORE_MS = 150;
+
 interface MessageListProps {
   messages: Message[];
   streaming: boolean;
@@ -50,14 +59,28 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
   // React 18 batching 后末尾是 assistant，导致 lastIsUser 误判）
   const prevUserCountRef = useRef(0);
 
-  // 滚动到底部按钮相关状态
-  // isAtBottom: 实时反映用户是否在底部（用于控制按钮显示/隐藏）
-  // stickToBottom: 用户点了"滚到底部"按钮后置 true，让后续新消息持续强制滚到底，
-  //   直到用户手动向上滚才解除（实现"跟随对话在底部"）
+  // ── 智能跟随滚动 ────────────────────────────────────────────────────
+  //
+  // 三个 ref 是这套逻辑的全部状态，刻意都用 ref 而不是 state：
+  // 它们只在事件回调里读写、不参与渲染（按钮只依赖 isAtBottom），用 state 会多出
+  // 一轮渲染，而「滚动 → 渲染 → 再滚动」这个循环正是抖动和竞态的来源。
+  //
+  // - atBottomRef：**实时**的「视图在底部吗」。scroll 事件是权威来源（用户在底部
+  //   就是用户自己滚到底了，不需要额外的恢复动作），内容变高时再用 DOM 复算一次。
+  // - stickRef：跟随态。这就是需求里的「默认自动跟随」——默认就是 true，流式内容
+  //   增长时把视图拉到底；用户在底部以外的地方主动滚动才置 false，直到他重新回到底部。
+  // - programmaticRef：程序滚动的忽略窗口截止时间戳，见 PROGRAMMATIC_IGNORE_MS。
+  const atBottomRef = useRef(true);
+  /** DOM 复算「视图是否在底部」，用于内容变高之后的判定。 */
+  const recomputeAtBottom = (el: HTMLElement) =>
+    el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_EPSILON;
+  const programmaticRef = useRef(0);
+
+  // isAtBottom 只用于渲染「回到底部」按钮的显隐
   const [isAtBottom, setIsAtBottom] = useState(true);
-  const [stickToBottom, setStickToBottom] = useState(false);
-  // 区分"程序触发的滚动"和"用户手动滚动"：程序滚动时不解除 stickToBottom
-  const programmaticScrollRef = useRef(false);
+  const stickRef = useRef(true);
+  /** 待执行的「跟到底部」帧（同一时刻只保留一个，见下面跟随副作用）。 */
+  const followRafRef = useRef<number | null>(null);
 
   // 会话切换（消息减少）时重置 visibleCount
   useEffect(() => {
@@ -65,9 +88,18 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
       setVisibleCount(INITIAL_VISIBLE);
       // 切会话时同步重置 user 计数基线，避免误触发"新 user 消息"
       prevUserCountRef.current = messages.filter(m => m.role === "user").length;
-      // 切会话重置锁定状态
-      setStickToBottom(false);
-      setIsAtBottom(true);
+      // 换了一个会话就是换了一套内容：下一次到达的消息属于用户没看过的对话，
+      // 跟随态、底部判定、程序滚动窗口全部复位（新会话的 readMessages 通常会滚到底）。
+      const el = scrollRef.current;
+      stickRef.current = true;
+      atBottomRef.current = true;
+      programmaticRef.current = 0;
+      if (el) {
+        atBottomRef.current = recomputeAtBottom(el);
+        setIsAtBottom(atBottomRef.current);
+      } else {
+        setIsAtBottom(true);
+      }
     }
     prevLenRef.current = messages.length;
   }, [messages.length]);
@@ -99,11 +131,14 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
         if (!entries[0]?.isIntersecting) return;
         if (loadingRef.current) return;
 
+        // 记录加载前的滚动高度：DOM 提交后按差值把 scrollTop 推下去，视线不动。
+        // 用户贴着底时则不需要补偿（他在最下面），照原样停在底部就是对的 ——
+        // 那时下面这段 rAF 会因为「已被顶离底部」而把它重新贴回底部。
         const prevScrollHeight = container.scrollHeight;
+        const pinned = stickRef.current;
 
         if (hasMore) {
-          // 展开本地已加载的部分：先用 rAF 等 DOM 更新，再把滚动位置往下推，
-          // 让用户视线停在原来那条消息上（不跳）。
+          // 展开本地已加载的部分
           setVisibleCount((c) => Math.min(c + LOAD_MORE_COUNT, messages.length));
         } else if (needOlder) {
           loadingRef.current = true;
@@ -116,9 +151,17 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
           }
         }
 
-        requestAnimationFrame(() => {
-          const newScrollHeight = container.scrollHeight;
-          container.scrollTop += newScrollHeight - prevScrollHeight;
+        // 位置补偿：等 DOM 提交后按「长了多少」把 scrollTop 推下去，视线停在原处。
+        if (compensateRafRef.current != null) cancelAnimationFrame(compensateRafRef.current);
+        compensateRafRef.current = requestAnimationFrame(() => {
+          compensateRafRef.current = null;
+          // 用户已经贴底（或刚刚滚走了）：贴底的人该继续贴底，不在这里补偿 ——
+          // 跟随逻辑会把他按在底部。
+          if (pinned) return;
+          const grew = container.scrollHeight - prevScrollHeight;
+          if (grew <= 0) return;
+          programmaticRef.current = Date.now() + PROGRAMMATIC_IGNORE_MS;
+          container.scrollTop += grew;
         });
       },
       { root: container, threshold: 0, rootMargin: "100px 0px 0px 0px" }
@@ -137,93 +180,131 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
     setVisibleCount((c) => Math.max(c, Math.min(messages.length - targetIdx, messages.length)));
   }, [messages.length]);
 
-  // 圆点触发的滚动要标记为程序滚动：否则 scroll 监听会把这次滚动当成用户手动上滑，
-  // 解除 stickToBottom 锁定。
+  // 圆点导航滚过去的这次滚动是我方发起的，交给滚动监听标记成程序滚动：
+  // 否则跳到页面中部（near=false）时会被当成「用户上滑离开底部」而解除跟随。
   //
-  // 注意**不能只置位不复位**：跳到页面中部的圆点后 near=false，onScroll 里那个
-  // 「滚到接近底部才清 flag」的分支永远等不到，flag 会一直挂着，导致之后用户手动
-  // 上滑也解除不了 stickToBottom（onScroll 会直接 return），新消息/流式更新反复把
-  // 视图拽回底部。这里用定时兜底复位，不依赖是否滚到底。
-  const programmaticClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 这个标记只覆盖 PROGRAMMATIC_IGNORE_MS 一个窗口，不依赖「有没有滚到底」来复位 ——
+  // 早前用定时器 800ms 兜底复位，窗口太长：用户如果在圆点跳转后马上手动上滑，
+  // 事件会被当成程序滚动吞掉，跟随解除不了；窗口只有 150ms 就不会吃掉真实手势。
   const markProgrammaticScroll = useCallback(() => {
-    programmaticScrollRef.current = true;
-    if (programmaticClearTimerRef.current) clearTimeout(programmaticClearTimerRef.current);
-    // smooth 滚动通常数百毫秒内结束；留足时间后无条件复位,避免 flag 卡住。
-    programmaticClearTimerRef.current = setTimeout(() => {
-      programmaticScrollRef.current = false;
-      programmaticClearTimerRef.current = null;
-    }, 800);
+    programmaticRef.current = Date.now() + PROGRAMMATIC_IGNORE_MS;
   }, []);
 
-  // 卸载时清掉兜底定时器
+  // 滚到底部（被动跟随用）：只在真正滚得动的时候改 scrollTop。
+  //
+  // 已经贴底时再赋一次值看着无害，实则会打断用户**正在进行**的触摸拖拽：
+  // 流式输出每来一个 chunk 就重设一次 scrollTop，浏览器会判定这次手势被接管并中止
+  // 「拖到边界时的橡皮筋回弹」，手感变成「刚想往下拽就被弹回来」。
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight <= 1) return;
+    programmaticRef.current = Date.now() + PROGRAMMATIC_IGNORE_MS;
+    el.scrollTop = el.scrollHeight;
+  }, []);
+
+  // 上滚分页的位置补偿：记下展开前的 scrollHeight，提交后把差值加回 scrollTop，
+  // 用户的视线就停在原来那条消息上（否则会被新插入的一屏整体往下推）。
+  //
+  // 用 rAF 排队而不是直接改：DOM 提交之后才能读到新的 scrollHeight。回调执行时
+  // 再确认一次用户是不是已经离开了底部 —— 他可能在这一帧里滚走了，那就不要再动他。
+  const compensateRafRef = useRef<number | null>(null);
   useEffect(() => {
     return () => {
-      if (programmaticClearTimerRef.current) clearTimeout(programmaticClearTimerRef.current);
+      if (compensateRafRef.current != null) cancelAnimationFrame(compensateRafRef.current);
     };
   }, []);
 
-  const scrollToBottom = useCallback(() => {
-    if (scrollRef.current) {
-      programmaticScrollRef.current = true;
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, []);
-
-  // 监听滚动：实时更新 isAtBottom；用户手动向上滚时解除 stickToBottom
+  // 监听滚动：这是「用户在哪儿」的唯一权威来源。
+  //   - 即时刷新 atBottomRef / 按钮显隐；
+  //   - 不在底部且不是自己滚的 → 解除跟随（需求核心：用户上滑后别再抢滚动位置）；
+  //   - 重新滚回底部 → 恢复跟随。
+  //
+  // 时间是唯一判据，不区分是用户滚的还是内容变高顶出来的：内容在用户眼皮底下变高
+  // 把视图顶离底部时，「别再动了」正是用户想要的；而程序自己发起的滚动落在
+  // PROGRAMMATIC_IGNORE_MS 窗口内，不会误伤跟随态。
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
-      const near = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-      setIsAtBottom(near);
-      // 程序触发的滚动不解除锁定
-      if (programmaticScrollRef.current) {
-        if (near) programmaticScrollRef.current = false;
-        return;
-      }
-      // 用户手动向上滚 → 解除锁定
-      if (!near && stickToBottom) {
-        setStickToBottom(false);
-      }
+      const atBottom = recomputeAtBottom(el);
+      atBottomRef.current = atBottom;
+      setIsAtBottom(atBottom);
+      if (Date.now() < programmaticRef.current) return;
+      stickRef.current = atBottom;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
+    // 挂载时先按真实滚动位置定一次初值：消息多的会话首屏读进来时可能并不在底部。
+    onScroll();
     return () => el.removeEventListener("scroll", onScroll);
-  }, [stickToBottom]);
+  }, []);
 
-  // 新消息到达时自动滚到底部
-  // - 用户发送的新消息（user 数量增加）：强制滚到底部（无论当前滚动位置）
-  //   不能用 messages 末尾 role 判断：consumeStream 会立即 push 空 assistant 占位，
-  //   React 18 batching 后末尾是 assistant，导致 lastIsUser 误判，用户在中间时不滚动
-  // - stickToBottom=true：用户点了"滚到底部"按钮，持续跟随
-  // - 助手流式更新：仅当用户在底部附近时跟随滚动，避免打断向上翻阅
+  // 消息变化 → 需要时跟随到底部。
+  //
+  // - 用户刚发出新消息（user 数量增加）：强制跟随到底部（无论当前滚动位置）——
+  //   这是用户自己的动作，理应看到自己的消息。不能用「末尾 role 是不是 user」判断：
+  //   consumeStream 会立刻 push 空 assistant 占位，React 18 batching 后末尾是
+  //   assistant，会误判。
+  // - 其余情况（助手流式追加、工具/卡片更新、消息增多、上滚分页展开）：跟随态为真
+  //   才贴底；为假说明用户在别处看东西，一个像素都不动他。
+  //
+  // 滚动派发写进 rAF 回调里（而不是先 rAF 再滚），这样 jsdom 也能断言到真实行为。
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const userCount = messages.filter(m => m.role === "user").length;
     const hasNewUserMessage = userCount > prevUserCountRef.current;
     prevUserCountRef.current = userCount;
-    if (hasNewUserMessage || stickToBottom) {
-      // 等下一帧 DOM 渲染完成再滚，避免 scrollHeight 还是旧值
-      requestAnimationFrame(() => scrollToBottom());
-      return;
+    if (hasNewUserMessage) {
+      stickRef.current = true;
+      atBottomRef.current = true;
+      setIsAtBottom(true);
     }
-    // 如果用户已经滚到接近底部（80px 阈值），自动跟随
-    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (isNearBottom) {
-      requestAnimationFrame(() => scrollToBottom());
+    // 先按当前 DOM 复算一次底部：内容变高会把视图顶离底部，此时 atBottomRef 还是
+    // 上一次 scroll 事件的结论（内容没变高过，所以它并不过期，只是此刻不再成立）；
+    // 用户主动上滑的结论则不同——它必须活到用户自己回到底部为止，不能被这里覆盖。
+    const pin = hasNewUserMessage ? true : stickRef.current;
+    if (pin && !hasNewUserMessage) {
+      // 内容变高后用户其实还在「原位」：只要他原本贴着底，就继续算贴底。
+      atBottomRef.current = recomputeAtBottom(el) || atBottomRef.current;
     }
-  }, [messages, scrollToBottom, stickToBottom]);
+    if (!pin) return;
+    // 排下一帧再滚（DOM 提交后 scrollHeight 才是新的），并且**登记这次 rAF**：
+    // 用户完全可能在这一帧之内就把视图滚走（流式输出时手速很快），那一帧回调如果
+    // 照常执行，就会在用户已经离开底部之后把他拽回底部 —— 正是需求要修的现象。
+    // 每次重新排期前取消上一次，保证同一时刻最多只有一个待执行的跟随滚动。
+    if (followRafRef.current != null) cancelAnimationFrame(followRafRef.current);
+    followRafRef.current = requestAnimationFrame(() => {
+      followRafRef.current = null;
+      // 回调真正执行的这一刻再确认一次跟随态：期间用户可能已经滚走了。
+      if (!stickRef.current) return;
+      scrollToBottom();
+    });
+  }, [messages, scrollToBottom]);
+
+  // 卸载时清掉待执行的跟随滚动（它捕获了容器引用，留着没有意义）。
+  useEffect(() => {
+    return () => {
+      if (followRafRef.current != null) cancelAnimationFrame(followRafRef.current);
+    };
+  }, []);
 
   const handleScrollToBottom = useCallback(() => {
-    scrollToBottom();
-    setStickToBottom(true);
+    const el = scrollRef.current;
+    if (!el) return;
+    programmaticRef.current = Date.now() + PROGRAMMATIC_IGNORE_MS;
+    el.scrollTop = el.scrollHeight;
+    stickRef.current = true;
+    atBottomRef.current = true;
     setIsAtBottom(true);
-  }, [scrollToBottom]);
+  }, []);
 
   return (
-    <div className="relative flex-1 min-h-0">
-    <div ref={scrollRef} className="absolute inset-0 overflow-y-auto p-4 pl-7">
-      <div className="max-w-3xl mx-auto space-y-6">
+    <div className="relative flex-1 flex flex-col min-h-0">
+    {/* pl-7 给左侧圆点导航让位——圆点栏是 absolute left-0 w-7 叠在容器上的，
+        不留padding 会被消息内容压住。 */}
+    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 pl-7">
+      <div className="max-w-3xl mx-auto w-full flex flex-col gap-6">
         {/* 顶部加载更多指示器：
             本地还有未展开的消息、或服务端还有更早一页时都要挂哨兵。
             hasOlder=false（已到会话开头）时刻意不渲染，避免"一直转圈但其实没有了"。 */}
@@ -239,11 +320,12 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
         )}
 
         {messages.length === 0 && (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
+          <div className="flex items-center justify-center text-muted-foreground min-h-[50vh]">
             <p>Start a conversation</p>
           </div>
         )}
         {visibleMessages.map((msg, i) => (
+          // data-msg-idx 是圆点导航的锚点，必须与 QueryDots 的 startIdx 同一坐标系
           <div key={msg.id ?? `idx-${startIdx + i}`} data-msg-idx={startIdx + i}>
           <MessageBubble
             msg={msg}
@@ -269,12 +351,10 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
       </div>
     </div>
 
-      {/* 只把「已渲染」的消息交给圆点：messages 是完整的，但 DOM 里只挂了
-          visibleMessages 这一段（末尾 visibleCount 条）。若把完整 messages 交给
-          QueryDots，靠前的圆点会指向 data-msg-idx 不在 DOM 中的节点 →
-          querySelector 返回 null → handleClick 静默 return，表现为「点了没反应、
-          控制台也不报错」。这里传 startIdx 让它按同一坐标系计算。
-          onReachOlder：点到尚未渲染的消息时，先展开分页再滚动。 */}
+      {/* 左侧圆点导航：只把「已渲染」的消息交给它——messages 是完整的，但 DOM 里
+          只挂了 visibleMessages 这一段。若把完整 messages 传进去，靠前的圆点会指向
+          data-msg-idx 不在 DOM 中的节点，点击后静默无反应（控制台也不报错）。
+          传 startIdx 让它按同一坐标系计算；onNeedOlder 让「点更早的消息」先展开分页。 */}
       <QueryDots
         messages={messages}
         startIdx={startIdx}
@@ -283,13 +363,15 @@ export function MessageList({ messages, streaming, sessionId, onQuote, onCardAct
         onBeforeScroll={markProgrammaticScroll}
       />
 
-      {/* 滚动到底部按钮：不在底部时显示；点击后锁定跟随新消息 */}
+      {/* 滚动到底部按钮：不在底部时显示；点击后回到跟随态。
+          按钮本身不表示任何状态——跟随态的唯一权威是「用户在不在底部」，
+          用图标颜色替它编码只会让人怀疑自己看到的到底算不算底部。 */}
       {messages.length > 0 && !isAtBottom && (
         <button
           type="button"
           onClick={handleScrollToBottom}
-          className={`absolute bottom-4 right-4 z-10 flex items-center justify-center h-9 w-9 rounded-full border bg-background/95 backdrop-blur shadow-md hover:bg-accent transition-colors ${stickToBottom ? "text-primary" : "text-muted-foreground"}`}
-          title={stickToBottom ? "已锁定跟随底部（向上滚解除）" : "滚动到底部并跟随"}
+          className="absolute bottom-4 right-4 z-10 flex items-center justify-center h-9 w-9 rounded-full border bg-background/95 backdrop-blur shadow-md hover:bg-accent transition-colors text-muted-foreground"
+          title="滚动到底部并跟随"
         >
           <ArrowDown className="h-4 w-4" />
         </button>
