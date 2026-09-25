@@ -247,7 +247,13 @@ flowchart LR
 
 popup 里用 `keydown` 直接录按键(不是让用户手打组合串),并强制要求至少一个真修饰键(`Cmd`/`Ctrl`/`Alt`)——**只按 Shift 或裸键会和页面自身的输入/快捷键冲突**。`Backspace`/`Delete` 清空 = 停用页面内那一层(此时只剩扩展层生效)。录到 `Cmd/Ctrl+T/N/W/Q`、`Ctrl+Tab` 这类会被浏览器/系统**先**吃掉的组合时给警告,因为扩展根本收不到。
 
+**「输入框里按不出来」是这一层最要命的坑**(已修)。早期实现见到 `input`/`textarea`/`select`/`contenteditable` 就无条件 `return`,理由是「别抢用户正在打的字」——但这条判据过粗:带**真修饰键**(`mod`/`Cmd`/`Ctrl`/`Alt` + 主键)的组合**不会往输入框里插入任何字符**,它正是 `Cmd+K` 这类「命令」的通用形态;而现实里用户多数时候焦点就在某个搜索框/评论框/聊天输入框里。实测(真实 Chromium 加载扩展)`input`/`textarea`/`select`/`contenteditable` 四种聚焦场景**全部打不开**,只有 `body` 聚焦时才正常——这就是「快捷键在很多页面上没反应」。现在的判据是**只在会真的输入字符时才让路**(`shouldYieldToEditable`):只有 Shift、或裸键让路,带真修饰键的一律放行。这套判据抽在 `shared/shortcut-match.ts`(纯函数、有单测),因为「某个按键落进了某条 early return」这种事只看代码很难判断,写成纯函数就能把各场景钉成用例。
+
+**iframe**:外层文档收不到 iframe 内部的 `keydown`,所以注入必须是 `allFrames: true`,切换面板的消息也要发给所有框架——面板会开在**有焦点的那一层**。只注主框架时的表现是「在嵌了输入框的 iframe 里按快捷键没反应」,而主框架里的其它地方都正常,极难自查。`broadcastShortcut` 同理,不带 `frameId` 广播,否则 iframe 里那份一直用启动时读到的旧快捷键。
+
 **注入方式是按需注入**,不是声明式 `content_scripts`:页面加载不为它付出任何成本,只在用户真按快捷键时 `chrome.scripting.executeScript` 注入一次(记在 `injectedTabs`,导航后失效重注)。`chrome://`、扩展页、应用商店等特权页无法注入 —— 这种情况**发系统通知说明原因**,而不是静默无反应。过去 popup 也会「转圈没反馈」,这类「不知道在等什么」的问题比慢本身更糟。
+
+**适用/不适用页面**:常规 `http(s)://` 页面(含带输入框/可编辑区、含 iframe 的页面)都可用;`chrome://`、扩展页(`chrome-extension://`)、应用商店、以及扩展没有 host 权限的页面无法注入 —— 这些页面按扩展层快捷键(`Cmd/Ctrl+Shift+K`)仍能用(它由浏览器派发,不经 content script),按页面内的配置键则会收到系统通知说明原因。
 
 **匹配语义**(`session-store/tab-search.ts`,纯函数、有单测):空格切词、**任一命中即匹配(OR)**、大小写不敏感、`title` 权重高于 `url`、词边界区分「完全/前缀/子串」匹配(`hub.docker.com` 搜 `hub` 优于 `github.com`),按「命中词数 → 分数 → 活动优先」排序。
 
@@ -274,3 +280,24 @@ popup 里用 `keydown` 直接录按键(不是让用户手打组合串),并强制
 但**降级可以静默,错误不可以**:失败原因会随 `closedError` 回到面板并显示出来(「历史读取失败:…」)。这条正是被上面那个 `toSessionTab` 的 bug 逼出来的 —— 当时异常被静默吞掉,用户只看到「点了没反应」,从现象完全推不出原因。开关开着却一条历史都没有时,一定要说清是「今天确实没关过」还是「取不到」。
 
 键盘上不用去点开关:`Alt+H` 切换(和 `Enter`/`↑↓` 一样在输入框里也能按)。开关状态**不持久化**,每次打开面板都回到默认关。
+
+## 8. 页面指令:执行、排序与弹窗展示
+
+「页面指令」是短指令(摘要/翻译/润色/生词卡片…),从 **popup 列表、右键菜单、选中工具条**三处触发,结果流式进页面右上角的结果面板。定义存 `chrome.storage.local` 的 `commands`,内置默认集在 `shared/index.ts` 的 `DEFAULT_COMMANDS`(升级后新增的内置项由 `withBuiltinDefaults` 按 id 补齐,不会覆盖用户改动)。
+
+**三件事分得很开,别混**(纯语义在 `shared/command-prefs.ts`,有单测):
+
+- **顺序**:就是 `commands` 数组本身的次序,**不另存一份顺序表**。少一份状态就少一处能不一致的地方——否则「顺序表」和「指令表」会各自漂移。管理界面里的拖动 / 上移 / 下移最后都落到 `moveItem` 这一次「搬动」上,三种交互共用一套边界处理(第一位的上移、最后一位的下移都要禁用并返回原位)。
+- **移出弹窗**(`hiddenCommandIds`):**不是删除**。指令仍在 `commands` 里,右键菜单和选中工具条照常能用,只是不在 popup 列表里出现;管理界面里单列一个「已移出」区可以一键加回。删除一条自定义指令时要用 `pruneHiddenIds` 把它的隐藏标记一起清掉,否则 id 集合里会留垃圾。
+- **展示数量**(`popupCommandLimit`):`0` = 不限。默认取 0(不限)而不是猜一个数字。**先剔除移出的、再按 limit 截断**——顺序反了会让用户觉得「我把某个移走了,结果列表里又冒出来一个新指令」。
+
+`popup` 侧只调 `readPopupCommands()`(读指令 → 读偏好 → 筛选),不在 UI 里自己判断顺序或裁剪。
+
+**弹窗顶部的「打开搜索 Tab」入口**放在「快捷操作」区,和页面指令并列:点击后请 background(`tabPaletteHost` 的 `open`)在当前页面打开标签页搜索面板,再把 popup 收起来(popup 一旦失焦就会关闭,所以必须先派发再 `window.close()`)。按钮右侧会显示当前配置的快捷键,没配置则隐藏,不留空壳。
+
+**e2e 覆盖**:`browser-extension/scripts/` 下有两个真实浏览器脚本(`npm run e2e`),因为「快捷键失效」和「拖动排序」这类问题**只看代码判断不了**,必须在真实 Chromium 里跑:
+
+- `e2e-shortcut.mjs`:8 个场景(普通页 / input / textarea / select / contenteditable / shadow DOM / iframe / 滚动后)验证快捷键都开得出面板。修复前是 3/8,现在是 8/8。
+- `e2e-commands.mjs`:16 项断言覆盖排序(含真实 HTML5 拖拽事件序列)、展示数量、移出并找回,以及「点击入口真的出现面板」。
+
+两个脚本都必须 `--headless=new`(旧 headless shell 不加载 MV3 扩展,service worker 起不来),且每步自带超时。

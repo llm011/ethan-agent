@@ -46,15 +46,38 @@ chrome.tabs.onRemoved.addListener(tabId => {
  * 用 content_scripts 声明式注入也行，但那样每个页面加载都要跑一遍脚本；
  * 「按需注入」只有在用户真的按快捷键时才付出成本，页面加载不受影响。
  * 代价是要处理注入失败（chrome:// 等特权页无法注入）。
+ *
+ * `allFrames: true` 是必须的：页面里键盘焦点落进 iframe 时，外层文档根本收不到
+ * keydown，只有 iframe 自己的 content script 才看得到。只注主框架的话，表现就是
+ * 「在嵌了输入框的 iframe 里按快捷键没反应」。注入到所有子框架后，哪一层有焦点
+ * 就由哪一层打开面板。
  */
 async function ensurePaletteInjected(tabId: number): Promise<boolean> {
   if (injectedTabs.has(tabId)) return true;
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
       files: [PALETTE_FILE],
     });
+    // 一个框架都没注入成功（比如整页都是特权上下文）才算失败
+    if (!results || results.length === 0) return false;
     injectedTabs.add(tabId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 在所有框架里切换面板。
+ *
+ * 面板被注入到了每个框架（见 ensurePaletteInjected），所以 toggle 也要发给每个框架，
+ * 否则只有主框架会响应，而焦点在 iframe 里时用户期望的是「在当前位置打开」。
+ * 每个框架各自维护自己的 `state.open`，互不干扰——多开时按 Esc 逐个关掉即可。
+ */
+async function broadcastToggle(tabId: number): Promise<boolean> {
+  try {
+    await chrome.tabs.sendMessage(tabId, { target: 'tabPalette', type: 'toggle' });
     return true;
   } catch {
     return false;
@@ -68,18 +91,11 @@ export async function openPaletteInTab(tabId: number): Promise<void> {
     await notifyCannotInject(tabId);
     return;
   }
-  try {
-    await chrome.tabs.sendMessage(tabId, { target: 'tabPalette', type: 'toggle' });
-  } catch {
-    // 注入成功但消息发不过去（页面刚导航走）：重试一次注入
-    injectedTabs.delete(tabId);
-    if (await ensurePaletteInjected(tabId)) {
-      try {
-        await chrome.tabs.sendMessage(tabId, { target: 'tabPalette', type: 'toggle' });
-      } catch {
-        /* 放弃 */
-      }
-    }
+  if (await broadcastToggle(tabId)) return;
+  // 注入成功但消息发不过去（页面刚导航走）：重试一次注入
+  injectedTabs.delete(tabId);
+  if (await ensurePaletteInjected(tabId)) {
+    await broadcastToggle(tabId);
   }
 }
 
@@ -113,12 +129,14 @@ async function openPaletteInActiveTab(): Promise<void> {
   }
 }
 
-/** 把最新快捷键广播给所有已注入的 tab，popup 改完立刻生效。 */
+/** 把最新快捷键广播给所有已注入的 tab（含子框架），popup 改完立刻生效。 */
 export async function broadcastShortcut(combo: string): Promise<void> {
   const targets = Array.from(injectedTabs);
   await Promise.all(
     targets.map(async tabId => {
       try {
+        // 注入时是 allFrames，这里也必须不带 frameId 广播，否则 iframe 里那份
+        // 用的一直是启动时读到的旧快捷键
         await chrome.tabs.sendMessage(tabId, {
           target: 'tabPalette',
           type: 'setShortcut',
@@ -265,14 +283,7 @@ export async function openPaletteFromExtensionUI(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && typeof tab.id === 'number') {
     const ok = await ensurePaletteInjected(tab.id);
-    if (ok) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, { target: 'tabPalette', type: 'toggle' });
-        return;
-      } catch {
-        /* 落到下面 */
-      }
-    }
+    if (ok && (await broadcastToggle(tab.id))) return;
   }
   // 活动 tab 是特权页：没法注入，那就让用户看到原因
   if (tab && typeof tab.id === 'number') {

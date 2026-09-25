@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { wsToHttp, readCommands } from '../shared';
+import { wsToHttp, readCommands, readPopupCommands } from '../shared';
 import {
   TAB_PALETTE_SHORTCUT_KEY as SHORTCUT_KEY,
   DEFAULT_TAB_PALETTE_SHORTCUT as DEFAULT_SHORTCUT,
@@ -326,6 +326,15 @@ function checkRisky(combo) {
   return '';
 }
 
+/** 把当前组合键同步到「快捷操作」区的提示上（没设置就隐藏，不留一个空壳）。 */
+function syncQuickShortcutHint(combo) {
+  const kbd = $('quickSearchKbd');
+  if (!kbd) return;
+  const label = comboToLabel(combo);
+  kbd.textContent = label;
+  kbd.style.display = label ? '' : 'none';
+}
+
 async function loadShortcut() {
   const stored = await chrome.storage.local.get([SHORTCUT_KEY]);
   const combo = resolveShortcut(stored);
@@ -334,6 +343,7 @@ async function loadShortcut() {
     input.value = comboToLabel(combo) || '未设置';
     input.dataset.combo = combo;
   }
+  syncQuickShortcutHint(combo);
   return combo;
 }
 
@@ -344,6 +354,7 @@ async function saveShortcut(combo) {
     input.value = comboToLabel(combo) || '未设置';
     input.dataset.combo = combo;
   }
+  syncQuickShortcutHint(combo);
   const warn = checkRisky(combo);
   setHint(warn || '已保存，所有已打开的网页立即生效', warn ? 'warn' : 'ok');
 }
@@ -394,18 +405,31 @@ function setupShortcutUI() {
     await saveShortcut(DEFAULT_SHORTCUT);
   });
 
-  $('openPalette')?.addEventListener('click', async () => {
-    // popup 会失焦关闭，所以先派发给 background 再收起
-    await chrome.runtime.sendMessage({ target: 'tabPaletteHost', type: 'open' });
-    window.close();
+  // 「打开搜索 Tab」入口：放在「快捷操作」区，和页面指令并列。
+  // popup 会失焦关闭，所以先派发给 background 再收起窗口。
+  $('quickSearchTab')?.addEventListener('click', async () => {
+    await openTabPalette();
   });
 }
 
+/** 请 background 在当前页面打开标签页搜索面板，然后把 popup 收起来。 */
+async function openTabPalette() {
+  try {
+    await chrome.runtime.sendMessage({ target: 'tabPaletteHost', type: 'open' });
+  } catch {
+    /* 打不开也先关窗口，避免 popup 僵在这 */
+  }
+  window.close();
+}
+
 // 页面指令列表：读 commands 渲染成按钮，点击 → 后台执行，结果进页面右上角面板。
+//
+// 展示的是「用户排好序、剔除掉移出项、再按展示数量截断」之后的那一批
+// （见 shared/command-prefs.ts）。这里不做任何排序/裁剪判断，只管画。
 async function renderCommands() {
   const list = $('commandList');
   if (!list) return;
-  const commands = await readCommands();
+  const commands = await readPopupCommands();
   list.innerHTML = '';
   for (const cmd of commands) {
     const btn = document.createElement('button');
@@ -423,6 +447,13 @@ async function renderCommands() {
     btn.appendChild(labelSpan);
     btn.addEventListener('click', () => runCommand(cmd));
     list.appendChild(btn);
+  }
+  // 一条都没有时给出可操作的下一步，而不是留一片空白
+  if (!commands.length) {
+    const empty = document.createElement('div');
+    empty.className = 'cmd-empty';
+    empty.textContent = '弹窗里没有指令了，点「管理」把需要的加回来';
+    list.appendChild(empty);
   }
 }
 

@@ -207,8 +207,11 @@ type ElProps = Record<string, unknown>;
       else key = p;
     }
     if (!key) return null;
+    // 只有修饰键的组合不算快捷键（否则会和「按住 Shift」冲突）
+    if (!need.mod && !need.ctrl && !need.meta && !need.alt) return null;
     return function (e: KeyboardEvent) {
-      if (e.key.toLowerCase() !== key) return false;
+      const eventKey = (e.key || '').toLowerCase() === ' ' ? 'space' : (e.key || '').toLowerCase();
+      if (eventKey !== key) return false;
       if (!!e.shiftKey !== need.shift) return false;
       if (!!e.altKey !== need.alt) return false;
       // mod = 当前平台的命令键（mac 上是 Cmd，其它是 Ctrl）
@@ -222,6 +225,56 @@ type ElProps = Record<string, unknown>;
 
   function isMac(): boolean {
     return /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '');
+  }
+
+  /** 组合串里是否含真修饰键（mod/ctrl/meta/alt）——只有 shift 不算。 */
+  function comboHasRealModifier(combo?: string): boolean {
+    if (!combo || typeof combo !== 'string') return false;
+    const parts = combo.split('+').map(p => p.trim().toLowerCase());
+    return parts.some(p => p === 'mod' || p === 'ctrl' || p === 'control'
+      || p === 'cmd' || p === 'meta' || p === 'command'
+      || p === 'alt' || p === 'option');
+  }
+
+  /**
+   * 事件目标是否落在「会吞掉普通按键」的可编辑区域。
+   *
+   * shadow DOM 要点：`e.target` 是宿主元素（如 `<my-widget>`），它自己不是 input，
+   * 但内部可能有聚焦的输入框——`shadowRoot.activeElement` 能穿透，所以沿链往下找，
+   * 否则组件库里的搜索框会被误判成普通元素。
+   */
+  function isEditableTarget(target: unknown): boolean {
+    const check = (node: unknown): boolean => {
+      if (!node || typeof node !== 'object') return false;
+      const el = node as {
+        tagName?: string;
+        isContentEditable?: boolean;
+        getAttribute?: (n: string) => string | null;
+      };
+      const tag = (el.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+      if (el.isContentEditable) return true;
+      const role = el.getAttribute ? el.getAttribute('role') : null;
+      if (role === 'textbox' || role === 'combobox' || role === 'searchbox') return true;
+      return false;
+    };
+    if (check(target)) return true;
+    // shadow DOM 宿主：往下看真正聚焦的元素
+    let host = target as { shadowRoot?: { activeElement?: unknown } } | null;
+    while (host && typeof host === 'object' && host.shadowRoot) {
+      const active = host.shadowRoot.activeElement;
+      if (check(active)) return true;
+      host = active as { shadowRoot?: { activeElement?: unknown } } | null;
+    }
+    const doc = document as Document & { activeElement?: { shadowRoot?: { activeElement?: unknown } } };
+    if (check(doc.activeElement)) return true;
+    let deep = doc.activeElement as { shadowRoot?: { activeElement?: unknown } } | null;
+    while (deep && typeof deep === 'object' && deep.shadowRoot) {
+      const inner = deep.shadowRoot.activeElement;
+      if (check(inner)) return true;
+      deep = inner as { shadowRoot?: { activeElement?: unknown } } | null;
+    }
+    return false;
   }
 
   /** 历史条目右侧的标记：能算出时间就显示 HH:MM，否则只写「已关闭」。 */
@@ -594,7 +647,11 @@ type ElProps = Record<string, unknown>;
 
   function applyShortcut(combo?: string) {
     comboMatcher = parseCombo(combo);
+    comboHasRealMod = comboHasRealModifier(combo);
   }
+
+  // 当前配置是否含真修饰键：决定焦点在输入框时让不让路。见下面 keydown 的注释。
+  let comboHasRealMod = true;
 
   document.addEventListener(
     'keydown',
@@ -602,11 +659,19 @@ type ElProps = Record<string, unknown>;
       if (state.open) return; // 开着的时候由面板自己处理
       if (e.repeat) return;
       if (!comboMatcher) return;
-      // 别抢输入框里的按键（用户正在页面里打字）
-      const t = e.target as HTMLElement | null;
-      if (t && (t.isContentEditable || /^(input|textarea|select)$/i.test(t.tagName || ''))) {
-        return;
-      }
+      // 焦点在输入框/可编辑区时**不再无条件放弃**。
+      //
+      // 早期版本在这里见到 input/textarea/contenteditable 就直接 return，等于
+      // 「只要焦点落在任意搜索框、评论框、聊天输入框里，页面内快捷键就失效」——
+      // 而现实里用户多数时候焦点正是在某个输入框里，这正是「很多页面上按不出来」
+      // 的主因（真实浏览器实测：input/textarea/select/contenteditable 四种聚焦场景
+      // 全部打不开，而 body 聚焦时正常）。
+      //
+      // 正确判据是「这个组合会不会和用户的输入冲突」：
+      //   - 带真修饰键（mod/Cmd/Ctrl/Alt + 主键）**不会往输入框插入文字**，正是
+      //     Cmd+K 这类「命令」的通用形态 → 放行；
+      //   - 只有 Shift、或裸键的组合会真的输入字符（Shift+字母=大写）→ 让路。
+      if (isEditableTarget(e.target) && !comboHasRealMod) return;
       if (!comboMatcher(e)) return;
       e.preventDefault();
       e.stopPropagation();

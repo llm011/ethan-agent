@@ -3,6 +3,19 @@
 // 只保留 sessions.* / tabs.* / pages.* 命名空间,供扩展各模块共享。
 export type * from './types';
 
+// 指令「展示偏好」（顺序/移出弹窗/展示数量）的纯语义在单独模块里，带单测；
+// 这里只补上读写 storage 的那一层，并 re-export 出去让 UI 拿到同一套类型与常量。
+import {
+  type CommandPrefs,
+  POPUP_COMMAND_LIMIT_KEY,
+  HIDDEN_COMMAND_IDS_KEY,
+  normalizeLimit,
+  normalizeHiddenIds,
+  resolveCommandPrefs,
+  selectPopupCommands,
+} from './command-prefs';
+export * from './command-prefs';
+
 export const BROWSER_RPC_VERSION = 1;
 
 // chrome.alarms 名称：定期唤醒 SW / 确保 offscreen 存活。
@@ -197,9 +210,38 @@ export async function saveCommands(commands: EthanCommand[]): Promise<void> {
   await chrome.storage.local.set({ commands });
 }
 
-/** 恢复内置默认集（清空用户自定义）。 */
+/** 恢复内置默认集（清空用户自定义）。展示偏好也一并回到默认，否则会残留指向已消失指令的隐藏标记。 */
 export async function resetCommands(): Promise<void> {
-  await chrome.storage.local.set({ commands: DEFAULT_COMMANDS });
+  await chrome.storage.local.set({
+    commands: DEFAULT_COMMANDS,
+    [HIDDEN_COMMAND_IDS_KEY]: [],
+    [POPUP_COMMAND_LIMIT_KEY]: 0,
+  });
+}
+
+/** 读「popup 展示偏好」：顺序即 `commands` 次序，这里只读移出集合与展示数量。 */
+export async function readCommandPrefs(): Promise<CommandPrefs> {
+  const stored = await chrome.storage.local.get([
+    POPUP_COMMAND_LIMIT_KEY, HIDDEN_COMMAND_IDS_KEY,
+  ]);
+  return resolveCommandPrefs(stored);
+}
+
+/** 写「popup 展示偏好」。 */
+export async function saveCommandPrefs(prefs: CommandPrefs): Promise<void> {
+  await chrome.storage.local.set({
+    [POPUP_COMMAND_LIMIT_KEY]: normalizeLimit(prefs.limit),
+    [HIDDEN_COMMAND_IDS_KEY]: normalizeHiddenIds(prefs.hiddenIds),
+  });
+}
+
+/**
+ * popup 最终要渲染的指令：读指令 + 读偏好 + 应用「剔除移出 → 按 limit 截断」。
+ * popup 只需调这一个函数，不必自己关心 storage 的键与语义。
+ */
+export async function readPopupCommands(): Promise<EthanCommand[]> {
+  const [commands, prefs] = await Promise.all([readCommands(), readCommandPrefs()]);
+  return selectPopupCommands(commands, prefs);
 }
 
 /** 使用次数计数（用于右键菜单取 top-N）。 */
