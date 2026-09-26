@@ -20,6 +20,7 @@ import com.ethan.agent.core.model.ambiguousCandidates
 import com.ethan.agent.core.model.fullId
 import com.ethan.agent.core.model.isAmbiguous
 import com.ethan.agent.core.model.resolveModel
+import com.ethan.agent.shared.AppLifecycleBus
 import com.ethan.agent.shared.EthanRepository
 import com.ethan.agent.shared.UiMessage
 import com.ethan.agent.shared.UiMessageImage
@@ -28,6 +29,7 @@ import kotlinx.datetime.Clock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,10 +42,65 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
-enum class ConnectionState { Idle, Streaming, Reconnecting, Disconnected }
+/**
+ * 与后端的连接状态。**这是界面上「离线」的唯一来源** —— 判定依据只有一条：
+ * 网络路径是否还能用（探活结果 / SSE 流是否还活着），不是「有没有在生成」。
+ *
+ * 早期版本只有 [Idle] / [Streaming] / [Reconnecting] / [Disconnected] 四态，且
+ * `Disconnected` 只在**一次生成失败**时写入 —— 没有生成在跑时永远是 `Idle`，
+ * 于是「切回前台后发现服务端已经连不上」没有任何状态可以表达。现在补一个
+ * [Offline] 专门表示「探活失败」，并把 `Disconnected` 收窄为「生成中断且重连失败」。
+ */
+enum class ConnectionState {
+    /** 空闲且已确认可达（或尚未探活）。 */
+    Idle,
 
-private const val MAX_AUTO_RECONNECT = 3
-private val RECONNECT_DELAYS_MS = longArrayOf(1_000, 3_000, 10_000)
+    /** 正在流式接收。 */
+    Streaming,
+
+    /** 正在重连 / 正在探活，界面上是「重连中…」。 */
+    Reconnecting,
+
+    /**
+     * 生成流断了、且自动重连也没接回来。此时 run 可能还在服务端跑，
+     * 用户可以点「重连」手动再试（区别于 [Offline]：那条路走的是整机不可达）。
+     */
+    Disconnected,
+
+    /**
+     * 服务端不可达（探活失败）。与 [Disconnected] 分开是因为**恢复方式不同**：
+     * 这里没有「重连当前 run」可言，只能等网络回来 / 用户改地址。
+     */
+    Offline,
+}
+
+/**
+ * 生成流的自动重连参数。
+ *
+ * 指数退避 1s / 2s / 4s…，封顶 [MAX_RECONNECT_DELAY_MS]。退避只用于「同一轮生成内
+ * 反复接不上」的场景；一次成功即清零，避免把偶发抖动累积成越来越长的等待。
+ */
+private const val MAX_AUTO_RECONNECT = 4
+private const val INITIAL_RECONNECT_DELAY_MS = 1_000L
+private const val MAX_RECONNECT_DELAY_MS = 30_000L
+
+/** 第 [attempt] 次（0 起）重连前等待的毫秒数：1s → 2s → 4s → 8s… 封顶 30s。 */
+private fun reconnectDelayMs(attempt: Int): Long {
+    var delay = INITIAL_RECONNECT_DELAY_MS
+    repeat(attempt) {
+        delay = (delay * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
+    }
+    return delay
+}
+
+/**
+ * 前台探活的最小间隔。
+ *
+ * 手机上「切回前台」发生得非常频繁 —— 下拉通知栏、切个 App 回来、甚至解锁屏幕都会触发。
+ * 每次都打一次 /health 既费电又会把服务端打出一串无用请求。5 秒内的重复触发直接丢弃：
+ * 真断线不会在 5 秒内自愈，而用户来回切屏的体感延迟几乎为零。
+ */
+private const val FOREGROUND_PROBE_DEBOUNCE_MS = 5_000L
 
 /** 待发送的图片：内存临时持有，发送后清空。不落 DB。 */
 data class PendingImage(
@@ -81,6 +138,15 @@ data class ChatUiState(
     val isResuming: Boolean = false,
     val isStopping: Boolean = false,
     val connectionState: ConnectionState = ConnectionState.Idle,
+    /**
+     * 最近一次探活的结论：false = 服务端不可达。
+     *
+     * 与 [connectionState] 并存而不是合并：探活是**周期性**的，而 connectionState 还带着
+     * 「正在生成」「正在重连」这些瞬时含义。true 时不显示任何东西，false 时界面挂一条离线提示。
+     */
+    val reachable: Boolean = true,
+    /** 正在探活（前台探活进行中），用于避免重复发起。 */
+    val isProbing: Boolean = false,
     val showScrollToBottom: Boolean = false,
     val unreadCount: Int = 0,
     val error: String? = null,
@@ -158,11 +224,178 @@ class ChatViewModel(
     private var consumedKey: String? = null
     private var consumedText: String? = null
 
+    /** 前台探活的串行化闸门：同一时刻只允许一次探活在飞。 */
+    private var probeJob: Job? = null
+
+    /**
+     * 离线后的持续探活循环（独立于 [probeJob]）。
+     *
+     * 单独放一个 job 而不是复用 [probeJob]：这个循环要按退避一直重试到服务端回来，
+     * 长的可能挂几个小时。如果它占着 [probeJob]，[probeAndRecover] 的早退判断
+     * （`if (probeJob?.isActive == true) return`）会把之后所有的前台事件全部吞掉，
+     * 用户切回来多少次都不会再探活一次。
+     */
+    private var onlineProbeJob: Job? = null
+
+    /** 上一次前台探活的时刻（毫秒），用于 [FOREGROUND_PROBE_DEBOUNCE_MS] 去抖。 */
+    private var lastProbeAtMs: Long = 0
+
     init {
         loadInitial(sessionId)
         observeSharedText()
         observeAutoConsent()
         observeDraftPersistence()
+        observeAppLifecycle()
+    }
+
+    /**
+     * App 切回前台时主动探活 + 接流。
+     *
+     * 这是「放一会儿就自己变离线」的主修复点。两种断线都要处理：
+     *   1. **被挂起**：进程在后台被冻结，`onPause` 之后没有任何回调告诉我们连接没了。
+     *      手里那个 `isStreaming = true` 是陈旧的死状态 —— 探活能发现服务端还好着，
+     *      于是只需要重新接流（resume），界面立刻回到在线。
+     *   2. **真断线**：服务端重启 / 网络换了。探活失败 → 标记 [ConnectionState.Offline]，
+     *      并起一个带退避的探活循环，直到服务端回来为止（回来即自动清掉离线态）。
+     *
+     * 去抖的理由见 [FOREGROUND_PROBE_DEBOUNCE_MS]：切后台再回来在手机上是高频动作。
+     */
+    private fun observeAppLifecycle() {
+        viewModelScope.launch {
+            AppLifecycleBus.foregroundEvents.collect {
+                val now = Clock.System.now().toEpochMilliseconds()
+                if (now - lastProbeAtMs < FOREGROUND_PROBE_DEBOUNCE_MS) return@collect
+                lastProbeAtMs = now
+                probeAndRecover()
+            }
+        }
+    }
+
+    /**
+     * 探活一次；失败则进入离线态并启动后台探活循环，成功则恢复并接回进行中的 run。
+     *
+     * 并发保护：探活是「串行化 + 合并」的 —— 已经在飞就复用那一次，不排队。
+     * 否则用户快速切几次屏会叠出一串探活，最后到达的响应可能比最先到的还早，
+     * 把已恢复的在线态又盖回离线（经典的乱序覆盖）。
+     */
+    private fun probeAndRecover() {
+        if (probeJob?.isActive == true) return
+        probeJob = viewModelScope.launch {
+            _state.update { it.copy(isProbing = true) }
+            val healthy = try {
+                repository.isServerHealthy()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                false
+            }
+            _state.update { it.copy(isProbing = false, reachable = healthy) }
+
+            if (healthy) {
+                // 探活通了：先把断线态收回在线，再尝试接回那轮还在跑的生成。
+                //
+                // 顺序很重要 —— `markOnline()` 会把 connectionState 从
+                // Disconnected/Offline 收成 Idle，而它**不动 isStreaming**。
+                // 所以下面判「有没有活要接」必须看 isStreaming（那才是「本地认为
+                // 还有一轮生成在跑」的真实来源），不能看 connectionState。
+                val hadActiveRun = _state.value.isStreaming
+                markOnline()
+                if (hadActiveRun) resumeStreamIfNeeded(force = true)
+            } else {
+                markOffline()
+            }
+        }
+    }
+
+    /**
+     * 进入离线态，并**确保**后台探活循环在跑。
+     *
+     * 收敛成一个方法而不是各处直接写 `connectionState = Offline`：离线态一旦进入就必须
+     * 有人负责把它带回来，否则界面会永久卡在「网络已断开，正在自动重连…」而实际什么都
+     * 没在重试（横幅按设计不给按钮，用户连手动重试都点不到）。
+     * 之前有三条独立路径写离线态，只有探活那条顺带起了循环 —— 生成失败/重连失败那两条
+     * 会把用户丢进这个死状态。现在只留这一个入口，忘记起循环在结构上就不可能了。
+     *
+     * 循环放**独立** job（[onlineProbeJob]）而不是 [probeJob]：它要长时间退避重试，
+     * 而 probeJob 是「一次探活」的闸门，让它一直占着会让后续前台事件全部早退。
+     */
+    private fun markOffline() {
+        _state.update { it.copy(connectionState = ConnectionState.Offline, reachable = false) }
+        startOnlineProbeLoop()
+    }
+
+    /**
+     * 离线后持续探活，直到恢复为止（退避 1s/2s/4s… 封顶 30s）。
+     *
+     * 不设「最大重试次数」：这里的重试对象是「用户把手机掏出电梯 / 走出地库」这种
+     * 恢复时间完全不可知的外因，放弃重试等于让用户回来还得手动操作一次。
+     * 循环本身极轻（一次 GET），且用户离开页面时随 viewModelScope 一起取消。
+     *
+     * 幂等：已经有一个循环在跑就直接返回，避免每次前台事件都叠一个新的。
+     */
+    private fun startOnlineProbeLoop() {
+        if (onlineProbeJob?.isActive == true) return
+        onlineProbeJob = viewModelScope.launch {
+            var attempt = 0
+            while (true) {
+                delay(reconnectDelayMs(attempt))
+                // 已经被别处（另一次探活 / 成功的 resume）恢复了 —— 退出，别重复探。
+                if (_state.value.reachable) return@launch
+                val healthy = try {
+                    repository.isServerHealthy()
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    false
+                }
+                if (healthy) {
+                    val hadActiveRun = _state.value.isStreaming
+                    markOnline()
+                    if (hadActiveRun) resumeStreamIfNeeded(force = true)
+                    return@launch
+                }
+                attempt += 1
+            }
+        }
+    }
+
+    /**
+     * 把界面从各种「断线态」收回在线态。
+     *
+     * **只回收断线态**（Offline / Disconnected）—— 正在生成（Streaming）或正在重连
+     * （Reconnecting）时不能碰：那两个状态由各自的流程负责推进，这里覆盖会把
+     * 「重连中…」的提示抹掉，用户看不到正在发生的事情。
+     */
+    private fun markOnline() {
+        _state.update {
+            if (it.connectionState == ConnectionState.Offline ||
+                it.connectionState == ConnectionState.Disconnected
+            ) {
+                // 断线态收干净了，当初为它显示的错误文案也一并清掉，
+                // 否则会留下一条「连接断开」的红字挂在一个已经恢复的界面上。
+                it.copy(connectionState = ConnectionState.Idle, reachable = true, error = null)
+            } else {
+                it.copy(reachable = true)
+            }
+        }
+    }
+
+    /**
+     * 接回进行中的生成。
+     *
+     * @param force 探活刚证明服务端是通的：此时**跳过 [isStreaming] 检查**。
+     *   后台被挂起时 `isStreaming` 会停在 true（陈旧状态，没有任何回调会清它），
+     *   而 `resumeStream()` 的第一句就是 `if (isStreaming) return` —— 不 force 的话
+     *   这条「接回断流」的路会被自己的陈旧状态挡在门外，界面就永久卡在离线/断线。
+     */
+    private fun resumeStreamIfNeeded(force: Boolean = false) {
+        if (_state.value.sessionId == null) return
+        if (_state.value.isResuming) return
+        if (!_state.value.reachable) return
+        if (!force && _state.value.isStreaming) return
+        // 走 force 时先清掉那个陈旧的 isStreaming，让 resumeStream 放行。
+        if (force && _state.value.isStreaming) {
+            _state.update { it.copy(isStreaming = false) }
+        }
+        resumeStream()
     }
 
     /**
@@ -629,15 +862,25 @@ class ChatViewModel(
                         ),
                         assistantIndex = assistantIndex,
                     )
-                    _state.update { it.copy(connectionState = ConnectionState.Idle) }
+                    // 跑完即证明连接是通的 —— 把离线态一并清掉
+                    // （用户可能是在离线提示还挂着的时候重试并成功的）。
+                    _state.update { it.copy(connectionState = ConnectionState.Idle, reachable = true) }
                     // 正常跑完，放行队首
                     drainQueue()
                 } catch (e: Exception) {
                     // SSE 断连后自动重连（指数退避），失败才显示横幅
                     val reconnected = autoReconnect(sessionId, assistantIndex)
                     if (!reconnected) {
-                        // 失败收场不 drain：队列原样保留给用户处理
-                        _state.update { it.copy(isStreaming = false, connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                        // 失败收场不 drain：队列原样保留给用户处理。
+                        //
+                        // autoReconnect 已经判过「是整机不可达（Offline）还是 run 接不回来
+                        // （Disconnected）」，这里只在它没动过状态时补一个 Disconnected ——
+                        // 否则会把 Offline 覆盖掉，用户看到「已断开 + 一个重连按钮」，
+                        // 而真正的问题是网络根本不通。
+                        if (_state.value.connectionState != ConnectionState.Offline) {
+                            _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                        }
+                        _state.update { it.copy(isStreaming = false) }
                     } else {
                         // 重连后接续跑完，同样放行队首
                         drainQueue()
@@ -697,7 +940,13 @@ class ChatViewModel(
         }
     }
 
-    /** App 从后台恢复时调用，尝试接回进行中的 SSE 流。204 = 无活跃 run，静默返回。 */
+    /**
+     * App 从后台恢复时调用，尝试接回进行中的 SSE 流。204 = 无活跃 run，静默返回。
+     *
+     * 直接调用（UI、外部入口）会被 [isStreaming] 挡住，这是对的：用户不该在
+     * 生成正常跑着的时候手动再开一条流。内部的「探活成功后接回」走
+     * [resumeStreamIfNeeded]，它在下去之前会先把陈旧的 `isStreaming` 清掉。
+     */
     fun resumeStream() {
         val sessionId = _state.value.sessionId ?: return
         if (_state.value.isStreaming || _state.value.isResuming) return
@@ -714,25 +963,41 @@ class ChatViewModel(
                 _state.update { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "", isStreaming = true)) }
             }
             var gotAnyEvent = false
+            val localContent = if (reuseLast) msgs.getOrNull(lastIdx)?.content.orEmpty() else ""
             try {
                 collectSseStream(
-                    flow = repository.resumeStream(sessionId),
+                    flow = repository.resumeStream(
+                        sessionId,
+                        hasProgress = localContent.isNotEmpty(),
+                    ),
                     assistantIndex = assistantIndex,
                     onFirstEvent = { gotAnyEvent = true },
                     // 复用旧气泡时必须带上它已有的正文（app 切回前台、rotating 等场景），
                     // 否则回放会把已渲染的内容覆盖掉 —— 见 appendContent 的说明。
-                    localContent = if (reuseLast) msgs.getOrNull(lastIdx)?.content.orEmpty() else "",
+                    localContent = localContent,
                 )
-                _state.update { it.copy(connectionState = ConnectionState.Idle) }
+                // 接上了 → 连接是通的，离线态清掉。
+                _state.update { it.copy(connectionState = ConnectionState.Idle, reachable = true) }
             } catch (e: Exception) {
-                // 自动重连：仅当曾经收到过事件（说明 run 仍活跃）时尝试
-                if (gotAnyEvent) {
+                // 自动重连：曾经收到过事件（说明 run 仍活跃）、或本地已经有渲染进度
+                // （说明这是一次「接续」而不是「接一条还没存在的流」）时尝试。
+                //
+                // 后者是后台挂起后的关键场景：进程被冻结时第一次 resume 往往直接失败，
+                // 而本地气泡里已经有半截正文 —— 早先只按 gotAnyEvent 判，这种情况会
+                // 被直接判成 Disconnected，用户回来看到的就是「已断开」且不再自愈。
+                if (gotAnyEvent || localContent.isNotEmpty()) {
                     val reconnected = autoReconnect(sessionId, assistantIndex)
-                    if (!reconnected) {
+                    if (!reconnected && _state.value.connectionState != ConnectionState.Offline) {
                         _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
                     }
                 } else {
-                    _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                    // 首次就没接上：区分「服务端不可达」和「run 已结束」。
+                    // 204（无活跃 run）走的是空流、不抛异常，所以能走到这里的失败都是真错误。
+                    if (e !is com.ethan.agent.core.network.ApiException) {
+                        markOffline()
+                    } else {
+                        _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
+                    }
                 }
             } finally {
                 // 仅当追加了新占位且没收到任何事件时才 drop，避免误删复用的旧气泡
@@ -745,13 +1010,17 @@ class ChatViewModel(
     }
 
     /**
-     * 断连后自动重连（指数退避 1s/3s/10s）。
+     * 断连后自动重连（指数退避 1s/2s/4s/8s…，封顶 30s）。
+     *
      * 返回 true 表示成功接回流，false 表示全部重试失败或 run 已结束。
+     *
+     * 与 [observeAppLifecycle] 的分工：这里修的是「生成进行中、流断了」；那条路修的是
+     * 「界面停在离线态、需要重新探活」。两者共用同一套退避参数，但触发源不同。
      */
     private suspend fun autoReconnect(sessionId: String, assistantIndex: Int): Boolean {
         for (attempt in 0 until MAX_AUTO_RECONNECT) {
             _state.update { it.copy(connectionState = ConnectionState.Reconnecting) }
-            kotlinx.coroutines.delay(RECONNECT_DELAYS_MS[attempt.coerceAtMost(RECONNECT_DELAYS_MS.lastIndex)])
+            delay(reconnectDelayMs(attempt))
             try {
                 var gotEvent = false
                 // 带上气泡里已经渲染出来的正文：重连的 backlog 是从头回放的，
@@ -759,20 +1028,30 @@ class ChatViewModel(
                 val localContent = _state.value.messages
                     .getOrNull(assistantIndex)?.content.orEmpty()
                 collectSseStream(
-                    flow = repository.resumeStream(sessionId),
+                    flow = repository.resumeStream(sessionId, hasProgress = localContent.isNotEmpty()),
                     assistantIndex = assistantIndex,
                     onFirstEvent = { gotEvent = true },
                     localContent = localContent,
                 )
                 // 204（无活跃 run）返回空流：run 已结束，不算重连成功
                 if (!gotEvent) {
-                    _state.update { it.copy(connectionState = ConnectionState.Idle) }
+                    _state.update { it.copy(connectionState = ConnectionState.Idle, reachable = true) }
                     return false
                 }
-                _state.update { it.copy(connectionState = ConnectionState.Idle) }
+                _state.update { it.copy(connectionState = ConnectionState.Idle, reachable = true) }
                 return true
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                // 重连时拿不到 HTTP 响应（连接被拒 / 超时 / DNS 挂了）→ 这是整机不可达，
+                // 不是「run 接不回来」。交给后台探活循环去等网络恢复，别在这里空转重试
+                // （markOffline 会确保那个循环在跑）。
+                //
+                // 判据用 `!is ApiException`（commonMain 里没有 java.net 那套异常）：
+                // ApiException 意味着**拿到了**响应，服务端是活着的，那才该继续重试。
+                if (e !is com.ethan.agent.core.network.ApiException) {
+                    markOffline()
+                    return false
+                }
             }
         }
         return false

@@ -29,6 +29,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.ethan.agent.auth.BiometricLockManager
 import com.ethan.agent.core.datastore.AppConfigStore
+import com.ethan.agent.shared.AppLifecycleBus
 import com.ethan.agent.shared.ShareBus
 import com.ethan.agent.ui.EthanApp
 import com.ethan.agent.shared.viewmodel.AuthViewModel
@@ -56,8 +57,18 @@ class MainActivity : FragmentActivity() {
      * 应用退到后台时重新加锁。用 ProcessLifecycleOwner 而非 Activity 生命周期：
      * BiometricPrompt 弹窗只会让 Activity onPause，不会触发进程级 ON_STOP，
      * 因此解锁过程本身不会误触发重新加锁。
+     *
+     * 同一处观察者顺带负责**前台探活**的信号投递：长连接在后台被系统挂起后，
+     * 客户端收不到任何断线通知，只能靠「回到前台」这个时机主动问一次服务端还在不在。
+     * 用进程级 ON_START（而不是 Activity 的 onResume）：多 Activity / 分屏场景下
+     * Activity 的 onResume 会在内部跳转时反复触发，进程级事件才是真正的「用户回来了」。
+     * 真正的去抖（5s 内不重复探活）在 ChatViewModel 里做，这里只管投递事实。
      */
     private val processObserver = object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) {
+            AppLifecycleBus.postForeground()
+        }
+
         override fun onStop(owner: LifecycleOwner) {
             if (lockEnabled) locked.value = true
         }

@@ -49,7 +49,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
@@ -103,14 +105,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import com.ethan.agent.R
 import com.ethan.agent.core.model.FileSignature
 import com.ethan.agent.core.model.ModelSelection
@@ -118,6 +117,11 @@ import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.UserIdentity
 import com.ethan.agent.core.model.fullId
 import com.ethan.agent.shared.UiMessage
+import com.ethan.agent.shared.viewmodel.MessageRoleKind
+import com.ethan.agent.ui.theme.bubbleAccentColor
+import com.ethan.agent.ui.theme.bubbleContainerColor
+import com.ethan.agent.ui.theme.bubbleRoleLabel
+import com.ethan.agent.ui.theme.bubbleRoleLabelColor
 import com.ethan.agent.ui.components.EthanBadge
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
@@ -179,7 +183,6 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     var showPlusSheet by remember { mutableStateOf(false) }
     // 超级权限「关→开」时的二次确认（开启是高危方向，必须让用户明确知道代价）
     var showAutoConsentConfirm by remember { mutableStateOf(false) }
@@ -286,14 +289,18 @@ fun ChatScreen(
         }
     }
 
-    // App 从后台恢复时尝试重连
-    LaunchedEffect(state.sessionId) {
-        if (state.sessionId != null) {
-            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                onResumeStream()
-            }
-        }
-    }
+    // 说明：App 从后台恢复时的「探活 + 接流」已收敛到 ChatViewModel 的
+    // observeAppLifecycle（订阅 AppLifecycleBus，由 MainActivity 的进程级 ON_START 投递）。
+    //
+    // 这里原先挂了一个 `repeatOnLifecycle(RESUMED) { onResumeStream() }`，两个问题：
+    //   1. 它**只**接流、不探活 —— 服务端已经不可达时，它会不停地对着一个死地址重试，
+    //      界面却没有任何「离线」表达，这正是「放一会儿自己变离线且回不来」的成因之一；
+    //   2. Activity 的 RESUMED 在内部页面跳转时也会触发，比进程级 ON_START 吵得多，
+    //      每次跳转都打一次 resume 请求。
+    // 现在统一由 ViewModel 去抖后处理（探活通了才接流），这里不再重复触发。
+    // 随之一起去掉了 `LocalLifecycleOwner` 与 `repeatOnLifecycle` 的 import。
+    // `onResumeStream` 参数保留：断线横幅上的「重连」按钮仍用它（那是用户主动触发，
+    // 与这里的自动恢复是两回事）。
 
     // 「分享到 Ethan」的图片/文件：订阅 pendingUri（而非 LaunchedEffect(Unit) 只跑一次），
     // app 已在前台时再次分享也能触发上传。
@@ -612,21 +619,42 @@ fun ChatScreen(
             return@Scaffold
         }
 
-        // 断线重连横幅
-        if (state.connectionState == ConnectionState.Disconnected) {
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+        // 断线横幅。两种断线给**不同的文案和动作**，因为用户的下一步操作不同：
+        //   - Offline（服务端不可达）：重连按钮没用（网络就没通），所以不提供按钮，
+        //     只说明正在自动重试 —— 恢复后横幅会自己消失，不需要用户做任何事。
+        //   - Disconnected（生成流断了但服务端还活着）：手动「重连」有意义，
+        //     因为服务端那边 run 可能还在跑，接回去就能继续看输出。
+        when (state.connectionState) {
+            ConnectionState.Offline -> {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("连接断开", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = onResumeStream) { Text("重连") }
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("网络已断开，正在自动重连…", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
+            ConnectionState.Disconnected -> {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("连接断开", style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = onResumeStream) { Text("重连") }
+                    }
+                }
+            }
+            else -> Unit
         }
 
         // 消息列表 + 输入栏垂直排列：输入栏不再覆盖消息列表底部，
@@ -1158,6 +1186,8 @@ fun ChatScreen(
                     when {
                         state.isResuming -> FooterStatusDot("重连中", MaterialTheme.colorScheme.tertiary)
                         state.isStreaming -> FooterStatusDot("生成中", MaterialTheme.colorScheme.primary)
+                        state.connectionState == ConnectionState.Offline ->
+                            FooterStatusDot("离线", MaterialTheme.colorScheme.error)
                         state.connectionState == ConnectionState.Disconnected ->
                             FooterStatusDot("已断开", MaterialTheme.colorScheme.error)
                     }
@@ -1313,6 +1343,9 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
     val (color, label) = when {
         isResuming -> Pair(MaterialTheme.colorScheme.tertiary, "重连中…")
         state == ConnectionState.Streaming -> Pair(MaterialTheme.colorScheme.error, "生成中")
+        // 离线（服务端不可达）与断线（run 断了）都给「离线」这一类文案即可 ——
+        // 顶部横幅已经区分了两者，这个 badge 位置窄，再分两行会挤。
+        state == ConnectionState.Offline -> Pair(MaterialTheme.colorScheme.error, "离线")
         state == ConnectionState.Disconnected -> Pair(MaterialTheme.colorScheme.error, "已断开")
         else -> return
     }
@@ -1408,15 +1441,11 @@ internal fun UserAvatarImage(
 @Composable
 private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, signFile: (suspend (String) -> FileSignature?)? = null, userIdentity: UserIdentity = UserIdentity(), onLongPress: () -> Unit, onOpenReading: () -> Unit = {}) {
     val isUser = message.role == "user"
-    // 对齐 Web（web/components/chat/message-bubble.tsx）：
-    //   用户   bg-primary/10 text-foreground
-    //   助手   bg-muted
-    // 之前用户气泡是实心 primary + onPrimary 文字，在一片浅色里非常刺眼，也和 Web 对不上。
-    val bubbleColor = if (isUser) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
+    // 说话方分类 —— 移动端隐藏头像后，**颜色 + 角色名 + 色条** 三者共同承担
+    // 「谁在说话」的识别职责（见 BubblePalette 的设计约束说明）。
+    val roleKind = MessageRoleKind.of(message.role)
+    val bubbleColor = bubbleContainerColor(roleKind)
+    val accentColor = bubbleAccentColor(roleKind)
     val textColor = MaterialTheme.colorScheme.onSurface
 
     Row(
@@ -1426,33 +1455,35 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Top,
     ) {
-        // Assistant avatar (left)
-        if (!isUser) {
-            Image(
-                painter = painterResource(id = R.drawable.ethan_logo_avatar),
-                contentDescription = "Assistant",
-                modifier = Modifier
-                    .size(30.dp)
-                    .clip(CircleShape),
-            )
-            Spacer(Modifier.width(6.dp))
-        }
+        // 移动端**不渲染头像**：头像在窄屏上吃掉 36dp（30dp 圆 + 6dp 间距）的横向
+        // 空间，而这正是「头像占宽度过多」的直接来源。识别职责已交给
+        // 颜色 / 角色名 / 左侧色条（见下方 Column），不会因为去掉头像而失去区分度。
+        //
+        // 注意这里**没有**留占位 Spacer —— 去掉头像必须同时去掉它占的宽度，
+        // 否则只是把头像变成一块空白，「气泡布局不错乱、不留空位」的要求就没满足。
 
         // Bubble content —— 宽度对齐 Web 的 max-w-[90%]，四角统一 rounded-2xl（18dp）。
         // 之前是固定 310dp + 不对称的一角切平，换机型/字号后容易显得局促。
         Column(
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier.weight(1f),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
-            // 用户显示名：只在设置过时占一行。老用户没设名字，气泡不会凭空多一行。
-            if (isUser && userIdentity.displayName.isNotBlank()) {
-                Text(
-                    userIdentity.displayName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 2.dp),
-                )
+            // 角色名行（替代头像的识别职责）。
+            //
+            // 用户侧优先显示用户自己设的显示名（那是更有信息量的标识），没设才回落
+            // 到「我」；助手/工具/系统用固定角色名。老用户没设名字时也能看到「我」，
+            // 所以这一行是**恒定存在**的 —— 靠颜色单独区分对色盲用户不够。
+            val roleLabel = if (isUser && userIdentity.displayName.isNotBlank()) {
+                userIdentity.displayName
+            } else {
+                bubbleRoleLabel(roleKind)
             }
+            Text(
+                roleLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = bubbleRoleLabelColor(),
+                modifier = Modifier.padding(bottom = 2.dp),
+            )
             Surface(
                 modifier = Modifier.combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -1465,7 +1496,37 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                 color = bubbleColor,
                 shadowElevation = 0.dp,
             ) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                // 左侧色条：隐藏头像后的**主要**角色标记。3dp 实色线画在气泡左内缘。
+                //
+                // 用色条而不是给 Surface 加 border：border 会沿整个圆角描一圈，
+                // 看起来像「选中态」而不是「角色标记」；这里只要一条边的暗示。
+                // 系统消息的 accentColor 是透明（不参与角色区分），色条位置仍然占着，
+                // 保证四种角色的正文左边界对齐、气泡宽度不会因角色而跳。
+                //
+                // ⚠️ 这里**刻意不用 `Row(Modifier.height(IntrinsicSize.Min))` + 色条 Box**
+                // 那种写法（虽然直觉上更「声明式」）：`IntrinsicSize.Min` 会向整个子树
+                // 发起 intrinsic 测量，而本树里可达 `AndroidView`（```mermaid 代码块
+                // 走 MermaidBlock → WebView）。AndroidViewHolder 没有实现 intrinsic 测量，
+                // Compose 对它的回退是 NoIntrinsicsMeasurePolicy —— 该策略的四个
+                // intrinsic 方法**直接抛 IllegalStateException**（已对 ui-android 1.7.8
+                // 的字节码确认）。所以只要一条消息里有 mermaid 块，这个气泡就会崩。
+                //
+                // `drawBehind` 不参与测量，只在已确定尺寸的绘制阶段画一条线，因此
+                // 色条高度天然等于气泡内容高度 —— 既拿回了 IntrinsicSize 想要的效果，
+                // 又完全不碰 intrinsic 路径。`padding(start = 16.dp)` 给色条让出位置，
+                // 正文左边界与之前一致。
+                Column(
+                    Modifier
+                        .drawBehind {
+                            if (accentColor != Color.Transparent) {
+                                drawRect(
+                                    color = accentColor,
+                                    size = Size(3.dp.toPx(), size.height),
+                                )
+                            }
+                        }
+                        .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                ) {
                     // 用户消息图片（在文本之前）
                     if (message.images.isNotEmpty()) {
                         Row(
@@ -1607,8 +1668,8 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                             color = textColor.copy(alpha = 0.7f),
                         )
                     }
-                }
-            }
+            } // end Column（气泡正文）
+            } // end Surface
 
             // Bottom info bar: timestamp + stats pills
             if (!message.isStreaming) {
@@ -1616,17 +1677,9 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
             }
         }
 
-        // User avatar (right)：与左侧助手 logo 对称（同尺寸 30dp / 同 6dp 间距），
-        // 顶对齐气泡（对齐 Web 的 mt-1）。
-        if (isUser) {
-            Spacer(Modifier.width(6.dp))
-            UserAvatarImage(
-                url = avatarAbsoluteUrl(userIdentity.avatarUrl, serverUrl),
-                name = userIdentity.displayName,
-                size = 30.dp,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
+        // 移动端不再渲染用户头像（见上方「不渲染头像」的说明）。
+        // 这里同样**不留** Spacer 占位 —— 右侧的 6dp 间距与 30dp 圆的宽度都要还回去，
+        // 否则气泡会被挤窄，「隐藏头像」就只完成了一半。
     }
 }
 
@@ -1697,9 +1750,21 @@ private fun messageCollapseState(
     val lineHeightDp = fontSizeDp * 1.62f     // 默认行高约 1.6×
     val charWidthDp = fontSizeDp * 0.55f      // 中英混排的粗略平均字宽
 
-    // 气泡内可用宽度：屏宽 - LazyColumn 横向 padding(12dp×2) - 头像(30dp+6dp)
-    //                   - 气泡内 padding(16dp×2) - 外层 padding(4dp×2)
-    val contentWidthDp = (screenWidthDp - 100f).coerceAtLeast(fontSizeDp * 8f)
+    // 气泡内可用宽度：屏宽 - 各项横向留白。
+    //
+    // 这些常量必须与 MessageBubble 的实际布局一致 —— 改布局（加/减 padding、
+    // 换圆角、增删头像）时**必须同步这里**，否则估算会系统性偏大或偏小：
+    // 偏大会高估行数、把没超屏的消息也折起来；偏小则长消息漏折叠。
+    // 拆成具名常量而不是一个 67f：这样改了布局一眼能看出该动哪一项。
+    val rowPaddingDp = 12f * 2      // LazyColumn 横向 padding
+    val bubblePaddingDp = 16f * 2   // 气泡内 padding（水平）
+    val accentBarDp = 3f            // 左侧角色色条
+    val outerPaddingDp = 4f * 2     // 外层 padding
+    val chromeWidthDp = rowPaddingDp + bubblePaddingDp + accentBarDp + outerPaddingDp
+
+    // 隐藏头像后**宽度变宽了**（少了 30dp 头像 + 6dp 间距）：这个估算只用来判断
+    // 「要不要折叠」，估窄一点意味着「宁可多折一次」，是安全方向。
+    val contentWidthDp = (screenWidthDp - chromeWidthDp).coerceAtLeast(fontSizeDp * 8f)
 
     val charsPerLine = (contentWidthDp / charWidthDp).coerceAtLeast(8f)
     val lineCount = text.split('\n').sumOf { line ->

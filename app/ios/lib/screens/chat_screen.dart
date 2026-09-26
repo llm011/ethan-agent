@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../data/api_client.dart';
 import '../models/app_models.dart';
+import '../role_palette.dart';
 import '../services/api_service.dart';
 import 'session_media_screens.dart';
 
@@ -43,6 +44,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? askTimer, waitTimer;
   int unread = 0;
   StreamSubscription<ChatEvent>? streamSub;
+  /// 服务端不可达（探活失败）。与 [error] 分开：error 是「一次操作失败了」，
+  /// offline 是「整机连不上」，后者的恢复方式只有等网络回来（或用户改地址）。
+  bool offline = false;
+  /// 探活进行中，避免重复发起。
+  bool _probing = false;
+  /// 上一次前台探活的时刻，用于去抖（见 [_onForegrounded]）。
+  DateTime? _lastProbeAt;
+  /// 离线探活循环的句柄（非 null 表示已有一个循环在跑）。
+  Completer<void>? _onlineProbe;
   // 当前 _consume 的完成信号：onDone/onError/取消时都要 complete，
   // 否则 await 方（send/_resume）会永远挂起，streaming/resuming 卡死。
   Completer<void>? _streamDone;
@@ -68,7 +78,96 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _resume();
+    if (state == AppLifecycleState.resumed) _onForegrounded();
+  }
+
+  /// 切回前台：先探活，再决定要不要接流。
+  ///
+  /// 为什么不能像以前那样直接 `_resume()`：iOS 在后台会挂起进程、回收 socket，
+  /// 而这个 App 收不到任何断线回调 —— 手里那个 `streaming = true` 是**陈旧**的死状态。
+  /// 直接 resume 只会在服务端不可达时反复失败，界面没有任何「离线」表达，
+  /// 表现就是「放一会儿自己变离线、且不会自己回来」。
+  ///
+  /// 去抖：切前台在手机上是高频动作（下拉通知栏、切 App 回来都会触发）。
+  /// 5 秒内的重复触发直接丢弃 —— 真断线不会在 5 秒内自愈。
+  Future<void> _onForegrounded() async {
+    final now = DateTime.now();
+    if (_lastProbeAt != null &&
+        now.difference(_lastProbeAt!) < const Duration(seconds: 5)) {
+      return;
+    }
+    _lastProbeAt = now;
+    if (_probing) return;
+    _probing = true;
+    try {
+      final healthy = await widget.api.health();
+      if (!mounted) return;
+      setState(() {
+        offline = !healthy;
+        // 探活通了就把错误横幅收掉 —— 之前失败留下的报错挂在一个已经恢复的界面上
+        // 会让人以为还没好。
+        if (healthy && error != null) error = null;
+      });
+      if (healthy) {
+        // 服务端活着：如果本地认为还有一轮生成在跑（后台期间被挂起丢了流），接回来。
+        // force: true —— streaming 此刻正是被挂起留下的陈旧值，不 force 会被 _resume 挡回。
+        if (streaming || messages.any((m) => m.isStreaming)) {
+          await _resume(force: true);
+        }
+      } else {
+        // 不可达：起一个后台探活循环，直到服务端回来为止。
+        unawaited(_awaitOnline());
+      }
+    } finally {
+      _probing = false;
+    }
+  }
+
+  /// 离线后持续探活直到恢复（退避 1s/2s/4s… 封顶 30s）。
+  ///
+  /// 不设最大重试次数：这里等的是「用户走出地库/电梯」这类恢复时间完全不可知的外因，
+  /// 放弃重试等于让用户回来还得手动操作一次。循环极轻（一次 GET），
+  /// 且随 [_onlineProbe] 的取消 / 页面销毁一起结束。
+  Future<void> _awaitOnline() async {
+    if (_onlineProbe != null) return;
+    var attempt = 0;
+    final completer = Completer<void>();
+    _onlineProbe = completer;
+    try {
+      while (mounted && offline) {
+        await Future<void>.delayed(reconnectDelay(attempt));
+        if (!mounted || !offline) break;
+        final healthy = await widget.api.health();
+        if (!mounted) break;
+        if (!healthy) {
+          attempt += 1;
+          continue;
+        }
+        // 探活通了：先清离线态。
+        setState(() {
+          offline = false;
+          error = null;
+        });
+        if (streaming || messages.any((m) => m.isStreaming)) {
+          // 接流。force: true —— 这里的 streaming 是后台挂起留下的陈旧值。
+          //
+          // ⚠️ 必须**先退出循环再接流**（`_resume` 可能又把 offline 置回 true）：
+          // `_resume` 如果在中途以非 ApiException 失败，它会 `offline = true` 并调用
+          // `_awaitOnline()` —— 而此刻我们仍在循环里、`_onlineProbe` 还非 null，
+          // 那次调用会在开头的守卫处直接 return。若这里接着 `break`，循环就带着
+          // `offline == true` 退出了，且 `_onlineProbe` 被 finally 置空 ——
+          // 界面挂着「正在自动重连…」而**没有任何循环在重试**，只能等下一次切前台。
+          // 所以这里用 return：让 finally 先把 `_onlineProbe` 释放，`_resume` 里
+          // 那次嵌套调用才能真正起一个新的循环。
+          return;
+        }
+        // 没有活跃 run：只是网络回来了，恢复在线态即可，无需接流。
+        break;
+      }
+    } finally {
+      if (!completer.isCompleted) completer.complete();
+      _onlineProbe = null;
+    }
   }
 
   Future<void> _load() async {
@@ -132,14 +231,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (mounted && nextId == null) setState(() => loading = false);
   }
 
-  Future<void> _resume() async {
+  /// 接回进行中的生成。
+  ///
+  /// [force] 表示「刚刚探活证明服务端是通的」，此时**跳过 `streaming` 检查**。
+  /// 必需的：App 进后台被系统挂起时 `streaming` 会停在 true（`didChangeAppLifecycleState`
+  /// 只处理 resumed，没有任何回调会清它），而下面的守卫见到 true 就 return ——
+  /// 不 force 的话，「切回前台接回断流」这条路的触发条件（`streaming == true`）
+  /// 恰好就是它的拒绝条件，调用必然空转，界面永久停在「正在生成…」。
+  /// Android 侧对应 `ChatViewModel.resumeStreamIfNeeded(force = true)`。
+  Future<void> _resume({bool force = false}) async {
     final id = sessionId;
-    if (id == null || streaming || resuming) return;
-    setState(() => resuming = true);
+    if (id == null || resuming) return;
+    if (!force && streaming) return;
+    setState(() {
+      // force 路径：清掉陈旧的 streaming，让 _consume / 收尾逻辑从干净状态开始。
+      if (force) streaming = false;
+      resuming = true;
+    });
+    // 本地是否已有半截正文：有就说明这是一次「接续」而不是「接一条还不存在的流」。
+    // 交给 resumeStream 决定首连失败要不要在流内自动重试 —— 后台挂起后刚回来
+    // 那几秒网络常常还没就绪，首次连接失败是常态而非终局。
+    final hasProgress =
+        messages.isNotEmpty && messages.last.isStreaming && messages.last.text.isNotEmpty;
     try {
-      await _consume(widget.api.resumeStream(id), resumed: true);
+      await _consume(widget.api.resumeStream(id, hasProgress: hasProgress),
+          resumed: true);
+      // 接上了 → 服务端可达，离线态清掉。
+      if (mounted && offline) setState(() => offline = false);
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (!mounted) return;
+      // 拿不到 HTTP 响应 = 整机不可达；拿到响应（ApiException）说明服务端活着，
+      // 只是这一轮 run 接不回来 —— 两者的下一步动作完全不同，不能混成一个错误。
+      if (e is ApiException) {
+        setState(() => error = e.toString());
+      } else {
+        setState(() {
+          offline = true;
+          error = e.toString();
+        });
+        unawaited(_awaitOnline());
+      }
     } finally {
       if (mounted) setState(() => resuming = false);
     }
@@ -708,6 +839,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           children: [
             Column(
               children: [
+                // 离线提示。主路径是**自动重连**：后台探活循环已经在按退避重试，
+                // 服务端回来后这条横幅会自己消失，用户不需要做任何事。
+                // 「立即重试」只是个逃生口（比如刚改完服务端地址、或者用户就是不想等
+                // 那几秒退避），走的是与切前台同一条探活路径，不是另一套逻辑。
+                if (offline)
+                  MaterialBanner(
+                      content: const Text('网络已断开，正在自动重连…'),
+                      actions: [
+                        TextButton(
+                            onPressed: _onForegrounded,
+                            child: const Text('立即重试'))
+                      ]),
                 if (error != null)
                   MaterialBanner(content: Text('请求失败：$error'), actions: [
                     TextButton(
@@ -883,9 +1026,11 @@ class _Bubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = message.isUser
-        ? theme.colorScheme.primaryContainer
-        : theme.colorScheme.surfaceContainerLow;
+    // 说话方分类 → 颜色。用角色配色替代原来「user 一个色、其余全是中性」的两档方案：
+    // 两档方案下工具输出和助手回复长得一模一样，长会话里根本分不清哪段是谁说的。
+    final roleKind = MessageRoleKind.fromIsUser(message.isUser);
+    final color = context.bubbleColor(roleKind);
+    final accent = context.bubbleAccent(roleKind);
     final isActive = message.isStreaming;
     return GestureDetector(
         onLongPress: onQuote,
@@ -898,7 +1043,7 @@ class _Bubble extends StatelessWidget {
                         ? 640
                         : MediaQuery.sizeOf(context).width * .86),
                 margin: const EdgeInsets.only(bottom: 16),
-                padding: const EdgeInsets.fromLTRB(15, 12, 15, 11),
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                     color: color,
                     borderRadius: BorderRadius.circular(18),
@@ -906,86 +1051,100 @@ class _Bubble extends StatelessWidget {
                         ? null
                         : Border.all(
                             color: theme.dividerColor.withOpacity(.45))),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                // 左侧色条 + 正文。色条是角色识别的主要视觉标记，
+                // 用 IntrinsicHeight 让它高度跟随正文（否则 stretch 到 0 会整条消失）。
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
+                      // 系统消息的强调色是透明 —— 仍占位，保证四种角色的正文
+                      // 左边界对齐、气泡宽度不因角色而跳。
+                      SizedBox(width: 3, child: ColoredBox(color: accent)),
+                      Expanded(
+                        child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 15, 11),
+                        child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                              message.isUser
-                                  ? Icons.person_outline_rounded
-                                  : Icons.auto_awesome_rounded,
-                              size: 16,
-                              color: message.isUser
-                                  ? theme.colorScheme.primary
-                                  : theme.colorScheme.secondary),
-                          const SizedBox(width: 6),
-                          Text(message.isUser ? '你' : 'Ethan',
-                              style: theme.textTheme.labelMedium
-                                  ?.copyWith(fontWeight: FontWeight.w700)),
-                          if (isActive) ...[
-                            const SizedBox(width: 8),
-                            _StatusPill(
-                                label: '生成中', color: theme.colorScheme.primary),
-                          ],
-                          const Spacer(),
-                          if (message.time.isNotEmpty)
-                            Text(message.time,
-                                style: theme.textTheme.labelSmall),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      if (message.text.isEmpty && message.isStreaming)
-                        Row(children: [
-                          SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: theme.colorScheme.primary)),
-                          const SizedBox(width: 8),
-                          Text('正在准备回复…', style: theme.textTheme.bodySmall),
-                        ])
-                      else if (message.text.isNotEmpty)
-                        _MarkdownText(text: message.text),
-                      if (message.toolSteps.isNotEmpty)
-                        _ToolTimeline(steps: message.toolSteps),
-                      if (message.quote != null)
-                        Text('引用：${message.quote!.content}',
-                            style: Theme.of(context).textTheme.bodySmall),
-                      if (message.images.isNotEmpty)
-                        Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: message.images
-                                .map((image) =>
-                                    _MessageImageView(image: image, api: api))
-                                .toList()),
-                      if (message.cards.isNotEmpty)
-                        _MediaCards(
-                            cards: message.cards,
-                            api: api,
-                            workspaceApi: workspaceApi,
-                            sessionId: sessionId),
-                      if (message.usage != null || message.toolSteps.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Row(children: [
-                            if (message.usage != null)
-                              Text(
-                                  'Tokens ${message.usage!.input}/${message.usage!.output}',
-                                  style: theme.textTheme.labelSmall),
-                            if (message.usage != null &&
-                                message.toolSteps.isNotEmpty)
-                              const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 6),
-                                  child: Text('·')),
-                            if (message.toolSteps.isNotEmpty)
-                              Text('${message.toolSteps.length} 个步骤',
-                                  style: theme.textTheme.labelSmall),
-                          ]),
-                        ),
-                    ]))));
+                          Row(
+                            children: [
+                              Icon(context.bubbleRoleIcon(roleKind),
+                                  size: 16,
+                                  color: roleKind == MessageRoleKind.user
+                                      ? theme.colorScheme.primary
+                                      : theme.colorScheme.secondary),
+                              const SizedBox(width: 6),
+                              Text(context.bubbleRoleLabel(roleKind),
+                                  style: theme.textTheme.labelMedium
+                                      ?.copyWith(fontWeight: FontWeight.w700)),
+                              if (isActive) ...[
+                                const SizedBox(width: 8),
+                                _StatusPill(
+                                    label: '生成中', color: theme.colorScheme.primary),
+                              ],
+                              const Spacer(),
+                              if (message.time.isNotEmpty)
+                                Text(message.time,
+                                    style: theme.textTheme.labelSmall),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          if (message.text.isEmpty && message.isStreaming)
+                            Row(children: [
+                              SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: theme.colorScheme.primary)),
+                              const SizedBox(width: 8),
+                              Text('正在准备回复…', style: theme.textTheme.bodySmall),
+                            ])
+                          else if (message.text.isNotEmpty)
+                            _MarkdownText(text: message.text),
+                          if (message.toolSteps.isNotEmpty)
+                            _ToolTimeline(steps: message.toolSteps),
+                          if (message.quote != null)
+                            Text('引用：${message.quote!.content}',
+                                style: Theme.of(context).textTheme.bodySmall),
+                          if (message.images.isNotEmpty)
+                            Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: message.images
+                                    .map((image) =>
+                                        _MessageImageView(image: image, api: api))
+                                    .toList()),
+                          if (message.cards.isNotEmpty)
+                            _MediaCards(
+                                cards: message.cards,
+                                api: api,
+                                workspaceApi: workspaceApi,
+                                sessionId: sessionId),
+                          if (message.usage != null || message.toolSteps.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 10),
+                              child: Row(children: [
+                                if (message.usage != null)
+                                  Text(
+                                      'Tokens ${message.usage!.input}/${message.usage!.output}',
+                                      style: theme.textTheme.labelSmall),
+                                if (message.usage != null &&
+                                    message.toolSteps.isNotEmpty)
+                                  const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 6),
+                                      child: Text('·')),
+                                if (message.toolSteps.isNotEmpty)
+                                  Text('${message.toolSteps.length} 个步骤',
+                                      style: theme.textTheme.labelSmall),
+                              ]),
+                            ),
+                    ]), // end Column（正文）
+                        ), // end Padding（正文）
+                      ), // end Expanded
+                    ], // end Row（色条 + 正文）
+                  ), // end IntrinsicHeight
+                )))); // end Container / Align / GestureDetector
   }
 }
 

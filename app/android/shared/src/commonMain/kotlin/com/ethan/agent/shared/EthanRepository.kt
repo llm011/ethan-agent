@@ -576,10 +576,29 @@ class EthanRepository(
 
     // ── Chat 扩展（非 SSE） ────────────────────────────────────────────────
 
-    /** 重连进行中的生成：返回 SSE Flow，204（无活跃 run）时返回空流。 */
-    fun resumeStream(sessionId: String): Flow<ChatStreamEvent> = flow {
-        sseClient.resumeStream(sessionId).collect { emit(it) }
+    /**
+     * 重连进行中的生成：返回 SSE Flow，204（无活跃 run）时返回空流。
+     *
+     * @param hasProgress 调用方此刻是否已渲染过内容。它决定「首连失败」要不要在流内部
+     *   自动重试：断点续传的是一个确实在跑的 run，第一次没接上多半是刚切回前台、
+     *   网络还没就绪，值得再试；而一条全新的空流首连失败更像配置错误，立刻报出去更好。
+     */
+    fun resumeStream(
+        sessionId: String,
+        hasProgress: Boolean = false,
+    ): Flow<ChatStreamEvent> = flow {
+        sseClient.resumeStream(sessionId, hasProgress = hasProgress).collect { emit(it) }
     }.flowOn(ioDispatcher)
+
+    /**
+     * 单次健康检查。用于「切回前台主动探活」：长连接被系统挂起时客户端收不到任何
+     * 断线通知，只能主动问一次服务端还在不在。
+     *
+     * 走的是与正式请求同一个 Ktor client（同一套 baseUrl 解析、鉴权头、代理配置），
+     * 因此只测「TCP 通不通」而不校验 HTTP 状态是不够的 —— 网关返回 502 页面时
+     * TCP 也是通的。这里要求 `status.isSuccess()`，并把任何异常都收敛成 false。
+     */
+    suspend fun isServerHealthy(): Boolean = sseClient.healthy()
 
     suspend fun stopChat(sessionId: String): StopChatResponse {
         return api.stopChat(sessionId)
