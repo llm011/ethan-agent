@@ -1199,6 +1199,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         </div>
       ) : (
       <MessageList
+        key={activeSession ?? "new"}
         messages={messages}
         streaming={streaming || !!bgPolling}
         sessionId={activeSession}
