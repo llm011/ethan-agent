@@ -1750,13 +1750,21 @@ private fun messageCollapseState(
     val lineHeightDp = fontSizeDp * 1.62f     // 默认行高约 1.6×
     val charWidthDp = fontSizeDp * 0.55f      // 中英混排的粗略平均字宽
 
-    // 气泡内可用宽度：屏宽 - LazyColumn 横向 padding(12dp×2)
-    //                   - 气泡内 padding(16dp×2) - 角色色条(3dp) - 外层 padding(4dp×2)
+    // 气泡内可用宽度：屏宽 - 各项横向留白。
     //
+    // 这些常量必须与 MessageBubble 的实际布局一致 —— 改布局（加/减 padding、
+    // 换圆角、增删头像）时**必须同步这里**，否则估算会系统性偏大或偏小：
+    // 偏大会高估行数、把没超屏的消息也折起来；偏小则长消息漏折叠。
+    // 拆成具名常量而不是一个 67f：这样改了布局一眼能看出该动哪一项。
+    val rowPaddingDp = 12f * 2      // LazyColumn 横向 padding
+    val bubblePaddingDp = 16f * 2   // 气泡内 padding（水平）
+    val accentBarDp = 3f            // 左侧角色色条
+    val outerPaddingDp = 4f * 2     // 外层 padding
+    val chromeWidthDp = rowPaddingDp + bubblePaddingDp + accentBarDp + outerPaddingDp
+
     // 隐藏头像后**宽度变宽了**（少了 30dp 头像 + 6dp 间距）：这个估算只用来判断
-    // 「要不要折叠」，估窄一点意味着「宁可多折一次」，是安全方向。这里按新布局收紧，
-    // 让它和实际渲染宽度一致 —— 否则会系统性高估行数，把没超屏的消息也折起来。
-    val contentWidthDp = (screenWidthDp - 67f).coerceAtLeast(fontSizeDp * 8f)
+    // 「要不要折叠」，估窄一点意味着「宁可多折一次」，是安全方向。
+    val contentWidthDp = (screenWidthDp - chromeWidthDp).coerceAtLeast(fontSizeDp * 8f)
 
     val charsPerLine = (contentWidthDp / charWidthDp).coerceAtLeast(8f)
     val lineCount = text.split('\n').sumOf { line ->
