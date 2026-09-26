@@ -14,6 +14,9 @@ enum MessageRoleKind {
   tool,
   system;
 
+  /// 从服务端 role 字符串推断分类。
+  ///
+  /// 这是**权威**入口，用于拿得到原始 role 的场景（会话历史、未来扩展）。
   static MessageRoleKind of(String? role) {
     switch (role?.trim().toLowerCase()) {
       case 'user':
@@ -28,6 +31,15 @@ enum MessageRoleKind {
         return MessageRoleKind.assistant;
     }
   }
+
+  /// 从 [ChatMessage.isUser] 推断分类 —— 模型层已经丢掉了原始 role 字符串
+  /// （`api_client.dart` 解析时把 `role == 'user'` 收敛成了 bool），所以气泡只能走这个入口。
+  ///
+  /// 代价：工具 / 系统消息在 iOS 侧无法与助手回复区分（它们都不是 user，一律落 assistant）。
+  /// 这是模型层的既有信息损失，不是配色逻辑的问题 —— 想恢复区分度需要先让
+  /// `ChatMessage` 保留原始 role（属于另一处改动）。
+  static MessageRoleKind fromIsUser(bool isUser) =>
+      isUser ? MessageRoleKind.user : MessageRoleKind.assistant;
 }
 
 /// 角色配色 —— 全部从 `ColorScheme` 派生，不写死十六进制。

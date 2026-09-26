@@ -301,12 +301,26 @@ class ChatViewModel(
                 markOnline()
                 if (hadActiveRun) resumeStreamIfNeeded(force = true)
             } else {
-                _state.update { it.copy(connectionState = ConnectionState.Offline) }
-                // 探活循环放**独立** job：它要长时间退避重试，而 probeJob 是
-                // 「一次探活」的闸门，让它一直占着会让后续前台事件全部早退。
-                startOnlineProbeLoop()
+                markOffline()
             }
         }
+    }
+
+    /**
+     * 进入离线态，并**确保**后台探活循环在跑。
+     *
+     * 收敛成一个方法而不是各处直接写 `connectionState = Offline`：离线态一旦进入就必须
+     * 有人负责把它带回来，否则界面会永久卡在「网络已断开，正在自动重连…」而实际什么都
+     * 没在重试（横幅按设计不给按钮，用户连手动重试都点不到）。
+     * 之前有三条独立路径写离线态，只有探活那条顺带起了循环 —— 生成失败/重连失败那两条
+     * 会把用户丢进这个死状态。现在只留这一个入口，忘记起循环在结构上就不可能了。
+     *
+     * 循环放**独立** job（[onlineProbeJob]）而不是 [probeJob]：它要长时间退避重试，
+     * 而 probeJob 是「一次探活」的闸门，让它一直占着会让后续前台事件全部早退。
+     */
+    private fun markOffline() {
+        _state.update { it.copy(connectionState = ConnectionState.Offline, reachable = false) }
+        startOnlineProbeLoop()
     }
 
     /**
@@ -980,7 +994,7 @@ class ChatViewModel(
                     // 首次就没接上：区分「服务端不可达」和「run 已结束」。
                     // 204（无活跃 run）走的是空流、不抛异常，所以能走到这里的失败都是真错误。
                     if (e !is com.ethan.agent.core.network.ApiException) {
-                        _state.update { it.copy(connectionState = ConnectionState.Offline, reachable = false) }
+                        markOffline()
                     } else {
                         _state.update { it.copy(connectionState = ConnectionState.Disconnected, error = repository.friendlyError(e)) }
                     }
@@ -1029,12 +1043,13 @@ class ChatViewModel(
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 // 重连时拿不到 HTTP 响应（连接被拒 / 超时 / DNS 挂了）→ 这是整机不可达，
-                // 不是「run 接不回来」。交给前台探活那条路去等网络恢复，别在这里空转重试。
+                // 不是「run 接不回来」。交给后台探活循环去等网络恢复，别在这里空转重试
+                // （markOffline 会确保那个循环在跑）。
                 //
                 // 判据用 `!is ApiException`（commonMain 里没有 java.net 那套异常）：
                 // ApiException 意味着**拿到了**响应，服务端是活着的，那才该继续重试。
                 if (e !is com.ethan.agent.core.network.ApiException) {
-                    _state.update { it.copy(connectionState = ConnectionState.Offline, reachable = false) }
+                    markOffline()
                     return false
                 }
             }

@@ -110,7 +110,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       });
       if (healthy) {
         // 服务端活着：如果本地认为还有一轮生成在跑（后台期间被挂起丢了流），接回来。
-        if (streaming || messages.any((m) => m.isStreaming)) await _resume();
+        // force: true —— streaming 此刻正是被挂起留下的陈旧值，不 force 会被 _resume 挡回。
+        if (streaming || messages.any((m) => m.isStreaming)) {
+          await _resume(force: true);
+        }
       } else {
         // 不可达：起一个后台探活循环，直到服务端回来为止。
         unawaited(_awaitOnline());
@@ -136,15 +139,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (!mounted || !offline) break;
         final healthy = await widget.api.health();
         if (!mounted) break;
-        if (healthy) {
-          setState(() {
-            offline = false;
-            error = null;
-          });
-          if (streaming || messages.any((m) => m.isStreaming)) await _resume();
-          break;
+        if (!healthy) {
+          attempt += 1;
+          continue;
         }
-        attempt += 1;
+        // 探活通了：先清离线态。
+        setState(() {
+          offline = false;
+          error = null;
+        });
+        if (streaming || messages.any((m) => m.isStreaming)) {
+          // 接流。force: true —— 这里的 streaming 是后台挂起留下的陈旧值。
+          //
+          // ⚠️ 必须**先退出循环再接流**（`_resume` 可能又把 offline 置回 true）：
+          // `_resume` 如果在中途以非 ApiException 失败，它会 `offline = true` 并调用
+          // `_awaitOnline()` —— 而此刻我们仍在循环里、`_onlineProbe` 还非 null，
+          // 那次调用会在开头的守卫处直接 return。若这里接着 `break`，循环就带着
+          // `offline == true` 退出了，且 `_onlineProbe` 被 finally 置空 ——
+          // 界面挂着「正在自动重连…」而**没有任何循环在重试**，只能等下一次切前台。
+          // 所以这里用 return：让 finally 先把 `_onlineProbe` 释放，`_resume` 里
+          // 那次嵌套调用才能真正起一个新的循环。
+          return;
+        }
+        // 没有活跃 run：只是网络回来了，恢复在线态即可，无需接流。
+        break;
       }
     } finally {
       if (!completer.isCompleted) completer.complete();
@@ -213,10 +231,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (mounted && nextId == null) setState(() => loading = false);
   }
 
-  Future<void> _resume() async {
+  /// 接回进行中的生成。
+  ///
+  /// [force] 表示「刚刚探活证明服务端是通的」，此时**跳过 `streaming` 检查**。
+  /// 必需的：App 进后台被系统挂起时 `streaming` 会停在 true（`didChangeAppLifecycleState`
+  /// 只处理 resumed，没有任何回调会清它），而下面的守卫见到 true 就 return ——
+  /// 不 force 的话，「切回前台接回断流」这条路的触发条件（`streaming == true`）
+  /// 恰好就是它的拒绝条件，调用必然空转，界面永久停在「正在生成…」。
+  /// Android 侧对应 `ChatViewModel.resumeStreamIfNeeded(force = true)`。
+  Future<void> _resume({bool force = false}) async {
     final id = sessionId;
-    if (id == null || streaming || resuming) return;
-    setState(() => resuming = true);
+    if (id == null || resuming) return;
+    if (!force && streaming) return;
+    setState(() {
+      // force 路径：清掉陈旧的 streaming，让 _consume / 收尾逻辑从干净状态开始。
+      if (force) streaming = false;
+      resuming = true;
+    });
     // 本地是否已有半截正文：有就说明这是一次「接续」而不是「接一条还不存在的流」。
     // 交给 resumeStream 决定首连失败要不要在流内自动重试 —— 后台挂起后刚回来
     // 那几秒网络常常还没就绪，首次连接失败是常态而非终局。
@@ -997,7 +1028,7 @@ class _Bubble extends StatelessWidget {
     final theme = Theme.of(context);
     // 说话方分类 → 颜色。用角色配色替代原来「user 一个色、其余全是中性」的两档方案：
     // 两档方案下工具输出和助手回复长得一模一样，长会话里根本分不清哪段是谁说的。
-    final roleKind = MessageRoleKind.of(message.role);
+    final roleKind = MessageRoleKind.fromIsUser(message.isUser);
     final color = context.bubbleColor(roleKind);
     final accent = context.bubbleAccent(roleKind);
     final isActive = message.isStreaming;
