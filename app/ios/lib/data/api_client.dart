@@ -14,6 +14,23 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// 单条 SSE 流内部最多连续重连几次。与 [ChatScreen] 自己的「跨流 resume 重连」
+/// 叠加：单条流先自愈 4 次，全失败才把错误交给上层，由上层再走它自己的退避。
+const int _maxSseRetries = 4;
+
+/// SSE 断流重连的退避间隔（秒）：1s → 2s → 4s → 8s… 封顶 30s。
+///
+/// 封顶的理由：服务端真挂掉时，不封顶的退避会一直按「每秒一次」打请求，既耗电，
+/// 又会在服务恢复的瞬间制造惊群。
+Duration reconnectDelay(int attempt) {
+  var seconds = 1;
+  for (var i = 0; i < attempt; i++) {
+    seconds *= 2;
+    if (seconds >= 30) return const Duration(seconds: 30);
+  }
+  return Duration(seconds: seconds);
+}
+
 class ChatEvent {
   const ChatEvent({
     this.content,
@@ -343,6 +360,13 @@ class EthanApiClient {
     return parts.length == 2 ? http.MediaType(parts[0], parts[1]) : null;
   }
 
+  /// 发起一轮生成（POST /chat + SSE 响应）。
+  ///
+  /// **刻意不套 [_resilientSse]**：POST /chat 不是幂等的 —— 它「创建并运行一轮生成」。
+  /// 响应中途丢掉时服务端其实已经开跑了，重发会开出第二轮（重复回复、工具重复执行、
+  /// token 重复计费）。这种「请求可能已生效」的失败只能由上层核对会话状态来处理
+  /// （先 resumeStream 看有没有活跃 run，再决定要不要重发），传输层不能盲重试。
+  /// 需要自动重连的是 [resumeStream]，那个端点是幂等的「从头回放」。
   Stream<ChatEvent> chat(
       {required String text,
       required String sessionId,
@@ -394,8 +418,36 @@ class EthanApiClient {
     }
   }
 
-  Stream<ChatEvent> resumeStream(String id) =>
-      _sse('chat/${Uri.encodeComponent(id)}/stream', method: 'GET');
+  /// 重连一个仍在进行的生成。
+  ///
+  /// [hasProgress] 告诉客户端「这是一次接续，不是新建一条空流」：本地已经有渲染进度时，
+  /// 首连失败也值得在流内部自动重试一次 —— 刚切回前台那几秒网络常常还没就绪。
+  ///
+  /// 该端点每次都是「从头回放 + 继续推」，天然幂等，所以重试是安全的。
+  Stream<ChatEvent> resumeStream(String id, {bool hasProgress = false}) =>
+      _resilientSse(
+        () => _sse('chat/${Uri.encodeComponent(id)}/stream', method: 'GET'),
+        hasEmittedContent: hasProgress,
+      );
+
+  /// 单次健康检查（`GET /health`）。
+  ///
+  /// 用于「切回前台主动探活」：长连接被系统挂起后客户端收不到任何断线通知，
+  /// 只能主动问一次服务端还在不在。失败一律返回 false，调用方据此判定离线。
+  ///
+  /// 不用 `_request`（它会解析 body 且把非 2xx 抛异常）：探活只关心「通没通」，
+  /// 一个 500 响应同样说明**服务端是活的**，不该被判成离线 —— 用 `_request` 会把
+  /// 「服务器活着但内部报错」误报成网络断开，把用户引向错误的排查方向。
+  Future<bool> health() async {
+    try {
+      final request = http.Request('GET', _uri('health'))..headers.addAll(_headers);
+      final response = await _client.send(request);
+      await response.stream.drain<void>();
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Future<void> inject(String id, String content) async {
     await injectMessage(id, {'content': content});
@@ -412,6 +464,43 @@ class EthanApiClient {
   Future<void> respondWaitForUser(String requestId, String value) async =>
       _request('POST', 'wait-for-user/${Uri.encodeComponent(requestId)}',
           body: {'value': value});
+
+  /// 断线后按指数退避重连（1s / 2s / 4s… 封顶 30s），**同一条流内**完成，
+  /// 调用方感知不到中间断过。
+  ///
+  /// 为什么必须做：移动端的长连接会在服务端重启、Wi-Fi↔蜂窝 切换、App 进后台被系统
+  /// 冻结时断开。没有自动重连时，断点之后的流就是一条干流 —— 界面永久停在「离线」，
+  /// 除非用户手动点重连。
+  ///
+  /// 只对「已经产出过内容」的流生效（首连就失败更像配置错误 —— 地址填错、服务没起，
+  /// 无限重试会把用户锁在一个永远转圈的界面里，报错更诚实）。[hasEmittedContent]
+  /// 让调用方把「本地已有进度」也算作已产出，覆盖「切回前台接续」这种首连即失败但
+  /// 确实有活跃 run 的场景。
+  Stream<ChatEvent> _resilientSse(
+    Stream<ChatEvent> Function() open, {
+    bool hasEmittedContent = false,
+  }) async* {
+    var attempt = 0;
+    var emitted = hasEmittedContent;
+    while (true) {
+      try {
+        await for (final event in open()) {
+          emitted = true;
+          yield event;
+        }
+        return;
+      } catch (e) {
+        // 拿到 HTTP 响应说明服务端在工作，4xx/5xx 是业务语义，重连只会再拿一遍。
+        // 例外是 5xx/408/429 —— 服务端自己的临时状态，值得退避重试。
+        final retryable = e is ApiException
+            ? (e.status >= 500 || e.status == 408 || e.status == 429)
+            : true;
+        if (!retryable || !emitted || attempt >= _maxSseRetries) rethrow;
+        await Future<void>.delayed(reconnectDelay(attempt));
+        attempt += 1;
+      }
+    }
+  }
 
   Stream<ChatEvent> _sse(String path,
       {String method = 'GET', Map<String, dynamic>? body}) async* {

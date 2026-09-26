@@ -317,6 +317,56 @@ dblclick 一定在 click 之后触发，而那时 tab 已经被切走了。注�
 
 ---
 
+## 移动端 App（`app/android`、`app/ios`）
+
+### 断线恢复（不要往回退）
+
+移动端与 Web/Desktop 的关键差异：**进程会被系统挂起**（息屏、切后台一段时间后被冻结、
+socket 被回收），而且挂起/恢复都**收不到任何断线回调**。Web 端不存在这个问题——
+它的标签页一直在跑事件循环，断了会立刻抛错。所以移动端不能只依赖「流抛异常了才处理」，
+必须**主动探活**。
+
+两条恢复路径（Android `ChatViewModel` / iOS `_ChatScreenState` 各实现一份，语义一致）：
+
+1. **流断了但服务端活着**（生成进行中）：`GET /chat/{id}/stream` 是幂等的「从头回放」，
+   所以在**同一条流内**按 1s/2s/4s… 封顶 30s 退避重连，最多 4 次；全失败才把错误交给
+   上层，由上层再走它自己的退避。`POST /chat` **刻意不做自动重连**——它不幂等，
+   响应丢失时重发会开出第二轮生成（重复回复 / 工具重复执行 / token 重复计费）。
+2. **服务端不可达**：挂起期间流是「静默死掉」的，客户端手里那个 `isStreaming = true`
+   是**陈旧状态**，没有任何回调会清它。判据是**进程级回到前台**（Android
+   `ProcessLifecycleOwner` 的 `ON_START`，iOS `AppLifecycleState.resumed`）：
+   先 `GET /health` 探活，通了才 `resumeStream` 接回那轮生成 —— 直接 resume 会在服务端
+   不可达时反复失败且界面没有任何「离线」表达，表现就是「放一会儿自己变离线、且不会自己回来」。
+   探活另有 5s 去抖（切前台是高频动作，真断线不会在 5s 内自愈）。
+   探活失败则进入 `Offline` 态并起一个**后台探活循环**（同样退避封顶 30s，
+   **不设最大次数**：等的是「用户走出地库」这类恢复时间不可知的外因，放弃重试等于
+   逼用户手动操作一次），恢复后自动清掉离线态。
+
+**界面契约**：`Offline`（服务端不可达）与 `Disconnected`（run 断了但服务端活着）是
+**两个不同的状态**，给不同的文案和动作——前者不提供「重连」按钮（网络没通，点了没用，
+自动循环在跑），后者提供（服务端那边 run 可能还在，接回去能继续看输出）。两者不可合并。
+
+iOS 侧**没有 CI 覆盖**（`.github/workflows/test.yml` 不碰 `app/ios`，`android.yml` 只触发
+`app/android/**`），android 侧由 `android.yml` 跑 lint/test/assemble。
+
+### 气泡与头像
+
+- **移动端隐藏头像**：头像在窄屏上吃掉 36dp（30dp 圆 + 6dp 间距）横向空间，正文被挤
+  得只剩一半。去掉头像必须**同时去掉它占的宽度**（不留占位 `Spacer`），否则只是把头像
+  变成一块空白。
+- **识别职责转交颜色 + 角色名**：隐藏头像后不能只靠颜色区分（对色盲用户是净损失）。
+  每种角色同时有：低透明度彩色底 + 左侧 3dp 实色色条 + 文字角色名。
+  色值全部从设计系统的角色色派生，不写死十六进制 —— Android 走
+  `MaterialTheme.colorScheme`（`app/android/app/src/main/kotlin/com/ethan/agent/ui/theme/BubblePalette.kt`），
+  iOS 走 `ColorScheme`（`app/ios/lib/role_palette.dart`）；分类用两端同语义的
+  `MessageRoleKind`（user / assistant / tool / system，未知 role 落到 assistant 以扛脏数据）。
+- **桌面端不受影响**：桌面端仍走 Web 那套「头像 + 单色气泡」。
+- 气泡折叠阈值（Android `messageCollapseState` 的 `contentWidthDp`）与气泡内可用宽度
+  绑定，隐藏头像后**宽度变宽**，该常量需与布局同步调整，否则会系统性高估行数、把没超屏的
+  消息也折起来。
+
+---
+
 ## HTTP API（`ethan/interface/api.py`）
 
 ### 设计思路

@@ -26,8 +26,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -103,14 +105,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import com.ethan.agent.R
 import com.ethan.agent.core.model.FileSignature
 import com.ethan.agent.core.model.ModelSelection
@@ -118,6 +117,11 @@ import com.ethan.agent.core.model.Quote
 import com.ethan.agent.core.model.UserIdentity
 import com.ethan.agent.core.model.fullId
 import com.ethan.agent.shared.UiMessage
+import com.ethan.agent.shared.viewmodel.MessageRoleKind
+import com.ethan.agent.ui.theme.bubbleAccentColor
+import com.ethan.agent.ui.theme.bubbleContainerColor
+import com.ethan.agent.ui.theme.bubbleRoleLabel
+import com.ethan.agent.ui.theme.bubbleRoleLabelColor
 import com.ethan.agent.ui.components.EthanBadge
 import com.ethan.agent.ui.components.ErrorSnackbar
 import com.ethan.agent.ui.components.LoadingBox
@@ -179,7 +183,6 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     var showPlusSheet by remember { mutableStateOf(false) }
     // 超级权限「关→开」时的二次确认（开启是高危方向，必须让用户明确知道代价）
     var showAutoConsentConfirm by remember { mutableStateOf(false) }
@@ -286,14 +289,18 @@ fun ChatScreen(
         }
     }
 
-    // App 从后台恢复时尝试重连
-    LaunchedEffect(state.sessionId) {
-        if (state.sessionId != null) {
-            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                onResumeStream()
-            }
-        }
-    }
+    // 说明：App 从后台恢复时的「探活 + 接流」已收敛到 ChatViewModel 的
+    // observeAppLifecycle（订阅 AppLifecycleBus，由 MainActivity 的进程级 ON_START 投递）。
+    //
+    // 这里原先挂了一个 `repeatOnLifecycle(RESUMED) { onResumeStream() }`，两个问题：
+    //   1. 它**只**接流、不探活 —— 服务端已经不可达时，它会不停地对着一个死地址重试，
+    //      界面却没有任何「离线」表达，这正是「放一会儿自己变离线且回不来」的成因之一；
+    //   2. Activity 的 RESUMED 在内部页面跳转时也会触发，比进程级 ON_START 吵得多，
+    //      每次跳转都打一次 resume 请求。
+    // 现在统一由 ViewModel 去抖后处理（探活通了才接流），这里不再重复触发。
+    // 随之一起去掉了 `LocalLifecycleOwner` 与 `repeatOnLifecycle` 的 import。
+    // `onResumeStream` 参数保留：断线横幅上的「重连」按钮仍用它（那是用户主动触发，
+    // 与这里的自动恢复是两回事）。
 
     // 「分享到 Ethan」的图片/文件：订阅 pendingUri（而非 LaunchedEffect(Unit) 只跑一次），
     // app 已在前台时再次分享也能触发上传。
@@ -612,21 +619,42 @@ fun ChatScreen(
             return@Scaffold
         }
 
-        // 断线重连横幅
-        if (state.connectionState == ConnectionState.Disconnected) {
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+        // 断线横幅。两种断线给**不同的文案和动作**，因为用户的下一步操作不同：
+        //   - Offline（服务端不可达）：重连按钮没用（网络就没通），所以不提供按钮，
+        //     只说明正在自动重试 —— 恢复后横幅会自己消失，不需要用户做任何事。
+        //   - Disconnected（生成流断了但服务端还活着）：手动「重连」有意义，
+        //     因为服务端那边 run 可能还在跑，接回去就能继续看输出。
+        when (state.connectionState) {
+            ConnectionState.Offline -> {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("连接断开", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = onResumeStream) { Text("重连") }
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("网络已断开，正在自动重连…", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
+            ConnectionState.Disconnected -> {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("连接断开", style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = onResumeStream) { Text("重连") }
+                    }
+                }
+            }
+            else -> Unit
         }
 
         // 消息列表 + 输入栏垂直排列：输入栏不再覆盖消息列表底部，
@@ -1158,6 +1186,8 @@ fun ChatScreen(
                     when {
                         state.isResuming -> FooterStatusDot("重连中", MaterialTheme.colorScheme.tertiary)
                         state.isStreaming -> FooterStatusDot("生成中", MaterialTheme.colorScheme.primary)
+                        state.connectionState == ConnectionState.Offline ->
+                            FooterStatusDot("离线", MaterialTheme.colorScheme.error)
                         state.connectionState == ConnectionState.Disconnected ->
                             FooterStatusDot("已断开", MaterialTheme.colorScheme.error)
                     }
@@ -1313,6 +1343,9 @@ private fun ConnectionStateIndicator(state: ConnectionState, isResuming: Boolean
     val (color, label) = when {
         isResuming -> Pair(MaterialTheme.colorScheme.tertiary, "重连中…")
         state == ConnectionState.Streaming -> Pair(MaterialTheme.colorScheme.error, "生成中")
+        // 离线（服务端不可达）与断线（run 断了）都给「离线」这一类文案即可 ——
+        // 顶部横幅已经区分了两者，这个 badge 位置窄，再分两行会挤。
+        state == ConnectionState.Offline -> Pair(MaterialTheme.colorScheme.error, "离线")
         state == ConnectionState.Disconnected -> Pair(MaterialTheme.colorScheme.error, "已断开")
         else -> return
     }
@@ -1408,15 +1441,11 @@ internal fun UserAvatarImage(
 @Composable
 private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId: String? = null, signFile: (suspend (String) -> FileSignature?)? = null, userIdentity: UserIdentity = UserIdentity(), onLongPress: () -> Unit, onOpenReading: () -> Unit = {}) {
     val isUser = message.role == "user"
-    // 对齐 Web（web/components/chat/message-bubble.tsx）：
-    //   用户   bg-primary/10 text-foreground
-    //   助手   bg-muted
-    // 之前用户气泡是实心 primary + onPrimary 文字，在一片浅色里非常刺眼，也和 Web 对不上。
-    val bubbleColor = if (isUser) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
+    // 说话方分类 —— 移动端隐藏头像后，**颜色 + 角色名 + 色条** 三者共同承担
+    // 「谁在说话」的识别职责（见 BubblePalette 的设计约束说明）。
+    val roleKind = MessageRoleKind.of(message.role)
+    val bubbleColor = bubbleContainerColor(roleKind)
+    val accentColor = bubbleAccentColor(roleKind)
     val textColor = MaterialTheme.colorScheme.onSurface
 
     Row(
@@ -1426,33 +1455,35 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Top,
     ) {
-        // Assistant avatar (left)
-        if (!isUser) {
-            Image(
-                painter = painterResource(id = R.drawable.ethan_logo_avatar),
-                contentDescription = "Assistant",
-                modifier = Modifier
-                    .size(30.dp)
-                    .clip(CircleShape),
-            )
-            Spacer(Modifier.width(6.dp))
-        }
+        // 移动端**不渲染头像**：头像在窄屏上吃掉 36dp（30dp 圆 + 6dp 间距）的横向
+        // 空间，而这正是「头像占宽度过多」的直接来源。识别职责已交给
+        // 颜色 / 角色名 / 左侧色条（见下方 Column），不会因为去掉头像而失去区分度。
+        //
+        // 注意这里**没有**留占位 Spacer —— 去掉头像必须同时去掉它占的宽度，
+        // 否则只是把头像变成一块空白，「气泡布局不错乱、不留空位」的要求就没满足。
 
         // Bubble content —— 宽度对齐 Web 的 max-w-[90%]，四角统一 rounded-2xl（18dp）。
         // 之前是固定 310dp + 不对称的一角切平，换机型/字号后容易显得局促。
         Column(
-            modifier = Modifier.weight(1f, fill = false),
+            modifier = Modifier.weight(1f),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
-            // 用户显示名：只在设置过时占一行。老用户没设名字，气泡不会凭空多一行。
-            if (isUser && userIdentity.displayName.isNotBlank()) {
-                Text(
-                    userIdentity.displayName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 2.dp),
-                )
+            // 角色名行（替代头像的识别职责）。
+            //
+            // 用户侧优先显示用户自己设的显示名（那是更有信息量的标识），没设才回落
+            // 到「我」；助手/工具/系统用固定角色名。老用户没设名字时也能看到「我」，
+            // 所以这一行是**恒定存在**的 —— 靠颜色单独区分对色盲用户不够。
+            val roleLabel = if (isUser && userIdentity.displayName.isNotBlank()) {
+                userIdentity.displayName
+            } else {
+                bubbleRoleLabel(roleKind)
             }
+            Text(
+                roleLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = bubbleRoleLabelColor(),
+                modifier = Modifier.padding(bottom = 2.dp),
+            )
             Surface(
                 modifier = Modifier.combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -1465,150 +1496,170 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                 color = bubbleColor,
                 shadowElevation = 0.dp,
             ) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    // 用户消息图片（在文本之前）
-                    if (message.images.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = if (message.content.isNotBlank() || message.toolSteps.isNotEmpty() || message.quote != null) 6.dp else 0.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            message.images.forEach { img ->
-                                Image(
-                                    painter = rememberAsyncImagePainter(img.displayUrl),
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .sizeIn(maxHeight = 160.dp, maxWidth = 160.dp)
-                                        .clip(MaterialTheme.shapes.small),
-                                    contentScale = ContentScale.FillWidth,
-                                )
-                            }
-                        }
-                    }
-                    message.quote?.let {
-                        Text(
-                            "↩ ${it.content.take(60)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isUser) textColor.copy(alpha = 0.7f)
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                    }
-                    // 工具调用在前（折叠式）
-                    if (message.toolSteps.isNotEmpty()) {
-                        CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides textColor) {
-                            ToolTimeline(message.toolSteps, isStreaming = message.isStreaming)
-                        }
-                        if (message.content.isNotBlank()) {
-                            Spacer(Modifier.height(6.dp))
-                        }
-                    }
-                    // 文本结论在后
-                    if (message.content.isNotBlank()) {
-                        // 长消息折叠：超过半屏高就截断，底部给「查看全部 / 收起」。
-                        // 只在真实尺寸超过阈值时展开 UI，短消息完全不受影响（无额外高度、无多余按钮）。
-                        val density = LocalDensity.current
-                        val configuration = LocalConfiguration.current
-                        val screenWidthDp = configuration.screenWidthDp.toFloat()
-                        val screenHeightDp = configuration.screenHeightDp.toFloat()
-                        // 用 remember 而不是 rememberSaveable：MessageCollapseState 是自定义类，
-                        // SaveableStateRegistry 只接受能进 Bundle 的类型，直接塞会抛
-                        // IllegalArgumentException 把 App 打崩（已踩过）。而「展开/收起」
-                        // 本来就属于一次性 UI 状态，进程被回收后恢复成折叠态完全可以接受。
-                        //
-                        // key 用 isStreaming 而不是 content：流式期间 content 每帧都变，
-                        // 拿它做 key 会让「生成中就点开查看全部」立刻被重置回折叠态。
-                        val collapseState = remember(message.isStreaming) {
-                            messageCollapseState(
-                                text = message.content,
-                                screenWidthDp = screenWidthDp,
-                                screenHeightDp = screenHeightDp,
-                                fontScale = density.fontScale,
-                            )
-                        }
-                        // 流结束后正文才是最终值（最后一轮 tool 之后还有结论），
-                        // 此时按最终长度重新判定一次；只更新「可折叠与否 / 高度上限」，
-                        // 不动 expanded —— 用户已经手动展开的就别给他收回去。
-                        LaunchedEffect(message.isStreaming, message.content) {
-                            if (!message.isStreaming) {
-                                collapseState.recompute(
-                                    messageCollapseState(
-                                        text = message.content,
-                                        screenWidthDp = screenWidthDp,
-                                        screenHeightDp = screenHeightDp,
-                                        fontScale = density.fontScale,
-                                    )
-                                )
-                            }
-                        }
-                        Column(
-                            modifier = if (collapseState.collapsible) {
-                                Modifier
-                                    // animateContentSize 全程只跟约束走，不碰滚动位置，
-                                    // 所以展开/收起不会把用户的阅读位置顶走。
-                                    .animateContentSize()
-                                    .clipToBounds()
-                                    .then(
-                                        if (collapseState.expanded) Modifier
-                                        else Modifier.heightIn(max = collapseState.maxHeight)
-                                    )
-                            } else {
-                                Modifier
-                            },
-                        ) {
-                            SimpleMarkdown(
-                                text = message.content,
-                                textColor = textColor,
-                            )
-
-                            if (collapseState.collapsible) {
-                                // 「收起」放在内容末尾（用户明确要求「内底部」也要有收起交互），
-                                // 展开后在文末出现，不用回头往上滚。
-                                if (collapseState.expanded) {
-                                    Spacer(Modifier.height(8.dp))
-                                    BubbleActionLink(
-                                        label = "收起",
-                                        onClick = { collapseState.expanded = false },
-                                        color = textColor.copy(alpha = 0.65f),
+                // 左侧色条：隐藏头像后的**主要**角色标记。用 Row 把一条 3dp 的实色线
+                // 顶到气泡左内侧，然后才是正文。
+                //
+                // 用 Box 叠而不是给 Surface 加 border：border 会沿整个圆角描一圈，
+                // 看起来像「选中态」而不是「角色标记」；这里只要一条边的暗示。
+                // 系统消息的 accentColor 是透明（不参与角色区分），Box 仍占位但看不见，
+                // 保证四种角色的正文左边界对齐、气泡宽度不会因角色而跳。
+                //
+                // `IntrinsicSize.Min` 是必需的：Row 的默认高度由子项决定，而色条用的是
+                // `fillMaxHeight()` —— 没有内在高度约束时它会被解析为 0（或触发
+                // 无限高度约束的异常），色条就整条消失了。声明「取子项最小高度」后，
+                // 色条高度 = 正文列的高度，气泡多高它多高。
+                Row(Modifier.height(IntrinsicSize.Min)) {
+                    Box(
+                        Modifier
+                            .width(3.dp)
+                            .fillMaxHeight()
+                            .background(accentColor),
+                    )
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        // 用户消息图片（在文本之前）
+                        if (message.images.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = if (message.content.isNotBlank() || message.toolSteps.isNotEmpty() || message.quote != null) 6.dp else 0.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                message.images.forEach { img ->
+                                    Image(
+                                        painter = rememberAsyncImagePainter(img.displayUrl),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .sizeIn(maxHeight = 160.dp, maxWidth = 160.dp)
+                                            .clip(MaterialTheme.shapes.small),
+                                        contentScale = ContentScale.FillWidth,
                                     )
                                 }
                             }
                         }
-                        if (collapseState.collapsible && !collapseState.expanded) {
-                            // 折叠态：按钮钉在气泡底部。外面包一层跟气泡同色的 Surface，
-                            // 让被截断的文字行从按钮底下「透出来」之前先被遮住，
-                            // 视觉上明确是「还有内容没显示」，而不是排版断了。
-                            Surface(color = bubbleColor) {
-                                BubbleActionLink(
-                                    label = "查看全部",
-                                    onClick = { collapseState.expanded = true },
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
+                        message.quote?.let {
+                            Text(
+                                "↩ ${it.content.take(60)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isUser) textColor.copy(alpha = 0.7f)
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        // 工具调用在前（折叠式）
+                        if (message.toolSteps.isNotEmpty()) {
+                            CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides textColor) {
+                                ToolTimeline(message.toolSteps, isStreaming = message.isStreaming)
+                            }
+                            if (message.content.isNotBlank()) {
+                                Spacer(Modifier.height(6.dp))
                             }
                         }
-                    }
-                    // 文件卡片
-                    if (message.cards.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            message.cards.forEach { card ->
-                                com.ethan.agent.ui.components.FileCardView(
-                                    card = card,
-                                    serverUrl = serverUrl,
-                                    sessionId = sessionId,
-                                    signFile = signFile,
+                        // 文本结论在后
+                        if (message.content.isNotBlank()) {
+                            // 长消息折叠：超过半屏高就截断，底部给「查看全部 / 收起」。
+                            // 只在真实尺寸超过阈值时展开 UI，短消息完全不受影响（无额外高度、无多余按钮）。
+                            val density = LocalDensity.current
+                            val configuration = LocalConfiguration.current
+                            val screenWidthDp = configuration.screenWidthDp.toFloat()
+                            val screenHeightDp = configuration.screenHeightDp.toFloat()
+                            // 用 remember 而不是 rememberSaveable：MessageCollapseState 是自定义类，
+                            // SaveableStateRegistry 只接受能进 Bundle 的类型，直接塞会抛
+                            // IllegalArgumentException 把 App 打崩（已踩过）。而「展开/收起」
+                            // 本来就属于一次性 UI 状态，进程被回收后恢复成折叠态完全可以接受。
+                            //
+                            // key 用 isStreaming 而不是 content：流式期间 content 每帧都变，
+                            // 拿它做 key 会让「生成中就点开查看全部」立刻被重置回折叠态。
+                            val collapseState = remember(message.isStreaming) {
+                                messageCollapseState(
+                                    text = message.content,
+                                    screenWidthDp = screenWidthDp,
+                                    screenHeightDp = screenHeightDp,
+                                    fontScale = density.fontScale,
                                 )
                             }
+                            // 流结束后正文才是最终值（最后一轮 tool 之后还有结论），
+                            // 此时按最终长度重新判定一次；只更新「可折叠与否 / 高度上限」，
+                            // 不动 expanded —— 用户已经手动展开的就别给他收回去。
+                            LaunchedEffect(message.isStreaming, message.content) {
+                                if (!message.isStreaming) {
+                                    collapseState.recompute(
+                                        messageCollapseState(
+                                            text = message.content,
+                                            screenWidthDp = screenWidthDp,
+                                            screenHeightDp = screenHeightDp,
+                                            fontScale = density.fontScale,
+                                        )
+                                    )
+                                }
+                            }
+                            Column(
+                                modifier = if (collapseState.collapsible) {
+                                    Modifier
+                                        // animateContentSize 全程只跟约束走，不碰滚动位置，
+                                        // 所以展开/收起不会把用户的阅读位置顶走。
+                                        .animateContentSize()
+                                        .clipToBounds()
+                                        .then(
+                                            if (collapseState.expanded) Modifier
+                                            else Modifier.heightIn(max = collapseState.maxHeight)
+                                        )
+                                } else {
+                                    Modifier
+                                },
+                            ) {
+                                SimpleMarkdown(
+                                    text = message.content,
+                                    textColor = textColor,
+                                )
+
+                                if (collapseState.collapsible) {
+                                    // 「收起」放在内容末尾（用户明确要求「内底部」也要有收起交互），
+                                    // 展开后在文末出现，不用回头往上滚。
+                                    if (collapseState.expanded) {
+                                        Spacer(Modifier.height(8.dp))
+                                        BubbleActionLink(
+                                            label = "收起",
+                                            onClick = { collapseState.expanded = false },
+                                            color = textColor.copy(alpha = 0.65f),
+                                        )
+                                    }
+                                }
+                            }
+                            if (collapseState.collapsible && !collapseState.expanded) {
+                                // 折叠态：按钮钉在气泡底部。外面包一层跟气泡同色的 Surface，
+                                // 让被截断的文字行从按钮底下「透出来」之前先被遮住，
+                                // 视觉上明确是「还有内容没显示」，而不是排版断了。
+                                Surface(color = bubbleColor) {
+                                    BubbleActionLink(
+                                        label = "查看全部",
+                                        onClick = { collapseState.expanded = true },
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                         }
-                    }
-                    if (message.isStreaming && message.content.isEmpty() && message.toolSteps.isEmpty()) {
-                        Text(
-                            "思考中…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = textColor.copy(alpha = 0.7f),
-                        )
-                    }
-                }
-            }
+                        // 文件卡片
+                        if (message.cards.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                message.cards.forEach { card ->
+                                    com.ethan.agent.ui.components.FileCardView(
+                                        card = card,
+                                        serverUrl = serverUrl,
+                                        sessionId = sessionId,
+                                        signFile = signFile,
+                                    )
+                                }
+                            }
+                        }
+                        if (message.isStreaming && message.content.isEmpty() && message.toolSteps.isEmpty()) {
+                            Text(
+                                "思考中…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = textColor.copy(alpha = 0.7f),
+                            )
+                        }
+                } // end inner Column（气泡正文）
+                } // end Row（色条 + 正文）
+            } // end Surface
 
             // Bottom info bar: timestamp + stats pills
             if (!message.isStreaming) {
@@ -1616,17 +1667,9 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
             }
         }
 
-        // User avatar (right)：与左侧助手 logo 对称（同尺寸 30dp / 同 6dp 间距），
-        // 顶对齐气泡（对齐 Web 的 mt-1）。
-        if (isUser) {
-            Spacer(Modifier.width(6.dp))
-            UserAvatarImage(
-                url = avatarAbsoluteUrl(userIdentity.avatarUrl, serverUrl),
-                name = userIdentity.displayName,
-                size = 30.dp,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
+        // 移动端不再渲染用户头像（见上方「不渲染头像」的说明）。
+        // 这里同样**不留** Spacer 占位 —— 右侧的 6dp 间距与 30dp 圆的宽度都要还回去，
+        // 否则气泡会被挤窄，「隐藏头像」就只完成了一半。
     }
 }
 
@@ -1697,9 +1740,13 @@ private fun messageCollapseState(
     val lineHeightDp = fontSizeDp * 1.62f     // 默认行高约 1.6×
     val charWidthDp = fontSizeDp * 0.55f      // 中英混排的粗略平均字宽
 
-    // 气泡内可用宽度：屏宽 - LazyColumn 横向 padding(12dp×2) - 头像(30dp+6dp)
-    //                   - 气泡内 padding(16dp×2) - 外层 padding(4dp×2)
-    val contentWidthDp = (screenWidthDp - 100f).coerceAtLeast(fontSizeDp * 8f)
+    // 气泡内可用宽度：屏宽 - LazyColumn 横向 padding(12dp×2)
+    //                   - 气泡内 padding(16dp×2) - 角色色条(3dp) - 外层 padding(4dp×2)
+    //
+    // 隐藏头像后**宽度变宽了**（少了 30dp 头像 + 6dp 间距）：这个估算只用来判断
+    // 「要不要折叠」，估窄一点意味着「宁可多折一次」，是安全方向。这里按新布局收紧，
+    // 让它和实际渲染宽度一致 —— 否则会系统性高估行数，把没超屏的消息也折起来。
+    val contentWidthDp = (screenWidthDp - 67f).coerceAtLeast(fontSizeDp * 8f)
 
     val charsPerLine = (contentWidthDp / charWidthDp).coerceAtLeast(8f)
     val lineCount = text.split('\n').sumOf { line ->
