@@ -34,7 +34,10 @@ export async function initServerUrl(): Promise<void> {
 /** 用户在 Settings 填过的地址优先于本机 Ethan 配置。 */
 export function getServerUrl(): string {
   if (typeof window !== "undefined") {
-    const saved = normalizeServerUrl(localStorage.getItem(STORAGE_KEY_API_URL));
+    // jsdom/测试环境可能没有 localStorage（window 在、storage 缺）：直接调
+    // localStorage.getItem 会抛 TypeError 把整棵组件树拖崩。防御性取一次。
+    const storage = (globalThis as { localStorage?: Storage }).localStorage;
+    const saved = storage ? normalizeServerUrl(storage.getItem(STORAGE_KEY_API_URL)) : "";
     if (saved) return saved;
   }
   return configuredServerUrl;

@@ -23,7 +23,10 @@ export function setAuthToken(token: string) {
 export function getAuthToken(): string {
   if (authToken) return authToken;
   if (typeof window !== "undefined") {
-    authToken = localStorage.getItem("ethan_token") || "";
+    // jsdom/测试环境可能没有 localStorage（window 在、storage 缺）：直接调
+    // localStorage.getItem 会抛 TypeError 把整棵组件树拖崩。防御性取一次。
+    const storage = (globalThis as { localStorage?: Storage }).localStorage;
+    authToken = storage?.getItem("ethan_token") || "";
     if (!authToken) {
       const match = document.cookie.match(/(?:^|; )ethan_token=([^;]+)/);
       if (match) authToken = decodeURIComponent(match[1]);
