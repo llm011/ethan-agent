@@ -182,3 +182,16 @@ def test_slash_id_survives_config_yaml_round_trip(monkeypatch, tmp_path):
     entry = reloaded.get_model("trae/trae/glm-5.3-flash")
     assert entry is not None
     assert entry.id == "trae/glm-5.3-flash"
+
+
+def test_get_model_bare_slash_id_falls_back_to_registered_id():
+    """裸 id（会话落库形态）回查：首段不是 provider 时按整串匹配注册 id。
+
+    回归：defaults.model 配 "buddy-proxy/codebuddy/deepseek-v4.1-flash"，会话里
+    存的是解析后的裸 id "codebuddy/deepseek-v4.1-flash"。旧实现按第一个 "/" 拆出
+    provider="codebuddy"（不存在）→ 记忆沉淀报 Provider 'codebuddy' not found。
+    """
+    cfg = _config_with(("buddy-proxy", "codebuddy/deepseek-v4.1-flash"))
+    entry = cfg.get_model("codebuddy/deepseek-v4.1-flash")
+    assert entry is not None
+    assert (entry.provider, entry.id) == ("buddy-proxy", "codebuddy/deepseek-v4.1-flash")

@@ -325,6 +325,15 @@ class Config(BaseModel):
                 continue
             if m.id == target_model or target_model in m.alias:
                 return m
+
+        # 复合键失配后的兜底：把整串当注册 id 精确匹配。会话/定时任务落库的 model
+        # 是解析后的裸 id（如 "codebuddy/deepseek-v4.1-flash"，注册在 provider
+        # "buddy-proxy" 下），按第一个 "/" 拆会把 id 的首段误当 provider 名而匹配
+        # 失败 → 记忆沉淀等「拿裸 id 回查」的路径报 Provider not found。
+        # 放在复合匹配之后：复合键能命中时语义不变（见 test_model_id_with_slash）。
+        for m in self.models:
+            if m.id == model_id or model_id in m.alias:
+                return m
         return None
 
     def get_provider_config(self, provider_key: str) -> Optional[ProviderConfig]:
