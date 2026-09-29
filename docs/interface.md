@@ -72,6 +72,21 @@ CI 通过 `publish-desktop.yml` 在打 `v*` tag 时自动构建并上传到 GitH
 
 **下载地址必须是 CDN 直链**（`github.com/.../releases/download/<tag>/<filename>`）。tauri-action 默认生成的 `latest.json` 里是 GitHub **API** 地址（`api.github.com/.../releases/assets/<id>`），未认证限流 60 次/小时/IP 且对网络环境敏感，updater 下载安装包时会拿到 `403 Forbidden`（现象：设置页「手动检查更新」报 Download request failed with status 403）。`publish-desktop.yml` 的 `fix-updater-json` job 会在每次发布后自动反查 asset id→文件名映射、改写为直链并回传 release；如发现历史版本仍有 403，可 `workflow_dispatch` 手动触发该 workflow 修复指定 tag。
 
+### PR 自动合并（auto-merge）
+
+`auto-merge.yml` 给非 draft 的 PR 开启 squash auto-merge。两个坑，都表现为「看起来跑了、其实没生效」：
+
+1. **auto-merge 只有 GraphQL 有**（`enablePullRequestAutoMerge` mutation）。REST 的
+   `github.rest.pulls` 下**没有** `enableAutomerge`，早先误用该方法，异常被 catch 吞掉
+   后伪装成「跳过」，导致所有 PR 都开不了自动合并、而 check 仍显示 pass。
+2. **刚 opened 时开启会被拒**：那时检查还在跑，GitHub 返回 `unstable status`。所以
+   workflow 除了 `pull_request_target`（opened / reopened / ready_for_review / synchronize）
+   还监听 `check_suite: completed` —— 检查跑完时再试一次。`check_suite` 事件的
+   `pull_requests` 里只有数据库 id 没有 `node_id`，需按 number 反查。
+
+失败信息必须区分打印（`✅` 开启 / `⏭️` clean 或 unstable / `❌` 真失败）：把异常一律
+吞成「跳过」正是上面第 1 条藏了很久的原因。
+
 ### macOS 未签名提示
 
 桌面端目前未做 Apple Developer 签名公证，首次打开会被 Gatekeeper 拦截提示"已损坏"。这是误导文案，需执行：

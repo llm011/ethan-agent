@@ -2,7 +2,11 @@ name: Auto-enable Squash Merge
 
 on:
   pull_request_target:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
+  # check_suite 完成时才真正具备开启条件：PR 刚 opened 时检查还在跑，
+  # GitHub 会以 "unstable status" 拒绝 enablePullRequestAutoMerge（见下）。
+  check_suite:
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -12,61 +16,60 @@ permissions:
 jobs:
   enable-automerge:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
+    if: github.event.pull_request.draft != true
     steps:
       - uses: actions/github-script@v7
         with:
           script: |
-            const pr = context.payload.pull_request;
-            if (!pr) return;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // 候选 PR：三个事件来源各不相同
+            let numbers = [];
+            if (context.eventName === 'pull_request_target') {
+              numbers = [context.payload.pull_request.number];
+            } else if (context.eventName === 'check_suite') {
+              // check_suite 的 pull_requests 只有数据库 id 没有 node_id，按 number 反查
+              numbers = (context.payload.check_suite.pull_requests || []).map((p) => p.number);
+            } else {
+              const { data } = await github.rest.pulls.list({ owner, repo, state: 'open' });
+              numbers = data.filter((p) => !p.draft).map((p) => p.number);
+            }
+
             // auto-merge 只有 GraphQL 有（enablePullRequestAutoMerge mutation），
             // REST 的 github.rest.pulls 下没有 enableAutomerge —— 早先误用该方法，
             // 被 catch 吞掉后伪装成「跳过」，导致所有 PR 都开不了自动合并。
-            try {
-              const res = await github.graphql(`
-                mutation($prId: ID!) {
-                  enablePullRequestAutoMerge(input: {pullRequestId: $prId, mergeMethod: SQUASH}) {
-                    pullRequest { number autoMergeRequest { enabledAt } }
-                  }
-                }
-              `, { prId: pr.node_id });
-              const enabledAt = res.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt;
-              console.log(`✅ Auto-merge enabled for PR #${pr.number}: ${pr.title} (enabledAt=${enabledAt})`);
-            } catch (e) {
-              // "Pull request is in clean status"：无需 auto-merge，直接合就行
-              console.log(`⏭️ Skip PR #${pr.number}: ${e.message}`);
-            }
-
-  scan-all:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    steps:
-      - uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: prs } = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open'
-            });
-            for (const pr of prs) {
-              if (pr.draft) continue;
-              if (pr.auto_merge) {
-                console.log(`⏭️ PR #${pr.number} already has auto-merge`);
-                continue;
-              }
+            const enable = async (number) => {
+              const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+              if (pr.state !== 'open') return `⏭️ PR #${number}: 已关闭`;
+              if (pr.draft) return `⏭️ PR #${number}: draft`;
+              if (pr.auto_merge) return `⏭️ PR #${number}: 已有 auto-merge`;
               try {
-                await github.graphql(`
+                const res = await github.graphql(`
                   mutation($prId: ID!) {
                     enablePullRequestAutoMerge(input: {pullRequestId: $prId, mergeMethod: SQUASH}) {
                       pullRequest { number autoMergeRequest { enabledAt } }
                     }
                   }
                 `, { prId: pr.node_id });
-                console.log(`✅ Auto-merge enabled for PR #${pr.number}: ${pr.title}`);
+                const enabledAt = res.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt;
+                return `✅ PR #${number}: auto-merge 已开启 (enabledAt=${enabledAt})`;
               } catch (e) {
-                // "clean status" = 已满足合并条件、没有待跑的检查，无需 auto-merge
+                // clean status：已满足合并条件、没有待跑的检查，无需 auto-merge。
+                // unstable status：还有检查在跑，等 check_suite completed 事件再来一次。
+                // 两者都不是错误，但必须区分打印——早先把所有异常都吞成「跳过」，
+                // 真正的失败（REST 方法不存在）因此藏了很久。
                 const clean = /clean status/.test(e.message);
-                console.log(`${clean ? '⏭️' : '❌'} PR #${pr.number}: ${e.message}`);
+                const unstable = /unstable status/.test(e.message);
+                const mark = clean || unstable ? '⏭️' : '❌';
+                return `${mark} PR #${number}: ${e.message}`;
               }
+            };
+
+            if (numbers.length === 0) {
+              console.log('没有需要处理的 PR');
+              return;
+            }
+            for (const n of numbers) {
+              console.log(await enable(n));
             }
