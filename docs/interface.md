@@ -66,6 +66,12 @@ Ethan 提供多种交互方式，适应不同场景：
 
 CI 通过 `publish-desktop.yml` 在打 `v*` tag 时自动构建并上传到 GitHub Release。
 
+### 应用内自动更新
+
+桌面端用 Tauri updater 插件做半静默更新：endpoint 是 GitHub Release 上的 `latest.json`（Pages 镜像 `llm011.github.io/ethan-agent/latest.json` 兜底），发现新版本后后台下载、提示重启安装。
+
+**下载地址必须是 CDN 直链**（`github.com/.../releases/download/<tag>/<filename>`）。tauri-action 默认生成的 `latest.json` 里是 GitHub **API** 地址（`api.github.com/.../releases/assets/<id>`），未认证限流 60 次/小时/IP 且对网络环境敏感，updater 下载安装包时会拿到 `403 Forbidden`（现象：设置页「手动检查更新」报 Download request failed with status 403）。`publish-desktop.yml` 的 `fix-updater-json` job 会在每次发布后自动反查 asset id→文件名映射、改写为直链并回传 release；如发现历史版本仍有 403，可 `workflow_dispatch` 手动触发该 workflow 修复指定 tag。
+
 ### macOS 未签名提示
 
 桌面端目前未做 Apple Developer 签名公证，首次打开会被 Gatekeeper 拦截提示"已损坏"。这是误导文案，需执行：

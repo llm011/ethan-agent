@@ -230,10 +230,99 @@ jobs:
           fi
           gh release upload "$TAG" --repo "$REPO" --clobber /tmp/latest.json
 
+  # 把 release 上 latest.json 里的下载地址从 GitHub API 形式
+  # （api.github.com/.../releases/assets/<id>）改写为 CDN 直链
+  # （github.com/.../releases/download/<tag>/<filename>）。
+  # 原因：API 地址受未认证限流（60 次/小时/IP）且对网络环境敏感，桌面端
+  # updater 下载安装包时经常拿到 403 Forbidden；直链走 CDN 分发无限流。
+  # tauri-action 生成的 latest.json 里 URL 是 asset API 地址、不含文件名，
+  # 需要反查 release assets 建立 id→filename 映射后再替换。
+  fix-updater-json:
+    needs: [build, carry-updater-json]
+    # workflow_dispatch 时 build/carry 都跳过，需要显式放行（手动修历史 release 用）
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.build.result == 'success' || needs.carry-updater-json.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Rewrite latest.json download URLs to CDN direct links
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, subprocess, time
+
+          repo = os.environ["REPO"]
+          tag = os.environ["TAG"]
+
+          # 1. 反查 asset id -> 文件名（tauri-action 的 latest.json 里只有 id）
+          #    release 可能由 docker workflow 后创建，先等它出现
+          release = None
+          for i in range(90):
+              r = subprocess.run(
+                  ["gh", "api", f"repos/{repo}/releases/tags/{tag}"],
+                  capture_output=True, text=True,
+              )
+              if r.returncode == 0:
+                  release = json.loads(r.stdout)
+                  break
+              print(f"Waiting for release {tag}... ({i+1}/90)")
+              time.sleep(20)
+          assert release, f"release {tag} not found"
+          id2name = {str(a["id"]): a["name"] for a in release["assets"]}
+          print("asset map:", json.dumps(id2name, indent=2))
+
+          # 2. 下载当前 latest.json
+          base = f"https://github.com/{repo}/releases/download/{tag}"
+          dl = subprocess.run(
+              ["gh", "release", "download", tag, "--repo", repo,
+               "--pattern", "latest.json", "--dir", "/tmp/fixjson", "--clobber"],
+              capture_output=True, text=True,
+          )
+          if dl.returncode != 0:
+              print("No latest.json on this release, nothing to fix")
+              raise SystemExit(0)
+
+          with open("/tmp/fixjson/latest.json") as f:
+              data = json.load(f)
+
+          # 3. 把 api.github.com 的 asset 地址替换为直链；无法映射的保持原样
+          changed = 0
+          for plat, info in data.get("platforms", {}).items():
+              url = info.get("url", "")
+              if "api.github.com" in url:
+                  asset_id = url.rstrip("/").rsplit("/", 1)[-1]
+                  name = id2name.get(asset_id)
+                  if name:
+                      info["url"] = f"{base}/{name}"
+                      changed += 1
+                      print(f"{plat}: {asset_id} -> {name}")
+                  else:
+                      print(f"WARNING: {plat}: asset id {asset_id} not in release, left as-is")
+
+          if changed == 0:
+              print("All URLs already direct links, skipping upload")
+              raise SystemExit(0)
+
+          with open("/tmp/fixjson/latest.json", "w") as f:
+              json.dump(data, f, indent=2, ensure_ascii=False)
+              f.write("\n")
+
+          # 4. 覆盖上传回 release
+          subprocess.run(
+              ["gh", "release", "upload", tag, "--repo", repo,
+               "--clobber", "/tmp/fixjson/latest.json"],
+              check=True,
+          )
+          print(f"Rewrote {changed} URLs to direct links and uploaded")
+          PYEOF
+
   # 触发 Pages 重新部署，deploy-docs 会自动从 release 拉取 latest.json。
   # 不再往 main 提交 mirror commit。
   mirror-updater-json:
-    needs: [build, carry-updater-json]
+    needs: [build, carry-updater-json, fix-updater-json]
     # workflow_dispatch 时 build/carry 都跳过（result 为 'skipped'），需要显式放行
     if: always() && (github.event_name == 'workflow_dispatch' || needs.build.result == 'success' || needs.carry-updater-json.result == 'success')
     runs-on: ubuntu-latest
