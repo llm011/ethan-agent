@@ -32,6 +32,7 @@
 | [Provider 层](./providers.md) | 多模型接入、Anthropic / OpenAI 协议适配 |
 | [工具系统](./tools.md) | Tool 抽象、注册表、执行器、内置工具（shell、web_search、web_fetch、file、rg、fd）、MCP 接入 |
 | [记忆系统](./memory.md) | 四层记忆（Session/工作记忆/画像/情节）、信号检测器、语义召回、成功路径、FDE 需求挖掘 |
+| [文档库](./documents.md) | Agent 产出文档的统一落盘（`~/.ethan/documents/`）、目录约定、越界防护、doc_save/doc_list 工具、文档页交互、历史文档迁移 |
 | [Skill 系统](./skills.md) | Skill 加载、关键词匹配注入、自动生成 |
 | [对话模式](./modes.md) | Mode 机制、身份覆盖、按对话模式过滤技能、法律专家模式按需安装 |
 | [法律专家模式](./legal-mode.md) | legal-assistant 技能详解：能力范围、架构链路、按需安装、来源许可 |

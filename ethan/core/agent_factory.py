@@ -29,6 +29,7 @@ from ethan.tools.builtin.dida_tools import (
     DidaTaskCreateTool,
     DidaTaskListTool,
 )
+from ethan.tools.builtin.documents import DocListTool, DocSaveTool
 from ethan.tools.builtin.file import FileEditTool, FileListTool, FileReadTool, FileWriteTool
 from ethan.tools.builtin.find_tools import FindToolsTool
 from ethan.tools.builtin.heartbeat import HeartbeatAddTool, HeartbeatListTool, HeartbeatRemoveTool
@@ -143,6 +144,8 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     registry.register(FileEditTool())
     registry.register(FileListTool())
     registry.register(DeliverFileTool())
+    registry.register(DocSaveTool())
+    registry.register(DocListTool())
     # DIDA（滴答清单）CLI wrapper tools — 仅 DIDA_ENABLED=true 时注册（可选插件）。
     # 依赖 dida-cli 已安装并登录（docker 通过挂载 ~/.config/dida-cli 共享登录态）。
     # 未启用时工具不注册，不影响其他工具。

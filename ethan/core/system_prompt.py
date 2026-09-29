@@ -16,6 +16,24 @@ from ethan.providers.base import Message
 from ethan.skills.registry import SkillRegistry
 
 
+# 文档库协议：fast 与 full 两条分支都要注入。历史教训——它曾只写在 fast 分支里，
+# 走完整提示词的对话完全不知道 doc_save 存在，「别往 /tmp 写」的目标直接落空。
+def _documents_protocol() -> str:
+    """产出文档的落盘约定（两条 prompt 分支共用）。"""
+    return (
+        "<documents_protocol>\n"
+        "需要产出**给用户留存**的文档（报告、整理、记录、笔记、汇总等 md/txt/html/csv）时，"
+        "用 `doc_save` 工具，路径写成相对分类路径（如 "
+        "'work/coze/每日MR/2026-09-30-mr动态.md'）。它会把文档存进用户文档库（"
+        "~/.ethan/documents/），用户能在「文档」页找到并收藏。\n"
+        "**不要**把这类文档写到 /tmp 或临时目录——那些文件会被系统清理，用户回头找不到。\n"
+        "用 `doc_list` 查看已有文档，避免重复创建、并能在原文档上续写。\n"
+        "分类目录自行按主题决定（work/、life/、routine/ 等一级分类，可继续嵌套），"
+        "同一主题的文档放进同一目录，保持整洁。\n"
+        "</documents_protocol>"
+    )
+
+
 def build_schedule_context(workspace: str) -> str:
     """读取 APScheduler SQLite 数据库，返回当前活跃定时任务摘要（不需要启动 scheduler）。"""
     import datetime as dt
@@ -285,6 +303,7 @@ def build_system_prompt(
             "（知识库/定时任务/密钥/记忆写入/代码委派等），激活后直接调用。"
             "绝不要用 shell/terminal 跑 python 去硬凑这些能力。"
         )
+        parts.append(_documents_protocol())
         parts.append(_INTENT_SYSTEM_INSTRUCTION)
         if is_owner:
             parts.append(
@@ -380,6 +399,7 @@ def build_system_prompt(
     if tools_content:
         parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
         parts.append(_INTENT_SYSTEM_INSTRUCTION)
+    parts.append(_documents_protocol())
 
     if skills:
         default_list = [s for s in skills.all() if getattr(s, "category", "default") == "default"]

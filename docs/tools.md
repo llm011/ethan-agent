@@ -85,6 +85,26 @@ deliver_file(path="/Users/x/.ethan/output/article-to-video/demo/final.mp4", titl
   `agent._prepare_route` 只在 `is_owner` 时注入 `tools_list`：可见性对 owner 恒定、不依赖技能
   正文里的字符位置（不必再靠 agent.py 的 `content[:3000]` 自动激活），非 owner 则永不广播。
 
+### DocSaveTool / DocListTool — `ethan/tools/builtin/documents.py`
+
+把 Agent 产出的**文档**（md/txt/html/htm/csv/markdown）写进用户文档库 `~/.ethan/documents/`
+并同时交付文件卡片——一步完成「落盘 + 交付」。
+
+```
+doc_save(path="work/coze/每日MR/2026-09-28-mr动态.md", content="# ...", title="MR 动态", session_id="s_...")
+doc_list(prefix="work/coze")
+```
+
+- `path` 是**相对文档库根目录**的分类路径，父目录自动创建；分类由 Agent 按主题自行决定
+- 与 `deliver_file` 的分工：`deliver_file` 交付任意路径的既有文件（jail 只限 home//tmp，
+  Agent 习惯往 /tmp 丢 → 实测 57 个交付文件仅 1 个存活）；`doc_save` 用于**需要用户留存**的文档，
+  根目录固定，用户能在「文档」页找到
+- 路径经 `resolve_in_root` 逐段清洗，`../` 之类无法逃出文档库
+- `session_id` 写入元数据，供「文档」页一键跳回来源对话
+- 两个工具都设 `no_compress = True`：输出里的路径/清单要被模型逐字回传给 `file_read`，
+  压缩成散文摘要会让模型无法再操作
+- 详见 [docs/documents.md](./documents.md)
+
 ### ShellTool — `ethan/tools/builtin/shell.py`
 
 执行 shell 命令。

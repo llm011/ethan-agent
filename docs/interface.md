@@ -40,7 +40,7 @@ Ethan 提供多种交互方式，适应不同场景：
 
 桌面端用 `react-router-dom` 的 `HashRouter`（Tauri WebView 里没有服务端路由），路由表在
 `desktop/src/App.tsx`，与 Web 的路径一一对应（`/chat`、`/chat/:sessionId`、`/memory`、
-`/knowledge`、`/schedule`、`/skills`、`/sessions`、`/settings`、`/channels`、`/logs`、`/docs`）。
+`/knowledge`、`/documents`、`/schedule`、`/skills`、`/sessions`、`/settings`、`/channels`、`/logs`、`/docs`）。
 
 | 路径 | 功能 |
 |------|------|
@@ -167,6 +167,7 @@ CLI 内部维护 `WorkingMemory` 实例：
 | `/chat/[id]` | 指定会话的对话界面，支持流式输出和工具调用可视化；消息气泡显示 TTFT 耗时 |
 | `/memory` | 结构化记忆，七个 Tab：个人信息 / 偏好 / 方法论 / 正在做的事 / 决定与约定 / 苏念记忆 / 每日摘要。每条记忆可编辑/遗忘，展示来源、状态、scope、更新时间；苏念记忆仅在显式选择该 Tab 时加载（独立 domain） |
 | `/knowledge` | 知识库管理（查询、上传、删除文档） |
+| `/documents` | 文档库：Agent 产出的文档（md/txt/html/csv 等）按主题目录成树展示，可搜索、收藏、置顶、删除；点击复用侧栏预览，可放大到整宽阅读；带来源对话的文档可一键跳回产生它的那条消息 |
 | `/schedule` | 定时任务列表，支持暂停/恢复/删除/重命名 |
 | `/skills` | Skill 列表及内容预览 |
 | `/sessions` | 历史会话列表，支持按标题搜索 |
@@ -398,6 +399,14 @@ iOS 侧**没有 CI 覆盖**（`.github/workflows/test.yml` 不碰 `app/ios`，`a
 | GET | `/files/deck?path=...&session_id=...` | pptx 项目目录的 deck.json + pages/*.json，`/ppt-preview` 预览页数据源（Bearer） |
 | POST | `/files/sign` | 用 Bearer 把 path 批量换成短期签名（`{path: "exp.sig"}`，10 分钟有效），供 `<img>`/`<a>` 直链拼 `?user=&sig=` 免带 header |
 | GET | `/files/asset?path=...&session_id=...` | deck 项目 assets/ 下的图片（Bearer / cookie / 短期签名 URL 三通道鉴权，供 `<img>` 直链） |
+| GET | `/documents/tree` | 文档库文件树 + 文件总数（`~/.ethan/documents/`，供「文档」页） |
+| GET | `/documents/recent?limit=N` | 最近修改的文档，平铺列表 |
+| GET | `/documents?path=...` | 读取单个文档正文与元数据（收藏/置顶/来源对话）；非文本类型返回 415 |
+| GET | `/documents/download?path=...` | 下载文档（pdf/docx 等二进制类型的出口） |
+| PATCH | `/documents?path=...` | 更新元数据（`favorite` / `pinned` / `title` / `session_id` / `message_id`） |
+| POST | `/documents/move` | 移动/重命名文档，元数据跟随迁移（收藏不丢） |
+| DELETE | `/documents?path=...` | 删除文档（连同其元数据） |
+| GET | `/documents/root` | 文档库根目录路径与是否存在（设置页展示用） |
 | GET | `/releases/android/{tag}/app-release.apk` | Android 客户端 APK 下载（**公开、无鉴权**，见下） |
 
 `/api/releases/android/*` 是 Android 应用内自更新的下载源，**不带鉴权**：更新检查本身

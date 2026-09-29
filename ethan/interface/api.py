@@ -25,6 +25,7 @@ from ethan.interface.routers import (
     completions,
     consent,
     docs,
+    documents,
     feishu_doc,
     files,
     images,
@@ -243,6 +244,7 @@ app.include_router(knowledge.router, prefix="/api")
 app.include_router(skills.router, prefix="/api")
 app.include_router(plugins.router, prefix="/api")
 app.include_router(docs.router, prefix="/api")
+app.include_router(documents.router, prefix="/api")  # /api/documents — 文档库（Agent 产出的文档）
 app.include_router(completions.router)  # /v1 OpenAI-compat, no /api prefix
 app.include_router(logs.router, prefix="/api")
 app.include_router(models.router, prefix="/api")

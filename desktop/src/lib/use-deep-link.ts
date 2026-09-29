@@ -11,6 +11,7 @@
  *   ethan://settings/<tab>    -> /settings/<tab>
  *   ethan://memory            -> /memory
  *   ethan://knowledge         -> /knowledge
+ *   ethan://documents         -> /documents
  *   ethan://skills            -> /skills
  */
 
@@ -40,6 +41,8 @@ function mapDeepLinkUrl(raw: string): string | null {
       return "/memory";
     case "knowledge":
       return "/knowledge";
+    case "documents":
+      return "/documents";
     case "skills":
       return "/skills";
     default:

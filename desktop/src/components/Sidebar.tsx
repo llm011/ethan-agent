@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom"
-import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2, Pin, PinOff } from "lucide-react";
+import { Plus, Trash2, Search, Settings, Book, BookOpen, Pencil, Check, X, List, Wrench, RefreshCw, Loader2, Pin, PinOff, FileText } from "lucide-react";
 import { Clock, Database, CalendarDays } from "lucide-react";
 import { Ellipsis, CircleCheck } from "lucide-react";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
@@ -759,6 +759,17 @@ export function Sidebar() {
         <Button
           variant="ghost"
           className={`w-full justify-start h-9 px-3 ${
+            pathname === "/documents"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-muted-foreground"
+          }`}
+          onClick={() => goTo("/documents")}
+        >
+          <FileText className="h-4 w-4 mr-2" /> 文档 (Documents)
+        </Button>
+        <Button
+          variant="ghost"
+          className={`w-full justify-start h-9 px-3 ${
             pathname === "/knowledge"
               ? "bg-sidebar-accent text-sidebar-accent-foreground"
               : "text-muted-foreground"
@@ -805,7 +816,7 @@ export function Sidebar() {
           className="w-full justify-start h-9 px-3 text-muted-foreground"
           onClick={() => openExternal("https://llm011.github.io/ethan-agent/")}
         >
-          <BookOpen className="h-4 w-4 mr-2" /> 文档 (Docs)
+          <BookOpen className="h-4 w-4 mr-2" /> 使用手册 (Docs)
         </Button>
       </div>
 

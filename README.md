@@ -742,13 +742,14 @@ and once you reach the start (first user message) it stops: has_more=false
 **Tools**
 - [x] shell, web_search, web_fetch, file_read/write/list, rg, fd
 - [x] Knowledge base (sqlite-vec semantic search), scheduler tools, ACP → Claude Code
+- [x] Documents library: `doc_save`/`doc_list` collect Agent-produced docs into `~/.ethan/documents/` as a topic tree, browsable/favoritable/pinnable in the Documents page, with a jump back to the conversation that produced each file
 
 **Scheduler**
 - [x] Cron + interval, SQLite persistence, auto-restore on restart
 - [x] `heartbeat.md`: natural-language periodic tasks executed automatically
 
 **Channels & API**
-- [x] Web UI (Next.js): chat timeline, memory, skills, schedule, knowledge, settings
+- [x] Web UI (Next.js): chat timeline, memory, skills, schedule, knowledge, documents, settings
 - [x] Android App (Kotlin/Compose): mobile client with chat SSE, sessions, memory, settings
 - [x] Tool call timeline (collapsible, with icons + model-generation time + execution duration)
 - [x] Feishu/Lark WebSocket (no public IP required)
