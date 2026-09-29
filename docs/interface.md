@@ -83,32 +83,43 @@ CI 通过 `publish-desktop.yml` 在打 `v*` tag 时自动构建并上传到 GitH
 唯一的 ruleset（id `17945811`）enforcement 是 `disabled`，规则只有
 `["deletion","non_fast_forward"]`——**没有 required_status_checks**。
 
-于是 GitHub 对每个 PR 都立刻算出 `mergeStateStatus: CLEAN`（没有任何「待完成」的状态可等），
-而 `enablePullRequestAutoMerge` 的语义是「等条件满足后自动合并」，对一个**已经满足条件**的 PR
-会直接以 UNPROCESSABLE 拒绝：
+**关键的 GitHub 语义**（这正是当初误判的地方）：PR 的合并态有三种，用心完全不同 ——
+
+| mergeStateStatus | 含义 | auto-merge |
+|---|---|---|
+| `BLOCKED` | 有 **required** check 未通过 | ✅ 可开启（等它变绿） |
+| `UNSTABLE` | 有 check 未通过，但**都不是 required** | ❌ 拒绝（无 required 可等） |
+| `CLEAN` | 全绿 | ❌ 拒绝（已满足，无需等） |
+
+`enablePullRequestAutoMerge` 只在 `BLOCKED` 下有意义。本仓库**没有任何 required check**，
+所以 PR 永远不可能是 `BLOCKED`，只会在 `UNSTABLE` 与 `CLEAN` 之间摆动 —— **两种都被拒**。
+
+同一个 PR #386 上的实测（一手证据，可在日志里复现）：
 
 ```
-"Pull request Pull request is in clean status"
+PR 刚 opened、pytest 还在跑 → "Pull request Pull request is in unstable status"
+pytest 跑完、mergeState=CLEAN → "Pull request Pull request is in clean status"
 ```
 
-auto-merge 因此**从未在本仓库成功开启过**（实测近 20 个 PR 中 `auto_merge != null` 的数量为 0，
-workflow 日志里长期是 `⏭️ Skip PR #N: Pull request is in unstable status` 或 `clean status`）。
-仓库设置本身没问题（`allow_auto_merge=true`）。
+`unstable status` 被误读成「等检查跑完就好」，于是有了 #384 的 `check_suite` 重试方案 ——
+但跑完只会换成另一条拒绝路径，`CLEAN` 同样开不了。auto-merge 因此**从未在本仓库成功开启过**
+（实测近 20 个 PR 中 `auto_merge != null` 的数量为 0）。仓库设置本身没问题
+（`allow_auto_merge=true`）。
 
 **两个曾经被误判为根因、但都不是的点**（都已实测排除，避免重走弯路）：
 
-1. **`check_suite` 触发事件在本仓库根本不会触发。** 曾以为「刚 opened 时检查还在跑，
-   GitHub 以 `unstable status` 拒绝，等检查跑完再开即可」，于是给 workflow 加了
-   `check_suite: completed`。实测无效：该 PR 的 commit 上**确实存在** 2 个 github-actions
-   app 创建、状态 `completed/success` 的 check suite，但全仓库 `event=check_suite`
-   的 workflow run 数**至今为 0**（全部 run 的事件分布只有 push / pull_request /
-   workflow_dispatch / pull_request_target）。即：check suite 完成了，事件却没有派发到
-   workflow —— 这正是 GitHub 防递归的既定行为（由 `GITHUB_TOKEN` 触发的运行不会再
-   触发新的 workflow run），与本仓库配置无关，加触发事件解决不了。
+1. **`check_suite` 触发事件在本仓库根本不会触发。** #384 认为「刚 opened 时检查还在跑，
+   等检查跑完再开即可」，于是给 workflow 加了 `check_suite: completed`。实测无效：
+   该 PR 的 commit 上**确实存在** 2 个 github-actions app 创建、状态 `completed/success`
+   的 check suite，但全仓库 `event=check_suite` 的 workflow run 数**至今为 0**
+   （全部 run 的事件分布只有 push / pull_request / workflow_dispatch /
+   pull_request_target）。即：check suite 完成了，事件却没有派发到 workflow ——
+   这是 GitHub 防递归的既定行为（由 `GITHUB_TOKEN` 触发的运行不会再触发新的 workflow run），
+   与本仓库配置无关，**加触发事件解决不了**。而且就算它触发了，也只会在 `CLEAN` 上再被拒一次。
 2. **auto-merge 只有 GraphQL 有**（`enablePullRequestAutoMerge` mutation）。REST 的
    `github.rest.pulls` 下**没有** `enableAutomerge`。早先误用该方法，异常被 catch 吞掉后
-   伪装成「跳过」，而 check 仍显示 pass —— 这确实是**一个真实的坑**（修它对排查仍有价值，
-   见下条），但它只是让失败更难发现，不是 auto-merge 开不了的原因。
+   伪装成「跳过」，而 check 仍显示 pass —— 这确实是**一个真实的坑**（保留这个修复，
+   它让失败可见），但它只是让失败更难发现，不是 auto-merge 开不了的原因。
 
 失败信息必须区分打印（`✅` 开启 / `⏭️` clean 或 unstable / `❌` 真失败）：把异常一律
 吞成「跳过」正是上面第 2 条藏了很久的原因。这个改动保留，它让「空转」至少是**可见**的空转。

@@ -59,13 +59,15 @@ jobs:
                 const enabledAt = res.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt;
                 return `✅ PR #${number}: auto-merge 已开启 (enabledAt=${enabledAt})`;
               } catch (e) {
-                // clean status：本仓库的**常态**，不是边缘情况。main 没有 required
-                //   status check（ruleset enforcement=disabled、规则只有 deletion/
-                //   non_fast_forward），GitHub 对每个 PR 立刻算出 CLEAN，于是
-                //   enablePullRequestAutoMerge 被判「已满足条件、无需等待」而拒绝。
-                //   要真正开启必须给 main 加 required check，见 docs/interface.md。
-                // unstable status：还有检查在跑。但别指望 check_suite 事件来重试
-                //   （它在本仓库不派发，见文件头的说明），只能靠后续 synchronize。
+                // 本仓库的 auto-merge 是**结构性开不了**的，两种拒绝都不是边缘情况：
+                //   unstable status：有 check 在跑，但它们都不是 required。
+                //   clean status：全绿了，已满足合并条件、无需等待。
+                // enablePullRequestAutoMerge 只在 mergeStateStatus=BLOCKED（有 required
+                // check 未通过）时才有意义。main 没有 required check（ruleset
+                // enforcement=disabled、规则只有 deletion/non_fast_forward），PR 永远不是
+                // BLOCKED，只会在 UNSTABLE ↔ CLEAN 之间摆动 —— 两条路都被拒。
+                // 见 docs/interface.md「PR 自动合并」，那里有同一 PR 上的两态实测日志。
+                // 另注：别指望 check_suite 事件来重试，它在本仓库不派发（见文件头）。
                 // 两者都不是错误，但必须区分打印——早先把所有异常都吞成「跳过」，
                 // 真正的失败（REST 方法不存在）因此藏了很久。
                 const clean = /clean status/.test(e.message);
