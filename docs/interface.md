@@ -734,3 +734,4 @@ lark-cli 调用用户身份接口（如 `_fetch_recent_chat_messages` 走 `--as 
 
 这样 `from ethan.interface.api import app` 约 1.6s，`ethan serve restart` 端口探测在 15s 内通过，不再误报「端口未就绪」。
 
+
