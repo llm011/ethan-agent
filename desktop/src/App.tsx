@@ -11,6 +11,7 @@ import { ChatView } from "@/components/chat-view";
 import { AllSessionsView } from "@/components/all-sessions-view";
 import { MemoryView } from "@/components/memory-view";
 import { KnowledgeView } from "@/components/knowledge-view";
+import { DocumentsView } from "@/components/documents-view";
 import { SkillsView } from "@/components/skills-view";
 import { ScheduleView } from "@/components/schedule-view";
 import { AgendaView } from "@/components/agenda-view";
@@ -84,6 +85,7 @@ function RoutesTree() {
         <Route path="/sessions" element={<SessionsRoute />} />
         <Route path="/memory" element={<MemoryView />} />
         <Route path="/knowledge" element={<KnowledgeView />} />
+        <Route path="/documents" element={<DocumentsView />} />
         <Route path="/skills" element={<SkillsView />} />
         <Route path="/schedule" element={<ScheduleView />} />
         <Route path="/agenda" element={<AgendaView />} />

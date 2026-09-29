@@ -789,13 +789,14 @@ DevTools Network 里 GET /sessions/{id} 的响应体应是几百 KB 量级（不
 **工具**
 - [x] shell、web_search、web_fetch、file_read/write/list、rg、fd
 - [x] 知识库（sqlite-vec 语义检索）、定时任务管理、ACP 委派 Claude Code
+- [x] 文档库：`doc_save`/`doc_list` 把 Agent 产出的文档收进 `~/.ethan/documents/` 按主题成树，可在「文档」页浏览/收藏/置顶，并一键跳回产出该文档的对话
 
 **定时任务**
 - [x] cron + interval，SQLite 持久化，重启自动恢复
 - [x] heartbeat.md：自然语言定义周期任务，系统自动执行
 
 **渠道与 API**
-- [x] Web UI（Next.js）：对话时间轴（工具行并排展示模型生成耗时 + 工具执行耗时）、记忆管理、技能、定时、知识库、设置
+- [x] Web UI（Next.js）：对话时间轴（工具行并排展示模型生成耗时 + 工具执行耗时）、记忆管理、技能、定时、知识库、文档库、设置
 - [x] Android App（Kotlin/Compose）：移动端客户端，聊天 SSE、会话、记忆、设置等
 - [x] 飞书 WebSocket（无需公网 IP）
 - [x] OpenAI 兼容 Completions API（`/v1/chat/completions`）+ API Key 管理

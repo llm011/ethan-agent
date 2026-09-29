@@ -108,6 +108,9 @@ class RoutingConfig(BaseModel):
         "schedule_create", "schedule_list", "schedule_remove", "schedule_pause",
         "decide",  # Adaptive Planning 的决策出口（虚拟工具，agent loop 拦截不执行）
         "ui_card",
+        # doc_save/doc_list 与 ui_card 同理：<documents_protocol> 在两个档位都注入，
+        # 提示词引用的工具就必须在上下文里，否则模型只能退回 file_write 写 /tmp。
+        "doc_save", "doc_list",
         "browser_client",  # 多浏览器连接时的客户端选择入口，必须随浏览器工具一起广播
     ])  # fast 档永远挂载的基础系统工具；find_tools 用于「规则工具不够时」兜底激活进阶工具
     # ui_card 纳入 fast 档：短的结构化请求（对比/排行/统计/时间轴等）通常走 fast 档，
@@ -119,6 +122,10 @@ class RoutingConfig(BaseModel):
         # "扩展未连接"的明确报错，优于因 find_tools 激活失败陷入发现死循环超时。
         "shell", "web_search", "web_fetch", "get_weather", "generate_chart",
         "file_read", "file_write", "file_edit", "file_list",
+        # doc_save/doc_list 必须在初始集里：它们的存在意义就是「别把产出丢到 /tmp」，
+        # 而模型只能调用可见的工具。最初漏放（只注册不广播）→ 提示词教了 doc_save，
+        # 工具却不在上下文里，模型只能退回 file_write，问题原样复发。
+        "doc_save", "doc_list",
         "skill_read", "skill_list", "find_tools",
         "rg_search", "fd_find",
         "knowledge_search", "knowledge_read", "knowledge_add", "knowledge_edit",
