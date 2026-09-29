@@ -3,8 +3,12 @@ name: Auto-enable Squash Merge
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review, synchronize]
-  # check_suite 完成时才真正具备开启条件：PR 刚 opened 时检查还在跑，
-  # GitHub 会以 "unstable status" 拒绝 enablePullRequestAutoMerge（见下）。
+  # ⚠️ 这条触发在本仓库是死代码，实测从未派发过一次：
+  # check suite 确实会 completed（github-actions app 创建的、conclusion=success），
+  # 但 event=check_suite 的 workflow run 数至今为 0 —— GitHub 不让由 GITHUB_TOKEN
+  # 触发的运行再触发新 workflow run（防递归）。保留它无害，但别指望它做重试。
+  # 它当初是为「等检查跑完再开 auto-merge」加的，而那个假设本身就是错的根因判断，
+  # 详见 docs/interface.md「PR 自动合并」。
   check_suite:
     types: [completed]
   workflow_dispatch:
@@ -55,8 +59,15 @@ jobs:
                 const enabledAt = res.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt;
                 return `✅ PR #${number}: auto-merge 已开启 (enabledAt=${enabledAt})`;
               } catch (e) {
-                // clean status：已满足合并条件、没有待跑的检查，无需 auto-merge。
-                // unstable status：还有检查在跑，等 check_suite completed 事件再来一次。
+                // 本仓库的 auto-merge 是**结构性开不了**的，两种拒绝都不是边缘情况：
+                //   unstable status：有 check 在跑，但它们都不是 required。
+                //   clean status：全绿了，已满足合并条件、无需等待。
+                // enablePullRequestAutoMerge 只在 mergeStateStatus=BLOCKED（有 required
+                // check 未通过）时才有意义。main 没有 required check（ruleset
+                // enforcement=disabled、规则只有 deletion/non_fast_forward），PR 永远不是
+                // BLOCKED，只会在 UNSTABLE ↔ CLEAN 之间摆动 —— 两条路都被拒。
+                // 见 docs/interface.md「PR 自动合并」，那里有同一 PR 上的两态实测日志。
+                // 另注：别指望 check_suite 事件来重试，它在本仓库不派发（见文件头）。
                 // 两者都不是错误，但必须区分打印——早先把所有异常都吞成「跳过」，
                 // 真正的失败（REST 方法不存在）因此藏了很久。
                 const clean = /clean status/.test(e.message);
