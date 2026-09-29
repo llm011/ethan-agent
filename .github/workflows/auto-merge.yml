@@ -65,6 +65,8 @@ jobs:
                 `, { prId: pr.node_id });
                 console.log(`✅ Auto-merge enabled for PR #${pr.number}: ${pr.title}`);
               } catch (e) {
-                console.log(`❌ Failed PR #${pr.number}: ${e.message}`);
+                // "clean status" = 已满足合并条件、没有待跑的检查，无需 auto-merge
+                const clean = /clean status/.test(e.message);
+                console.log(`${clean ? '⏭️' : '❌'} PR #${pr.number}: ${e.message}`);
               }
             }
