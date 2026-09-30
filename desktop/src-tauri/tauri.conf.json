@@ -26,7 +26,8 @@
         "center": true,
         "decorations": true,
         "visible": true,
-        "titleBarStyle": "Overlay"
+        "titleBarStyle": "Overlay",
+        "dragDropEnabled": false
       },
       {
         "label": "countdown",
