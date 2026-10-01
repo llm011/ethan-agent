@@ -1,0 +1,16 @@
+# 临时探针：验证 auto-merge 合并后 pull_request[closed] 事件是否派发。
+# push 事件已被证实不派发（461fc053: 0 runs），本探针判断 closed 事件是否也如此。
+# 验证完即删。
+name: AM Probe (temporary)
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "closed 事件已派发"
+          echo "merged=${{ github.event.pull_request.merged }}"
+          echo "by=${{ github.event.pull_request.merged_by.login }}"
+          echo "sha=${{ github.event.pull_request.merge_commit_sha }}"
