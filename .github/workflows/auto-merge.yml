@@ -1,5 +1,18 @@
 name: Auto-enable Squash Merge
 
+# ⛔️ 本 workflow 已关闭（disabled_manually，2026-10-01）。
+#
+# 关掉的原因不是它本身有 bug —— 给 main 配上 required check `pytest` 后它是能正常
+# 开启 auto-merge 的。问题在 auto-merge 的**副作用**：自动合并产生的 commit 不派发
+# 任何事件（push 与 pull_request:closed 都不派发），于是 auto-bump-version / test /
+# publish-* 全不跑，版本号不 bump、不发版。受控实验证据见 docs/interface.md
+# 「PR 自动合并」——手动合并触发探针、自动合并 0 触发，同一探针同一仓库。
+#
+# 净收益为负：省一次点击，换来每次合并都要手动补触发。故关闭，回到手动合并。
+# 恢复方式：gh workflow enable auto-merge.yml（但先确认上述派发限制已解除）。
+#
+# 以下历史注释保留，重装/迁移仓库时可能再遇到：
+
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review, synchronize]
