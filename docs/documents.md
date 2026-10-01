@@ -119,9 +119,3 @@ Web 与 Desktop 两端同源（`web/components/documents-view.tsx` 与
 3. 改引用：把该消息 `cards` 里对应卡片的 `path` 换成新绝对路径（按主键 `UPDATE messages SET cards=? WHERE id=?`，
    不要整表重写）
 4. 校验：新路径须过 `file_jail.resolve_jailed` 且扩展名在 `DELIVER_EXTS`，否则卡片点不动
-
-<!-- auto-merge push-trigger 验证：本 PR 用用户 token 开启 auto-merge，
-     验证合并后 push 工作流是否触发（对照 461fc053 的 0 次触发）。 -->
-
-<!-- 对照：手动合并的 PR，验证探针本身有效 -->
-<!-- 探针测试：本 PR 会被 auto-merge 合并，用来验证 pull_request[closed] 是否派发 -->

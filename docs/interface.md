@@ -145,6 +145,36 @@ ruleset 配了：
 > 加 required check 不产生额外费用。它改变的是流程 —— **以后所有 PR 都必须等 `pytest` 绿了
 > 才能合并**（已配 bypass，不会卡住版本 bump）。
 
+#### ⚠️ 副作用：auto-merge 合并后不触发任何工作流
+
+启用 auto-merge 后发现一个**必须知道的代价**：**自动合并产生的 commit 不派发任何事件**，
+`push` 与 `pull_request: closed` 都不派发，于是依赖它们的 `auto-bump-version`、
+`test`、`publish-*` 全部不跑 —— 版本号不 bump、不发版。
+
+**受控实验证据**（同仓库内对照，排除了偶发）：
+
+| PR | 合并方式 | `merged_by` | 合并后触发的 run |
+|---|---|---|---|
+| #386 | 手动 `gh pr merge` | `jsongo` | ✅ 正常（3 个 check suite） |
+| #388 | auto-merge（workflow 的 `GITHUB_TOKEN` 开启） | `github-actions[bot]` | ❌ 0 |
+| #390 | auto-merge（同上） | `github-actions[bot]` | ❌ 0 |
+| #391 | 手动合并（对照组） | `jsongo` | ✅ 探针正常触发 |
+| #392 | auto-merge（**用户 token** 开启，`enabled_by=jsongo`） | 未合并 | — |
+
+用临时探针 workflow 挂 `pull_request: [closed]` 验证：#391（手动）触发、#390（自动）不触发 ——
+**探针本身有效**，差异确实来自合并方式。原因与 `auto-bump-version.yml` 顶部 PAT 那条限制同源：
+bot 身份（`GITHUB_TOKEN` / `github-actions[bot]`）造成的合并事件不再派发新 workflow run（防递归）。
+
+**影响与应对**：代码**本身已正确合入 main**，只是版本号与发版链要手动补。两种补法：
+
+- 推一个**真实文件改动**（空提交无效 —— `auto-bump-version` 有 `paths-ignore`，无文件变更故不匹配）
+- 或 `workflow_dispatch` 手动重跑 `auto-bump-version.yml`
+
+**取舍**：auto-merge 省的是「等 CI 绿了再点合并」这一次点击，代价是每次合并都要手动补触发，
+净收益为负。**除非上述派发限制在 GitHub 侧解除，否则建议关掉 auto-merge**
+（`gh workflow disable auto-merge.yml`），回到手动合并 —— 后者事件正常、发版链完整。
+保留 ruleset 的 required check `pytest` 仍有意义：它保证「CI 不绿就不能合并」。
+
 ### macOS 未签名提示
 
 桌面端目前未做 Apple Developer 签名公证，首次打开会被 Gatekeeper 拦截提示"已损坏"。这是误导文案，需执行：
