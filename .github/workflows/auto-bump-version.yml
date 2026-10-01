@@ -8,6 +8,20 @@ name: Auto bump version on merge to main
 # 前置条件：在仓库 Settings → Secrets 里添加名为 PAT 的 Personal Access Token
 # （需要 contents: write 权限）。用 PAT 推送的 tag 才能触发 publish-pypi.yml，
 # 用默认 GITHUB_TOKEN 推送的 tag 不会触发其他 workflow（GitHub 限制）。
+#
+# ⚠️ 与 auto-merge 的冲突（2026-10-01 实测）：**auto-merge 合并产生的 commit 不触发
+# push 工作流**，本 workflow 连同 test / publish-* 全部不跑，main 停在 feat commit
+# 且不产生新 tag。实测证据（同一仓库内两次合并的对照）：
+#   - 自动合并的 461fc053：check suite 数 = 0，workflow run 数 = 0
+#     （test.yml 无 paths 过滤、本该在每次 push main 时跑，也没跑）
+#   - 手动合并的 c4b62a2c：check suite 数 = 3，各 workflow 正常
+#   - 直接 git push 的 217c18ca：test.yml 正常触发
+# 原因大概率是自动合并由 GITHUB_TOKEN 发起，GitHub 对 GITHUB_TOKEN 造成的事件
+# 不再派发新 workflow run（防递归）——与上面 PAT 那条限制同源。
+# 影响：版本号不 bump、不发版；但**代码本身已正确合入 main**，不影响正确性。
+# 需要时手动补一次真实文件改动（空提交不行——本 workflow 有 paths-ignore，
+# 空提交无文件变更故不匹配）或 workflow_dispatch 重跑，即可补齐版本号。
+# 若要让 auto-merge 与自动发版并存，见 docs/interface.md「PR 自动合并」的取舍讨论。
 
 on:
   push:
