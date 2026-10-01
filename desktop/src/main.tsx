@@ -33,6 +33,13 @@ document.addEventListener("click", (e) => {
   openUrl(href);
 }, true);
 
+// 全局拖放兜底：tauri.conf.json 里 dragDropEnabled: false 之后，拖放事件直达
+// webview，落在没有处理组件的位置（设置页、侧栏等）时默认行为会把被拖文件
+// 当作页面导航、顶走整个 UI。这里统一 preventDefault；具体组件（聊天输入框、
+// 模型列表等）自己的 handler 已各自 preventDefault，不受影响。
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
 // URL 初始化完成后才 mount：AuthProvider 的首个请求和 WebSocket 都依赖它。
 void (async () => {
   await initServerUrl();
