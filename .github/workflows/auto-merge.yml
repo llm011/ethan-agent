@@ -59,15 +59,14 @@ jobs:
                 const enabledAt = res.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt;
                 return `✅ PR #${number}: auto-merge 已开启 (enabledAt=${enabledAt})`;
               } catch (e) {
-                // 本仓库的 auto-merge 是**结构性开不了**的，两种拒绝都不是边缘情况：
+                // 这两条拒绝都只在「main 没有 required check」时才会出现，属历史现象：
                 //   unstable status：有 check 在跑，但它们都不是 required。
                 //   clean status：全绿了，已满足合并条件、无需等待。
-                // enablePullRequestAutoMerge 只在 mergeStateStatus=BLOCKED（有 required
-                // check 未通过）时才有意义。main 没有 required check（ruleset
-                // enforcement=disabled、规则只有 deletion/non_fast_forward），PR 永远不是
-                // BLOCKED，只会在 UNSTABLE ↔ CLEAN 之间摆动 —— 两条路都被拒。
-                // 见 docs/interface.md「PR 自动合并」，那里有同一 PR 上的两态实测日志。
-                // 另注：别指望 check_suite 事件来重试，它在本仓库不派发（见文件头）。
+                // 正常情况下 PR 在 pytest 通过前是 BLOCKED（有 required check 未完成），
+                // enablePullRequestAutoMerge 才有意义。2026-10-01 给 main 加了
+                // required check `pytest`（ruleset 17945811）后，开 PR 即可开启成功。
+                // 若这两条又开始刷屏，说明 required check 配置丢了 —— 查 ruleset，
+                // 见 docs/interface.md「PR 自动合并」。
                 // 两者都不是错误，但必须区分打印——早先把所有异常都吞成「跳过」，
                 // 真正的失败（REST 方法不存在）因此藏了很久。
                 const clean = /clean status/.test(e.message);

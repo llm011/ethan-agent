@@ -74,64 +74,76 @@ CI 通过 `publish-desktop.yml` 在打 `v*` tag 时自动构建并上传到 GitH
 
 ### PR 自动合并（auto-merge）
 
-> **⚠️ 当前状态：auto-merge 在本仓库不可用，`auto-merge.yml` 实际是空转的。**
-> 下面记录的是实测结论，不要再照着一份「已修复」的错觉去排查。
+> **当前状态：已启用。** 2026-10-01 给 `main` 的 ruleset 加了 required check `pytest`，
+> auto-merge 从此可用。下面保留排查过程——它踩过的三个坑都不直观，重装/迁移仓库时会再遇到。
 
-**真正的根因：`main` 没有任何 required status check。**
+**机制**：`auto-merge.yml` 给非 draft 的 PR 开启 squash auto-merge，检查通过后由 GitHub
+自动合并，无需手点。
 
-`main` 分支未配保护规则（`/branches/main/protection` 返回 404 `Branch not protected`），
-唯一的 ruleset（id `17945811`）enforcement 是 `disabled`，规则只有
-`["deletion","non_fast_forward"]`——**没有 required_status_checks**。
+**前提：`main` 必须有 required status check。** 这是整件事的关键，缺了它 auto-merge
+**结构上开不起来**，而且报错信息具有误导性。PR 的合并态有三种：
 
-**关键的 GitHub 语义**（这正是当初误判的地方）：PR 的合并态有三种，用心完全不同 ——
-
-| mergeStateStatus | 含义 | auto-merge |
+| mergeStateStatus | 含义 | `enablePullRequestAutoMerge` |
 |---|---|---|
 | `BLOCKED` | 有 **required** check 未通过 | ✅ 可开启（等它变绿） |
 | `UNSTABLE` | 有 check 未通过，但**都不是 required** | ❌ 拒绝（无 required 可等） |
 | `CLEAN` | 全绿 | ❌ 拒绝（已满足，无需等） |
 
-`enablePullRequestAutoMerge` 只在 `BLOCKED` 下有意义。本仓库**没有任何 required check**，
-所以 PR 永远不可能是 `BLOCKED`，只会在 `UNSTABLE` 与 `CLEAN` 之间摆动 —— **两种都被拒**。
-
-同一个 PR #386 上的实测（一手证据，可在日志里复现）：
+该 mutation 只在 `BLOCKED` 下有意义。没有 required check 时，PR 永远到不了 `BLOCKED`，
+只会在 `UNSTABLE ↔ CLEAN` 之间摆动 —— **两条路都被拒**。同一 PR #386 上的实测日志：
 
 ```
 PR 刚 opened、pytest 还在跑 → "Pull request Pull request is in unstable status"
 pytest 跑完、mergeState=CLEAN → "Pull request Pull request is in clean status"
 ```
 
-`unstable status` 被误读成「等检查跑完就好」，于是有了 #384 的 `check_suite` 重试方案 ——
-但跑完只会换成另一条拒绝路径，`CLEAN` 同样开不了。auto-merge 因此**从未在本仓库成功开启过**
-（实测近 20 个 PR 中 `auto_merge != null` 的数量为 0）。仓库设置本身没问题
-（`allow_auto_merge=true`）。
+**当前配置**（ruleset id `17945811`，`enforcement: active`）：
 
-**两个曾经被误判为根因、但都不是的点**（都已实测排除，避免重走弯路）：
+```json
+{"type": "required_status_checks",
+ "parameters": {"required_status_checks": [
+   {"context": "pytest", "integration_id": 15368}],      // 15368 = github-actions app
+   "strict_required_status_checks_policy": false}}
+```
 
-1. **`check_suite` 触发事件在本仓库根本不会触发。** #384 认为「刚 opened 时检查还在跑，
-   等检查跑完再开即可」，于是给 workflow 加了 `check_suite: completed`。实测无效：
-   该 PR 的 commit 上**确实存在** 2 个 github-actions app 创建、状态 `completed/success`
-   的 check suite，但全仓库 `event=check_suite` 的 workflow run 数**至今为 0**
-   （全部 run 的事件分布只有 push / pull_request / workflow_dispatch /
-   pull_request_target）。即：check suite 完成了，事件却没有派发到 workflow ——
-   这是 GitHub 防递归的既定行为（由 `GITHUB_TOKEN` 触发的运行不会再触发新的 workflow run），
-   与本仓库配置无关，**加触发事件解决不了**。而且就算它触发了，也只会在 `CLEAN` 上再被拒一次。
-2. **auto-merge 只有 GraphQL 有**（`enablePullRequestAutoMerge` mutation）。REST 的
+- **`context` 必须与 job 名逐字一致**（`test.yml` 的 `pytest`）。写错不会报错，
+  只是永远等不到该检查、PR 卡在 `BLOCKED` —— 静默失效。当前全仓库只有这一个 `pytest` job，无重名歧义。
+- **`strict_required_status_checks_policy: false`**（非 strict 模式）：只要求检查在
+  PR 的最新 commit 上通过，不要求分支已 rebase 到最新 main。保持 false，避免「必须先更新分支」
+  把合并流程卡住。
+- `integration_id` 指向 `github-actions` app，避免同名检查被冒充。
+
+**bypass：`auto-bump-version.yml` 必须能绕过。** 它在每次合并后**直接 `git push origin main`**
+（推 bump commit + tag），是仓库里唯一这样做的工作流。加 required check 会挡住它，所以
+ruleset 配了：
+
+```json
+"bypass_actors": [{"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]
+```
+
+`actor_id: null` 是刻意的 —— 表示「所有组织管理员」而非某个固定用户，不会因为成员变动而失效。
+实测 `current_user_can_bypass: always`。**若日后 bump 工作流报 push 被拒，先查这条 bypass。**
+
+**三个已排除的误判**（都试过、都不行，别重走）：
+
+1. **`check_suite` 触发在本仓库是死代码。** 曾以为「刚 opened 时检查还在跑，等跑完再开即可」，
+   给 workflow 加了 `check_suite: completed`。实测：该 commit 上**确实存在** 2 个
+   github-actions app 创建、`completed/success` 的 check suite，但全仓库 `event=check_suite`
+   的 workflow run 数**至今为 0**（事件分布只有 push / pull_request / workflow_dispatch /
+   pull_request_target）。check suite 完成了、事件没派发 —— GitHub 防递归的既定行为
+   （`GITHUB_TOKEN` 触发的运行不再触发新 workflow run），与本仓库配置无关。**加触发事件解决不了。**
+2. **`unstable status` 曾被误读为根因**，以为「等检查跑完就好」—— 跑完只会换成
+   `clean status`，同样被拒。真正的变量是「有没有 required check」，不是「检查跑没跑完」。
+3. **auto-merge 只有 GraphQL 有**（`enablePullRequestAutoMerge` mutation）。REST 的
    `github.rest.pulls` 下**没有** `enableAutomerge`。早先误用该方法，异常被 catch 吞掉后
-   伪装成「跳过」，而 check 仍显示 pass —— 这确实是**一个真实的坑**（保留这个修复，
-   它让失败可见），但它只是让失败更难发现，不是 auto-merge 开不了的原因。
+   伪装成「跳过」，而 check 仍显示 pass。**这个坑是真的**，也是「失败必须区分打印」的由来。
 
-失败信息必须区分打印（`✅` 开启 / `⏭️` clean 或 unstable / `❌` 真失败）：把异常一律
-吞成「跳过」正是上面第 2 条藏了很久的原因。这个改动保留，它让「空转」至少是**可见**的空转。
+失败信息必须区分打印（`✅` 开启 / `⏭️` clean 或 unstable / `❌` 真失败）：把异常一律吞成
+「跳过」正是上面第 3 条藏了很久的原因。
 
-**若要真正启用 auto-merge**，必须给 `main` 加 required status check（如 `pytest`），
-让 PR 存在「待完成」状态，`enablePullRequestAutoMerge` 才有意义。但注意连带影响：
-
-- `auto-bump-version.yml` 在每次合并后**直接 `git push origin main`**，而该 ruleset 的
-  `bypass_actors` 为空 —— 加 required check 会把这条推送一并挡住。启用前需给该
-  workflow 的 token 加 bypass，或改走 PR 流程。
-- 目前 PR 合并前本就是 CLEAN、随时可合，auto-merge 带来的收益有限；不启用、
-  接受「手动点合并」也是合理选择。**不要为了「修好 auto-merge」而顺手打开规则**，先确认上述连带影响。
+> **成本提示**：本仓库是 public，Actions 对公开仓库的 standard runner 免费、不计额度，
+> 加 required check 不产生额外费用。它改变的是流程 —— **以后所有 PR 都必须等 `pytest` 绿了
+> 才能合并**（已配 bypass，不会卡住版本 bump）。
 
 ### macOS 未签名提示
 
