@@ -74,11 +74,13 @@ CI 通过 `publish-desktop.yml` 在打 `v*` tag 时自动构建并上传到 GitH
 
 ### PR 自动合并（auto-merge）
 
-> **当前状态：已启用。** 2026-10-01 给 `main` 的 ruleset 加了 required check `pytest`，
-> auto-merge 从此可用。下面保留排查过程——它踩过的三个坑都不直观，重装/迁移仓库时会再遇到。
+> **当前状态：已关闭**（`auto-merge.yml` 为 `disabled_manually`）。
+> required check `pytest` **保留**——它保证「CI 不绿就不能合并」，零成本且有用。
+> 关掉的是自动合并本身：实测它有净负收益（见下「副作用」）。
+> 下面保留完整排查过程——这些坑都不直观，重装/迁移仓库时会再遇到。
 
-**机制**：`auto-merge.yml` 给非 draft 的 PR 开启 squash auto-merge，检查通过后由 GitHub
-自动合并，无需手点。
+**曾经的机制**：`auto-merge.yml` 给非 draft 的 PR 开启 squash auto-merge，检查通过后由
+GitHub 自动合并，无需手点。**2026-10-01 实测发现它会让发版链失效，故关闭。**
 
 **前提：`main` 必须有 required status check。** 这是整件事的关键，缺了它 auto-merge
 **结构上开不起来**，而且报错信息具有误导性。PR 的合并态有三种：
@@ -170,10 +172,24 @@ bot 身份（`GITHUB_TOKEN` / `github-actions[bot]`）造成的合并事件不�
 - 推一个**真实文件改动**（空提交无效 —— `auto-bump-version` 有 `paths-ignore`，无文件变更故不匹配）
 - 或 `workflow_dispatch` 手动重跑 `auto-bump-version.yml`
 
-**取舍**：auto-merge 省的是「等 CI 绿了再点合并」这一次点击，代价是每次合并都要手动补触发，
-净收益为负。**除非上述派发限制在 GitHub 侧解除，否则建议关掉 auto-merge**
-（`gh workflow disable auto-merge.yml`），回到手动合并 —— 后者事件正常、发版链完整。
-保留 ruleset 的 required check `pytest` 仍有意义：它保证「CI 不绿就不能合并」。
+**结论：净收益为负，已关闭。** auto-merge 省的是「等 CI 绿了再点合并」这一次点击，
+代价是每次合并都要手动补触发发版链。**除非 GitHub 侧解除该派发限制，否则不要再打开它。**
+
+关闭方式（随时可逆）：
+
+```bash
+gh workflow disable auto-merge.yml      # 关闭；enable 可恢复
+```
+
+**关掉 auto-merge ≠ 回退全部改动**，两件事要分开看：
+
+| 配置 | 状态 | 为什么 |
+|---|---|---|
+| ruleset required check `pytest` | ✅ **保留** | 保证「CI 不绿不能合并」，零成本、有实际价值 |
+| ruleset bypass `OrganizationAdmin` | ✅ **保留** | 让 `auto-bump-version` 的直推不被挡（见上） |
+| `auto-merge.yml` workflow | ❌ **已关闭** | 自动合并有上述副作用，得不偿失 |
+
+手动合并（`gh pr merge` / 网页点按钮）产生的 commit 事件正常，发版链完整 —— 这是当前的正常流程。
 
 ### macOS 未签名提示
 
