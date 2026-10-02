@@ -43,6 +43,9 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   // 避免 SSR 与客户端首帧不一致导致 hydration mismatch。
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT);
+  // 拖动中要关掉宽度过渡：内层 div 的 transition-all 本是给展开/收起做动画的，
+  // 拖拽时会让面板慢半拍地追光标（实测落后 70px+）。松手后再恢复过渡。
+  const [resizing, setResizing] = useState(false);
 
   useEffect(() => {
     const stored = readSidebarWidth();
@@ -59,11 +62,13 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
   const handleSidebarResize = useCallback((deltaX: number) => {
     // 侧边栏在左侧：向右拖（deltaX > 0）变宽
+    setResizing(true);
     const next = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, sidebarWidthRef.current + deltaX));
     setSidebarWidth(next);
   }, []);
 
   const handleSidebarResizeEnd = useCallback(() => {
+    setResizing(false);
     setSidebarWidth((current) => {
       sidebarWidthRef.current = current;
       try {
@@ -112,14 +117,18 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
         >
           {/* 宽度用内层元素控制：md:w-64 / md:w-0 的 class 与行内 width 会打架，
               内层宽度只在桌面端生效，移动端仍由外层的 w-72 决定 */}
-          <div className="relative flex flex-col w-full h-full md:w-[var(--sb-w)] transition-all duration-200">
+          <div className={`relative flex flex-col w-full h-full md:w-[var(--sb-w)] ${
+            resizing ? "" : "transition-all duration-200"
+          }`}>
             <Sidebar />
             {/* 分隔线：仅桌面端、且侧边栏打开时——收起态没有可拖的边界。
-                overlay 变体压在 sidebar 自带的 border-r 上，不占布局宽度 */}
+                overlay + edge=right：压在 sidebar 自带的 border-r 上（右侧那条），
+                不占布局宽度 */}
             {sidebarOpen && (
               <div className="hidden md:block">
                 <ResizeHandle
                   variant="overlay"
+                  edge="right"
                   onResize={handleSidebarResize}
                   onResizeEnd={handleSidebarResizeEnd}
                 />

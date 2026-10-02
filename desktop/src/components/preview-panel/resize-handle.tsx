@@ -7,11 +7,14 @@ interface ResizeHandleProps {
    * flow：自己画一条分隔条并占据布局宽度（两侧本来没有 border 时用）。
    * overlay：完全不占位，覆盖在已有的 border 上（该 border 负责视觉）。
    *   侧边栏要用 overlay —— 折叠箭头是按 border 位置定位的，插入占位元素会把它挤偏。
+   *   edge 指定压哪条边：被覆盖的 border 在父容器右侧就传 "right"（如侧边栏的
+   *   `border-r`），传错会让命中区落在容器另一侧、看得见的那条线拖不动。
    */
   variant?: "flow" | "overlay";
+  edge?: "left" | "right";
 }
 
-export function ResizeHandle({ onResize, onResizeEnd, variant = "flow" }: ResizeHandleProps) {
+export function ResizeHandle({ onResize, onResizeEnd, variant = "flow", edge = "left" }: ResizeHandleProps) {
   const dragging = useRef(false);
   const cleanupRef = useRef<(() => void) | null>(null);
 
@@ -60,10 +63,13 @@ export function ResizeHandle({ onResize, onResizeEnd, variant = "flow" }: Resize
   if (variant === "overlay") {
     // 视觉仍是那 1px 的 border，这里只做命中区 + hover 高亮；
     // 命中区向两侧各扩 4px —— 1px 的线在触控板上几乎点不中。
+    const atRight = edge === "right";
     return (
       <div
         {...baseProps}
-        className="group absolute inset-y-0 left-0 z-20 w-[9px] -translate-x-1/2 cursor-col-resize"
+        className={`group absolute inset-y-0 z-20 w-[9px] cursor-col-resize ${
+          atRight ? "right-0 translate-x-1/2" : "left-0 -translate-x-1/2"
+        }`}
       >
         <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary group-active:bg-primary" />
       </div>
