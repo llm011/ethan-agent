@@ -789,7 +789,7 @@ DevTools Network 里 GET /sessions/{id} 的响应体应是几百 KB 量级（不
 **工具**
 - [x] shell、web_search、web_fetch、file_read/write/list、rg、fd
 - [x] 知识库（sqlite-vec 语义检索）、定时任务管理、ACP 委派 Claude Code
-- [x] 文档库：`doc_save`/`doc_list` 把 Agent 产出的文档收进 `~/.ethan/documents/` 按主题成树，可在「文档」页浏览/收藏/置顶，并一键跳回产出该文档的对话
+- [x] 文档库：`doc_save`/`doc_list` 把 Agent 产出的文档收进 `~/.ethan/documents/` 按主题成树，可在「文档」页浏览/收藏，并一键跳回产出该文档的对话
 
 **定时任务**
 - [x] cron + interval，SQLite 持久化，重启自动恢复

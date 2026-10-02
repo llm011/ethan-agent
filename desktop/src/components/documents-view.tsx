@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronDown, ChevronRight, FileText, Folder, FolderOpen, Loader2,
-  Pin, PinOff, RefreshCw, Search, Star, X, MessageSquare, Trash2,
+  RefreshCw, Search, Star, X, MessageSquare, Trash2,
   Maximize2, Minimize2,
 } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
@@ -20,13 +20,13 @@ import {
   deleteDocument,
 } from "@/lib/api";
 
-/** 从树里筛出收藏/置顶的文件（含其相对路径）。 */
-function collectFlagged(nodes: DocNode[], key: "favorite" | "pinned"): DocNode[] {
+/** 从树里筛出收藏的文件（含其相对路径）。 */
+function collectFlagged(nodes: DocNode[]): DocNode[] {
   const out: DocNode[] = [];
   const walk = (list: DocNode[]) => {
     for (const n of list) {
       if (n.is_dir) walk(n.children ?? []);
-      else if (n[key]) out.push(n);
+      else if (n.favorite) out.push(n);
     }
   };
   walk(nodes);
@@ -63,14 +63,13 @@ function fileIcon(ext?: string) {
 interface RowActions {
   active: string;   // 当前选中文档的 path
   onOpen: (n: DocNode) => void;
-  onTogglePin: (n: DocNode) => void;
   onToggleFavorite: (n: DocNode) => void;
   onLocate: (n: DocNode) => void;
   onDelete: (n: DocNode) => void;
 }
 
 /** 单个文件行。 */
-function DocRow({ node, active, onOpen, onTogglePin, onToggleFavorite, onLocate, onDelete }: RowActions & { node: DocNode }) {
+function DocRow({ node, active, onOpen, onToggleFavorite, onLocate, onDelete }: RowActions & { node: DocNode }) {
   const Icon = fileIcon(node.ext);
   return (
     <div
@@ -81,17 +80,9 @@ function DocRow({ node, active, onOpen, onTogglePin, onToggleFavorite, onLocate,
     >
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="truncate flex-1" title={node.path}>{node.name}</span>
-      {node.pinned && <Pin className="h-3.5 w-3.5 shrink-0 text-primary" />}
-      {node.favorite && !node.pinned && <Star className="h-3.5 w-3.5 shrink-0 text-amber-500" />}
+      {node.favorite && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-500 text-amber-500" />}
       {/* 操作按钮：hover 显示，避免列表视觉噪音 */}
       <span className="hidden group-hover:flex items-center gap-0.5 shrink-0">
-        <button
-          className="p-1 rounded hover:bg-background/80"
-          title={node.pinned ? "取消置顶" : "置顶"}
-          onClick={(e) => { e.stopPropagation(); onTogglePin(node); }}
-        >
-          {node.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-        </button>
         <button
           className="p-1 rounded hover:bg-background/80"
           title={node.favorite ? "取消收藏" : "收藏"}
@@ -164,7 +155,6 @@ export function DocumentsView() {
   const [active, setActive] = useState("");
   const [detail, setDetail] = useState<DocDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [pinnedOpen, setPinnedOpen] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<DocNode | null>(null);
   // 放大：隐藏列表区让正文占满宽度（侧边导航仍在，它是外层 layout 的一部分）。
   // 只影响阅读焦点，关闭预览或切换文档时保持，避免每次都要重新点。
@@ -230,15 +220,6 @@ export function DocumentsView() {
     setTree((prev) => walk(prev));
   }, []);
 
-  const togglePin = useCallback(async (node: DocNode) => {
-    const next = !node.pinned;
-    patchNode(node.path, { pinned: next });
-    try {
-      await updateDocumentMeta(node.path, { pinned: next });
-      if (detail?.path === node.path) setDetail({ ...detail, pinned: next });
-    } catch { patchNode(node.path, { pinned: !next }); }
-  }, [patchNode, detail]);
-
   const toggleFavorite = useCallback(async (node: DocNode) => {
     const next = !node.favorite;
     patchNode(node.path, { favorite: next });
@@ -273,13 +254,11 @@ export function DocumentsView() {
   }, [pendingDelete, active, load]);
 
   const filtered = useMemo(() => filterTree(tree, query), [tree, query]);
-  const pinnedList = useMemo(() => collectFlagged(filtered, "pinned"), [filtered]);
-  const favoriteList = useMemo(() => collectFlagged(filtered, "favorite"), [filtered]);
+  const favoriteList = useMemo(() => collectFlagged(filtered), [filtered]);
 
   const rowProps: RowActions = {
     active,
     onOpen: (n) => void openDoc(n),
-    onTogglePin: (n) => void togglePin(n),
     onToggleFavorite: (n) => void toggleFavorite(n),
     onLocate: locate,
     onDelete: (n) => setPendingDelete(n),
@@ -311,24 +290,7 @@ export function DocumentsView() {
 
         <ScrollArea className="flex-1 min-h-0">
           <div className="p-2">
-            {/* 置顶区：可折叠 */}
-            {pinnedList.length > 0 && (
-              <div className="mb-3">
-                <button
-                  className="flex items-center gap-1.5 w-full px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
-                  onClick={() => setPinnedOpen((v) => !v)}
-                >
-                  {pinnedOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                  <Pin className="h-3.5 w-3.5" />
-                  置顶 ({pinnedList.length})
-                </button>
-                {pinnedOpen && pinnedList.map((n) => (
-                  <DocRow key={`pin-${n.path}`} node={n} {...rowProps} />
-                ))}
-              </div>
-            )}
-
-            {/* 收藏区（置顶之外） */}
+            {/* 收藏区 */}
             {favoriteList.length > 0 && (
               <div className="mb-3">
                 <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-muted-foreground">
@@ -419,20 +381,10 @@ export function DocumentsView() {
                 title={detail.favorite ? "取消收藏" : "收藏"}
                 onClick={() => void toggleFavorite({
                   path: detail.path, name: detail.title, is_dir: false, mtime: 0,
-                  favorite: detail.favorite, pinned: detail.pinned,
+                  favorite: detail.favorite,
                 })}
               >
                 <Star className={`h-4 w-4 ${detail.favorite ? "fill-amber-500 text-amber-500" : ""}`} />
-              </Button>
-              <Button
-                variant="ghost" size="icon" className="h-7 w-7 shrink-0"
-                title={detail.pinned ? "取消置顶" : "置顶"}
-                onClick={() => void togglePin({
-                  path: detail.path, name: detail.title, is_dir: false, mtime: 0,
-                  favorite: detail.favorite, pinned: detail.pinned,
-                })}
-              >
-                <Pin className={`h-4 w-4 ${detail.pinned ? "text-primary" : ""}`} />
               </Button>
               <Button
                 variant="ghost" size="icon" className="h-7 w-7 shrink-0"

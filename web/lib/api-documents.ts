@@ -2,7 +2,7 @@
  * 文档库 API —— Agent 产出的文档（~/.ethan/documents/）。
  *
  * 与 /docs（项目自身文档站）、/knowledge（知识库）区分：
- * 这里管理的是对话里产出的文档，支持文件树、收藏置顶、溯源到来源对话。
+ * 这里管理的是对话里产出的文档，支持文件树、收藏、溯源到来源对话。
  */
 import { API_URL, fetchWithTimeout, headers } from "./api-base";
 
