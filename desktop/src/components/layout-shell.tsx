@@ -3,9 +3,28 @@ import { LoginView } from "@/components/login-view";
 import { Sidebar } from "@/components/Sidebar";
 import { UpdateToast } from "@/components/update-toast";
 import { PreviewProvider } from "@/components/preview-panel/preview-context";
-import { useState, useEffect, createContext, useContext } from "react";
+import { ResizeHandle } from "@/components/preview-panel/resize-handle";
+import { useState, useEffect, createContext, useContext, useCallback, useRef } from "react";
 import { ChevronLeft, ChevronRight, Menu } from "lucide-react";
 import { Outlet } from "react-router-dom";
+
+// 侧边栏宽度（px）。用 px 而非百分比：侧边栏装的是导航项，宽度与视口无关，
+// 窗口拉宽时它不该跟着变胖。
+const SIDEBAR_KEY = "ethan:sidebar-width";
+const SIDEBAR_DEFAULT = 256;   // 与原先的 w-64 一致
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 420;
+
+function readSidebarWidth(): number {
+  if (typeof window === "undefined") return SIDEBAR_DEFAULT;
+  try {
+    const n = Number(localStorage.getItem(SIDEBAR_KEY));
+    if (!Number.isFinite(n) || n <= 0) return SIDEBAR_DEFAULT;
+    return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, n));
+  } catch {
+    return SIDEBAR_DEFAULT;
+  }
+}
 
 // Shared context so child views (chat-view, etc.) can toggle the sidebar
 export const SidebarContext = createContext<{
@@ -18,9 +37,35 @@ export const useSidebar = () => useContext(SidebarContext);
 export function LayoutShell() {
   const { authenticated, loading } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // 侧边栏宽度（px，可拖拽）。初始用默认值，挂载后再读 localStorage——
+  // 避免 SSR 与客户端首帧不一致导致 hydration mismatch。
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
+  const sidebarWidthRef = useRef(SIDEBAR_DEFAULT);
+
+  useEffect(() => {
+    const stored = readSidebarWidth();
+    sidebarWidthRef.current = stored;
+    setSidebarWidth(stored);
+  }, []);
 
   useEffect(() => {
     if (window.innerWidth < 768) setSidebarOpen(false);
+  }, []);
+
+  const handleSidebarResize = useCallback((deltaX: number) => {
+    // 侧边栏在左侧：向右拖（deltaX > 0）变宽
+    const next = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, sidebarWidthRef.current + deltaX));
+    setSidebarWidth(next);
+  }, []);
+
+  const handleSidebarResizeEnd = useCallback(() => {
+    setSidebarWidth((current) => {
+      sidebarWidthRef.current = current;
+      try {
+        localStorage.setItem(SIDEBAR_KEY, String(Math.round(current)));
+      } catch {}
+      return current;
+    });
   }, []);
 
   if (loading) {
@@ -45,18 +90,35 @@ export function LayoutShell() {
           />
         )}
 
-        {/* Sidebar — 与窗口同高，顶部区域充当地址栏拖拽区 */}
+        {/* Sidebar — 与窗口同高，顶部区域充当地址栏拖拽区
+            桌面端宽度可拖拽（默认 256 = 原先的 w-64）；移动端是覆盖式抽屉，拖拽宽度没有意义 */}
         <div
           className={`
             flex flex-col shrink-0 transition-all duration-200
             ${
               sidebarOpen
-                ? "fixed inset-y-0 left-0 z-40 w-72 shadow-xl md:shadow-none md:relative md:z-auto md:inset-auto md:w-64"
+                ? "fixed inset-y-0 left-0 z-40 w-72 shadow-xl md:shadow-none md:relative md:z-auto md:inset-auto md:transition-none"
                 : "hidden md:flex md:w-0 md:overflow-hidden"
             }
           `}
+          style={sidebarOpen ? ({ "--sb-w": `${sidebarWidth}px` } as React.CSSProperties) : undefined}
         >
-          <Sidebar />
+          {/* 宽度用内层元素控制：md:w-64 / md:w-0 的 class 与行内 width 会打架，
+              内层宽度只在桌面端生效，移动端仍由外层的 w-72 决定 */}
+          <div className="relative flex flex-col w-full h-full md:w-[var(--sb-w)] transition-all duration-200">
+            <Sidebar />
+            {/* 分隔线：仅桌面端、且侧边栏打开时——收起态没有可拖的边界。
+                overlay 变体压在 sidebar 自带的 border-r 上，不占布局宽度 */}
+            {sidebarOpen && (
+              <div className="hidden md:block">
+                <ResizeHandle
+                  variant="overlay"
+                  onResize={handleSidebarResize}
+                  onResizeEnd={handleSidebarResizeEnd}
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Desktop sidebar collapse toggle */}
