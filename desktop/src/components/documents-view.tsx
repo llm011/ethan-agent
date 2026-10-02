@@ -9,6 +9,8 @@ import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
 import { ScrollArea } from "@ethan/shared/ui/scroll-area";
 import { ConfirmDialog } from "@ethan/shared/components/confirm-dialog";
+import { usePaneResize } from "@ethan/shared/lib/pane-resize";
+import { ResizeHandle } from "@/components/preview-panel/resize-handle";
 import {
   DocNode,
   DocDetail,
@@ -168,6 +170,10 @@ export function DocumentsView() {
   // 只影响阅读焦点，关闭预览或切换文档时保持，避免每次都要重新点。
   const [maximized, setMaximized] = useState(false);
 
+  // 预览区宽度（百分比，可拖拽）。预览区在右侧，故用面板宽度语义。
+  const { size: previewSize, containerRef, handleResize, handleResizeEnd } =
+    usePaneResize({ storageKey: "ethan:documents-preview-size", defaultSize: 46, min: 25, max: 80 });
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -280,9 +286,9 @@ export function DocumentsView() {
   };
 
   return (
-    <div className="flex h-full min-h-0">
+    <div ref={containerRef} className="flex h-full min-h-0">
       {/* 左：列表区。放大阅读时整块隐藏，把宽度让给正文 */}
-      <div className={`flex flex-col flex-1 min-w-0 border-r border-border ${maximized ? "hidden" : ""}`}>
+      <div className={`flex flex-col flex-1 min-w-0 ${maximized ? "hidden" : ""}`}>
         {/* 顶部：搜索 + 文件数 */}
         <div className="shrink-0 border-b border-border px-4 py-3 space-y-2">
           <div className="flex items-center gap-2">
@@ -364,11 +370,18 @@ export function DocumentsView() {
         </ScrollArea>
       </div>
 
+      {/* 分隔线：仅在有预览时出现（没有可调的两侧宽度，拖拽无意义）。
+          放大态列表已隐藏，同样不显示。 */}
+      {detail && !maximized && (
+        <ResizeHandle onResize={handleResize} onResizeEnd={handleResizeEnd} />
+      )}
+
       {/* 右：预览区（复用文件卡片同样的 markdown 渲染）。
-          放大时占满整个宽度；正常态固定比例并与列表并排。 */}
+          放大时占满整个宽度；正常态宽度可拖拽（min-w 兜底防止拖到内容不可读）。 */}
       <div className={maximized
         ? "flex-1 min-w-0 flex flex-col min-h-0"
-        : "w-[46%] min-w-[320px] flex flex-col min-h-0"}>
+        : "min-w-[280px] flex flex-col min-h-0"}
+        style={maximized ? undefined : { width: `${previewSize}%` }}>
         {detailLoading ? (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin mr-2" /> 加载中…
