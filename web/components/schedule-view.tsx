@@ -86,6 +86,21 @@ function getTimeStr(nextRun: string | null): string {
   return `${h}:${m}`;
 }
 
+// today 视图的时间窗：下次执行在今明两天。tab badge 与列表共用同一个判断，
+// 保证两边的数字永远一致（badge 与列表口径分叉会被当成计数错误）。
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function inTodayWindow(j: ScheduleJob): boolean {
+  if (!j.next_run_time) return false; // 暂停/无下次执行的任务不属于今明窗口
+  const d = new Date(j.next_run_time);
+  if (isNaN(d.getTime())) return false;
+  const now = new Date();
+  const key = dayKey(d);
+  return key === dayKey(now) || key === dayKey(new Date(now.getTime() + 86400000));
+}
+
 export function ScheduleView() {
   const router = useRouter();
   const [jobs, setJobs] = useState<ScheduleJob[]>([]);
@@ -232,28 +247,24 @@ export function ScheduleView() {
     const counts: Record<string, number> = {};
     const paused: Record<string, number> = {};
     for (const s of scenes) { counts[s] = 0; paused[s] = 0; }
+    // badge 口径跟随当前视图：today 模式只数今明两天的（和列表对得上），
+    // all 模式数全部。固定数全部的话，today 视图 badge 26 列表只有 10，
+    // 看起来像把已删除/重复的任务也算进去了。
     for (const j of jobs) {
+      if (viewMode === "today" && !inTodayWindow(j)) continue;
       const s = j.scene || "work";
       counts[s] = (counts[s] || 0) + 1;
       if (j.status === "paused") paused[s] = (paused[s] || 0) + 1;
     }
     return { counts, paused };
-  }, [scenes, jobs]);
+  }, [scenes, jobs, viewMode]);
 
   // today 模式：只展示今天+明天的任务；all 模式：过去全部 + 今天到未来 futureDays 天，点「展开」看剩余
   const visibleJobs = useMemo(() => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     if (viewMode === "today") {
-      const tomorrowStr = `${new Date(now.getTime() + 86400000).getFullYear()}-${String(new Date(now.getTime() + 86400000).getMonth() + 1).padStart(2, "0")}-${String(new Date(now.getTime() + 86400000).getDate()).padStart(2, "0")}`;
-      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      return sceneJobs.filter(j => {
-        if (!j.next_run_time) return false;
-        const d = new Date(j.next_run_time);
-        if (isNaN(d.getTime())) return false;
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        return key === todayStr || key === tomorrowStr;
-      });
+      return sceneJobs.filter(inTodayWindow);
     }
     // all 模式：展开后不再截断（badge 数的是分类全部任务，列表必须能对上，
     // 否则 tab 显示 4 个列表只有 3 个，第 4 个像凭空消失）
@@ -272,6 +283,8 @@ export function ScheduleView() {
 
   // all 模式下被时间窗截掉的任务数（提示用户「还有 N 个」，对齐 tab badge 的预期）
   const hiddenCount = viewMode === "all" && !expandAll ? sceneJobs.length - visibleJobs.length : 0;
+  // today 模式下属于其他日期的任务数（badge 只数今明两天，这里提示差值去哪了）
+  const otherDayCount = viewMode === "today" ? sceneJobs.length - visibleJobs.length : 0;
 
   const dateGroups = useMemo(() => groupJobsByDate(visibleJobs), [visibleJobs]);
 
@@ -507,6 +520,15 @@ export function ScheduleView() {
                 onClick={() => setExpandAll(true)}
                 className="text-xs text-primary hover:underline"
               >还有 {hiddenCount} 个更远期的任务，点击展开…</button>
+            </div>
+          )}
+          {/* today 模式：badge 只数今明两天，这里提示其余任务去了哪（一键切到全部） */}
+          {otherDayCount > 0 && !loading && (
+            <div className="pb-3 text-center">
+              <button
+                onClick={() => setViewMode("all")}
+                className="text-xs text-primary hover:underline"
+              >本分类还有 {otherDayCount} 个其他日期的任务，切换到「全部」查看…</button>
             </div>
           )}
           {loading && visibleJobs.length === 0 ? (
