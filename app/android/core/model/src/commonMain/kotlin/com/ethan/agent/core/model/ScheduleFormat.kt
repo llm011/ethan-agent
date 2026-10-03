@@ -20,10 +20,11 @@ object ScheduleFormat {
     private val INTERVAL_RE = Regex("""interval\[(\d+):(\d+):(\d+)]""")
     private val CRON_RE = Regex("""cron\[(.+)]""")
     private val CRON_FIELD_RE = Regex("""(\w+)='([^']+)'""")
+    private val DATE_RE = Regex("""date\[(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})""")
 
     private val DAY_NAMES = mapOf(
         "0" to "周日", "1" to "周一", "2" to "周二", "3" to "周三",
-        "4" to "周四", "5" to "周五", "6" to "周六",
+        "4" to "周四", "5" to "周五", "6" to "周六", "7" to "周日",
         "mon" to "周一", "tue" to "周二", "wed" to "周三", "thu" to "周四",
         "fri" to "周五", "sat" to "周六", "sun" to "周日",
     )
@@ -31,6 +32,29 @@ object ScheduleFormat {
     private fun isWild(v: String?): Boolean = v.isNullOrBlank() || v == "*"
 
     private fun pad2(v: String): String = if (v.length >= 2) v else "0".repeat(2 - v.length) + v
+
+    private fun formatDow(dow: String): String {
+        val lower = dow.trim().lowercase()
+        if (isWild(lower)) return ""
+        if (lower == "mon-fri" || lower == "1-5") return "工作日"
+        if (lower in setOf("sat,sun", "sun,sat", "6,0", "0,6", "6,7", "7,6")) return "周末"
+        return lower.split(",").joinToString("、") { d ->
+            val key = d.trim()
+            DAY_NAMES[key] ?: key
+        }
+    }
+
+    private fun formatMinutes(minute: String): String {
+        if (minute.startsWith("*/")) {
+            return "每 ${minute.removePrefix("*/")} 分钟"
+        }
+        if (minute.contains(",")) {
+            val mins = minute.split(",").joinToString("、") { pad2(it.trim()) }
+            return "$mins 分"
+        }
+        if (isWild(minute) || minute == "0") return "整点"
+        return "第 ${pad2(minute)} 分"
+    }
 
     /**
      * 小时字段可能是单值、多值（`9,21`）或步长（星号斜杠 N）。
@@ -53,13 +77,18 @@ object ScheduleFormat {
     /**
      * 把后端返回的 trigger 原文转成人类可读的中文描述。
      *
-     * 支持两种形式（与后端 `scheduler` 一致）：
+     * 支持形式（与后端 `scheduler` 一致）：
      * - `interval[H:MM:SS]` → 「每 N 分钟 / 每 N 小时 / 每 N 天」
-     * - `cron[key='val', ...]` → 「每天 09:00」「每 周一、周三 10:30」「每月 15 日 08:00」
+     * - `cron[key='val', ...]` → 「每天 09:00」「每小时第 17 分」「工作日 09:00」「每月 15 日 08:00」
+     * - `date[...]` → 「单次 2026-10-01 10:00」
      *
-     * 无法识别时原样返回，让用户至少看到真实配置而不是空白。
+     * 无法识别时做去通配兜底，绝不直接把带 * 的机器 cron 语法暴露给用户。
      */
     fun formatTrigger(trigger: String): String {
+        DATE_RE.find(trigger)?.let { m ->
+            return "单次 ${m.groupValues[1]} ${m.groupValues[2]}"
+        }
+
         INTERVAL_RE.find(trigger)?.let { m ->
             val h = m.groupValues[1].toIntOrNull() ?: 0
             val min = m.groupValues[2].toIntOrNull() ?: 0
@@ -86,25 +115,83 @@ object ScheduleFormat {
             val hour = p["hour"] ?: "*"
             val dow = p["day_of_week"] ?: "*"
             val dom = p["day"] ?: "*"
+            val month = p["month"] ?: "*"
 
-            // 每 N 分钟：minute='*/N'
-            if (minute.startsWith("*/")) {
-                return "每 ${minute.removePrefix("*/")} 分钟（cron）"
+            val dowStr = formatDow(dow)
+            val dowPrefix = when {
+                dowStr.isEmpty() -> ""
+                dowStr in setOf("工作日", "周末") -> "$dowStr "
+                else -> "每 $dowStr "
             }
-            // 每天固定时间；hour 可能是多值（`9,21`）或步长（星号斜杠 N）
+
+            // 1. 每 N 分钟：minute='*/N'
+            if (minute.startsWith("*/")) {
+                val step = minute.removePrefix("*/")
+                return if (isWild(hour)) {
+                    "${dowPrefix}每 $step 分钟"
+                } else if (hour.contains("-")) {
+                    "${dowPrefix}${hour} 点每 $step 分钟"
+                } else {
+                    "${dowPrefix}${formatHours(hour, "00")} 起每 $step 分钟"
+                }
+            }
+
+            // 2. 每小时（hour 通配符，如 hour='*'）：常见如每小时第 17 分、每小时整点
+            if (isWild(hour)) {
+                val minStr = formatMinutes(minute)
+                val joiner = if (minStr.firstOrNull()?.isDigit() == true) " " else ""
+                return if (dowPrefix.isNotEmpty()) {
+                    "${dowPrefix}每小时$joiner$minStr"
+                } else {
+                    "每小时$joiner$minStr"
+                }
+            }
+
+            // 3. 小时范围（如 hour='9-18' 或 '10-23'）
+            if (hour.contains("-")) {
+                val minStr = if (isWild(minute) || minute == "0") "整点" else ":${pad2(minute)}"
+                return if (dowPrefix.isNotEmpty()) {
+                    "${dowPrefix}${hour} 点 $minStr"
+                } else {
+                    "每天 ${hour} 点 $minStr"
+                }
+            }
+
+            // 4. 每年固定月份+日期
+            if (!isWild(month) && !isWild(dom)) {
+                return "每年 ${month}月${dom}日 ${formatHours(hour, minute)}"
+            }
+
+            // 5. 每年固定月份
+            if (!isWild(month)) {
+                return "每年 ${month}月 ${formatHours(hour, minute)}"
+            }
+
+            // 6. 每月固定日
+            if (!isWild(dom) && isWild(dow)) {
+                return "每月 $dom 日 ${formatHours(hour, minute)}"
+            }
+
+            // 7. 指定星期几 / 工作日 / 周末
+            if (!isWild(dow) && isWild(dom)) {
+                return "${dowPrefix}${formatHours(hour, minute)}"
+            }
+
+            // 8. 每天固定时间
             if (!isWild(hour) && isWild(dow) && isWild(dom)) {
                 return "每天 ${formatHours(hour, minute)}"
             }
-            // 指定星期几
-            if (!isWild(dow) && isWild(dom)) {
-                val days = dow.split(",").joinToString("、") { d ->
-                    DAY_NAMES[d.trim()] ?: d.trim()
-                }
-                return "每 $days ${padTime(hour, minute)}"
+
+            // 9. 兜底格式化：把非通配字段拼接起来，绝不输出带 * 的机器字符串
+            val parts = mutableListOf<String>()
+            if (!isWild(month)) parts.add("${month}月")
+            if (!isWild(dom)) parts.add("${dom}日")
+            if (dowPrefix.isNotBlank()) parts.add(dowPrefix.trim())
+            if (!isWild(hour) || !isWild(minute)) {
+                parts.add(formatHours(hour, minute))
             }
-            // 每月固定日
-            if (!isWild(dom) && isWild(dow)) {
-                return "每月 $dom 日 ${padTime(hour, minute)}"
+            if (parts.isNotEmpty()) {
+                return parts.joinToString(" ")
             }
         }
 

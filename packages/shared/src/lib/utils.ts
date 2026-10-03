@@ -19,7 +19,14 @@ export function fmtTokens(n: number | undefined | null): string {
 
 // "interval[0:10:00]" → "每 10 分钟"
 // "cron[minute='0', hour='9', ...]" → "每天 09:00"
+// "cron[hour='*', minute='17']" → "每小时第 17 分"
 export function formatTrigger(trigger: string): string {
+  // date[2026-10-15 14:30:00+08:00]
+  const dateMatch = trigger.match(/date\[(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})/)
+  if (dateMatch) {
+    return `单次 ${dateMatch[1]} ${dateMatch[2]}`
+  }
+
   // interval[H:MM:SS]
   const intervalMatch = trigger.match(/interval\[(\d+):(\d+):(\d+)\]/)
   if (intervalMatch) {
@@ -52,46 +59,98 @@ export function formatTrigger(trigger: string): string {
     const hour = p.hour ?? "*"
     const dow = p.day_of_week ?? "*"
     const dom = p.day ?? "*"
+    const month = p.month ?? "*"
 
+    const dayNames: Record<string, string> = {
+      "0": "周日", "1": "周一", "2": "周二", "3": "周三",
+      "4": "周四", "5": "周五", "6": "周六", "7": "周日",
+      "mon": "周一", "tue": "周二", "wed": "周三", "thu": "周四",
+      "fri": "周五", "sat": "周六", "sun": "周日",
+    }
+
+    const pad2 = (v: string) => v.length >= 2 ? v : "0" + v
     const padTime = (h: string, m: string) => {
-      const hh = isWild(h) ? "?" : h.padStart(2, "0")
-      const mm = isWild(m) ? "00" : m.padStart(2, "0")
+      const hh = isWild(h) ? "?" : pad2(h)
+      const mm = isWild(m) ? "00" : pad2(m)
       return `${hh}:${mm}`
     }
-    // 小时字段可能是多值（`9,21`）：展开成「09:00、21:00」，
-    // 否则会拼出 `9,21:00` 这种读不通的结果（Android 端 ScheduleFormat 同此逻辑）
+    // 小时字段可能是多值（`9,21`）：展开成「09:00、21:00」
     const fmtHours = (h: string, m: string) =>
       h.includes(",")
         ? h.split(",").map(x => padTime(x.trim(), m)).join("、")
         : padTime(h, m)
 
-    // every N minutes via */N
-    if (minute.startsWith("*/")) {
-      const n = minute.slice(2)
-      return `每 ${n} 分钟（cron）`
+    const formatDow = (d: string) => {
+      const lower = d.trim().toLowerCase()
+      if (isWild(lower)) return ""
+      if (lower === "mon-fri" || lower === "1-5") return "工作日"
+      if (["sat,sun", "sun,sat", "6,0", "0,6", "6,7", "7,6"].includes(lower)) return "周末"
+      return lower.split(",").map(x => dayNames[x.trim()] ?? x.trim()).join("、")
     }
 
-    // daily at fixed time
+    const formatMinutes = (min: string) => {
+      if (min.startsWith("*/")) return `每 ${min.slice(2)} 分钟`
+      if (min.includes(",")) return `${min.split(",").map(x => pad2(x.trim())).join("、")} 分`
+      if (isWild(min) || min === "0") return "整点"
+      return `第 ${pad2(min)} 分`
+    }
+
+    const dowStr = formatDow(dow)
+    const dowPrefix = !dowStr ? "" : ["工作日", "周末"].includes(dowStr) ? `${dowStr} ` : `每 ${dowStr} `
+
+    // 1. 每 N 分钟
+    if (minute.startsWith("*/")) {
+      const step = minute.slice(2)
+      if (isWild(hour)) return `${dowPrefix}每 ${step} 分钟`
+      if (hour.includes("-")) return `${dowPrefix}${hour} 点每 ${step} 分钟`
+      return `${dowPrefix}${fmtHours(hour, "00")} 起每 ${step} 分钟`
+    }
+
+    // 2. 每小时（hour 通配符，如 hour='*'）
+    if (isWild(hour)) {
+      const minStr = formatMinutes(minute)
+      const joiner = /^\d/.test(minStr) ? " " : ""
+      return `${dowPrefix}每小时${joiner}${minStr}`
+    }
+
+    // 3. 小时范围（如 hour='9-18' 或 '10-23'）
+    if (hour.includes("-")) {
+      const minStr = isWild(minute) || minute === "0" ? "整点" : `:${pad2(minute)}`
+      return `${dowPrefix || "每天 "}${hour} 点 ${minStr}`
+    }
+
+    // 4. 每年固定月份+日期
+    if (!isWild(month) && !isWild(dom)) {
+      return `每年 ${month}月${dom}日 ${fmtHours(hour, minute)}`
+    }
+
+    // 5. 每年固定月份
+    if (!isWild(month)) {
+      return `每年 ${month}月 ${fmtHours(hour, minute)}`
+    }
+
+    // 6. 每月固定日
+    if (!isWild(dom) && isWild(dow)) {
+      return `每月 ${dom} 日 ${fmtHours(hour, minute)}`
+    }
+
+    // 7. 指定星期几 / 工作日 / 周末
+    if (!isWild(dow) && isWild(dom)) {
+      return `${dowPrefix}${fmtHours(hour, minute)}`
+    }
+
+    // 8. 每天固定时间
     if (!isWild(hour) && isWild(dow) && isWild(dom)) {
       return `每天 ${fmtHours(hour, minute)}`
     }
 
-    // specific weekdays
-    if (!isWild(dow) && isWild(dom)) {
-      const dayNames: Record<string, string> = {
-        "0": "周日", "1": "周一", "2": "周二", "3": "周三",
-        "4": "周四", "5": "周五", "6": "周六",
-        "mon": "周一", "tue": "周二", "wed": "周三", "thu": "周四",
-        "fri": "周五", "sat": "周六", "sun": "周日",
-      }
-      const days = dow.split(",").map(d => dayNames[d.trim()] ?? d).join("、")
-      return `每 ${days} ${fmtHours(hour, minute)}`
-    }
-
-    // monthly
-    if (!isWild(dom) && isWild(dow)) {
-      return `每月 ${dom} 日 ${fmtHours(hour, minute)}`
-    }
+    // 9. 兜底格式化：把非通配字段拼接起来，绝不输出带 * 的机器字符串
+    const parts: string[] = []
+    if (!isWild(month)) parts.push(`${month}月`)
+    if (!isWild(dom)) parts.push(`${dom}日`)
+    if (dowPrefix.trim()) parts.push(dowPrefix.trim())
+    if (!isWild(hour) || !isWild(minute)) parts.push(fmtHours(hour, minute))
+    if (parts.length > 0) return parts.join(" ")
   }
 
   return trigger

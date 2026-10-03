@@ -157,13 +157,6 @@ fun ScheduleScreen(
             }
         },
         snackbarHost = { SnackbarContainer(snackbar) },
-        floatingActionButton = {
-            if (state.tab == ScheduleTab.Jobs) {
-                FloatingActionButton(onClick = onShowCreateSheet) {
-                    Icon(Icons.Default.Add, contentDescription = "创建任务")
-                }
-            }
-        },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             EthanScrollableTabBar(
@@ -194,6 +187,7 @@ fun ScheduleScreen(
                     onToggle = onToggle,
                     onDelete = { id -> pendingDelete = state.jobs.firstOrNull { it.id == id } },
                     onOpenSession = onOpenSession,
+                    onShowCreateSheet = onShowCreateSheet,
                 )
                 ScheduleTab.Timelines -> TimelinesContent(
                     jobs = state.jobs,
@@ -344,6 +338,7 @@ private fun JobsContent(
     onToggle: (ScheduleJob) -> Unit,
     onDelete: (String) -> Unit,
     onOpenSession: (String) -> Unit,
+    onShowCreateSheet: () -> Unit,
 ) {
     // 场景列表：来自数据本身（与 Web 一致，不硬编码），保持稳定顺序
     val scenes = remember(jobs) {
@@ -419,6 +414,22 @@ private fun JobsContent(
                 selectedIndex = layout.ordinal,
                 onSelect = { onLayoutSelect(JobLayout.entries[it]) },
             )
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .clickableNoRipple(onShowCreateSheet),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "添加任务",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
         }
 
         when {
@@ -607,33 +618,37 @@ private fun TimelineLayout(
 
     LazyColumn(
         Modifier.fillMaxSize(),
-        // 底部同样留 96dp 给 FAB 让位（时间轴最后一行的时间点不要被 FAB 压住）
-        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
     ) {
         item(key = "head") { Spacer(Modifier.height(10.dp)) }
 
         groups.forEachIndexed { groupIndex, (dateKey, groupJobs) ->
             item(key = "date_$dateKey") {
-                // 日期标题**在轴线右侧**、贴着轴线起排。
-                //
-                // 关键：行间的竖直间距（`DATE_ROW_TOP_GAP`）做在**轴列内部**，
-                // 不能放在 Row 的 padding 上 —— 放在 Row 外层的话那段高度没有
-                // 轴线覆盖，两组之间就会看到明显的断口（用户反馈的正是这个）。
+                // 日期标题在轴线右侧起排；非首组通过文字 top padding 撑高留白，
+                // 轴列通长画满整行，保持时间线跨组不断。
                 Row(
                     Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // 轴列：与任务行同一列，保证线在同一条竖线上；通长填满整行
                     Box(Modifier.width(AXIS_COLUMN).fillMaxHeight()) {
-                        Column(Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Spacer(
-                                Modifier.height(if (groupIndex == 0) 2.dp else DATE_ROW_TOP_GAP),
-                            )
+                        if (groupIndex == 0) {
+                            Column(Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Spacer(Modifier.weight(0.5f))
+                                Box(
+                                    Modifier
+                                        .width(1.dp)
+                                        .weight(0.5f)
+                                        .background(MaterialTheme.colorScheme.outlineVariant),
+                                )
+                            }
+                        } else {
                             Box(
                                 Modifier
                                     .width(1.dp)
-                                    .weight(1f)
-                                    .background(MaterialTheme.colorScheme.outlineVariant),
+                                    .fillMaxHeight()
+                                    .background(MaterialTheme.colorScheme.outlineVariant)
+                                    .align(Alignment.Center),
                             )
                         }
                     }
@@ -652,7 +667,7 @@ private fun TimelineLayout(
                         color = if (dateKey == todayKey) MaterialTheme.colorScheme.onSurface
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        modifier = Modifier.padding(vertical = 6.dp),
+                        modifier = Modifier.padding(top = if (groupIndex == 0) 6.dp else 16.dp, bottom = 6.dp),
                     )
                     // 「今天」徽章会让人误以为是可切换的胶囊按钮（旁边正好有
                     // 「今天/全部」切换），改成中性灰文字，纯标注、不可点。
@@ -707,32 +722,19 @@ private val AXIS_TO_CONTENT = 14.dp
 private val DOT_CENTER_Y = 26.dp
 
 /**
- * 日期标题行上方留出的空隙（第二组起）。
- *
- * **必须做在轴列内部**：日期行的高度里如果没有轴线覆盖，两组任务之间就会
- * 出现一个肉眼可见的断口（用户反馈的正是这个）。放在 Row 的 padding 上
- * 等于把空隙推到轴线外面去，所以这里改成「垫一段 Spacer，再把线 weight(1f)
- * 撑满剩余高度」。第一组不留（贴着列表顶部）。
+ * 时间轴卡片下方的纵向间隙。
+ * 做在卡片的 bottom padding 上，使整行高度自然包含间隙，
+ * 左侧轴列 fillMaxHeight 贯通延伸至行底，保持卡片间连线不断。
  */
-private val DATE_ROW_TOP_GAP = 16.dp
-
-/**
- * 每张卡片下方的空隙。
- *
- * 同理做在**轴列内部**：卡片自带 padding 的话那段高度在轴列外面，
- * 线就断了。这里由轴列在最底下垫一段等高的 Spacer 制造间距，
- * 上半段线照旧贯通 —— 于是「卡片底 → 下一张卡片顶」之间也是连线。
- */
-private val ROW_BOTTOM_GAP = 10.dp
+private val CARD_BOTTOM_GAP = 12.dp
 
 /**
  * 时间轴一行：轴线 + 卡片（时间在卡片内首行）。
  *
  * 布局要点：
- *   - 轴线贴左列，卡片紧跟其后；**时间标签移到卡片内部首行**，
- *     不再单独占一列，横向空间全部让给卡片正文。
- *   - 轴线在行内是通长竖线（圆点叠在线上），只有整个列表的第一行不画上段、
- *     最后一行不画下段，相邻行之间线头自然接续成一条连续时间线。
+ *   - 轴线贴左列，卡片紧跟其后；时间标签移到卡片内部首行。
+ *   - 卡片底部有 CARD_BOTTOM_GAP 间距，轴列 fillMaxHeight 撑满整行，
+ *     下半段线延伸至行底，相邻行之间连线严丝合缝接续成连续时间线。
  */
 @Composable
 private fun TimelineRow(
@@ -750,9 +752,8 @@ private fun TimelineRow(
 
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         // 轴列：整行一条竖线，圆点压在线中间。
-        // Box 用 fillMaxHeight 撑满整行，下半段的线才能一直延伸到行底 ——
-        // 而「行底」是含卡片下方那 [ROW_BOTTOM_GAP] 的（那个 padding 做在
-        // 轴列内部，不是做在 Row 上），所以两行之间的空隙也有线穿过，不断口。
+        // Box 用 fillMaxHeight 撑满整行，下半段的线一直延伸到行底（穿过卡片底部的间距），
+        // 从而卡片间隙处也有线穿过，两行自然连通。
         Box(Modifier.width(AXIS_COLUMN).fillMaxHeight()) {
             val dotTop = DOT_CENTER_Y - DOT_SIZE / 2
             // 上半段：第一行不画（时间轴上端不悬空）
@@ -777,20 +778,17 @@ private fun TimelineRow(
                     ),
             )
             // 下半段：最后一行不画（时间轴下端不拖尾）。
-            // 下面塞一个 Spacer 把线顶到行底再留出 ROW_BOTTOM_GAP，
-            // 这样「卡片底 → 下一行卡片顶」整段都有线。
-            Column(Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(dotTop + DOT_SIZE))
-                Box(
-                    Modifier
-                        .width(1.dp)
-                        .weight(1f)
-                        .background(
-                            if (isLast) Color.Transparent
-                            else MaterialTheme.colorScheme.outlineVariant,
-                        ),
-                )
-                Spacer(Modifier.height(ROW_BOTTOM_GAP))
+            // 延伸至行底穿过卡片间隙，接上下一行的上半段线。
+            if (!isLast) {
+                Column(Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Spacer(Modifier.height(dotTop + DOT_SIZE))
+                    Box(
+                        Modifier
+                            .width(1.dp)
+                            .weight(1f)
+                            .background(MaterialTheme.colorScheme.outlineVariant),
+                    )
+                }
             }
         }
 
@@ -803,7 +801,7 @@ private fun TimelineRow(
             onToggle = onToggle,
             onDelete = onDelete,
             onOpenSession = onOpenSession,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).padding(bottom = CARD_BOTTOM_GAP),
             phase = phase,
             // 时间轴视图里，时间放在卡片首行（替代列表视图那行「8小时后(09:00)」）
             timeBadge = ScheduleFormat.timeLabelOf(job.nextRunTime),
@@ -823,10 +821,7 @@ private fun ListLayout(
 ) {
     LazyColumn(
         Modifier.fillMaxSize(),
-        // bottom = 96dp：FAB 默认贴在右下角（距底 16dp、直径 56dp），卡片右侧的
-        // 删除按钮正好在同一竖线上 —— 只留 88dp 时最后一张卡片的删除键会被 FAB
-        // 压住（实测截图里叠在一起）。96dp 让列表滚到底时最后一行能整个抬到 FAB 之上。
-        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(jobs, key = { it.id }) { job ->
