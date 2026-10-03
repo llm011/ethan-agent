@@ -28,6 +28,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - **fact_sync mirror**: before each dream, active memories/playbook entries are mirrored into the vector store (type=`fact_sync`) so insight dedup naturally covers already-known facts; the mirror is fully rebuilt each cycle
 - **Permanent by design**: insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight)
 - **Sessions.db rotation**: full message history grows fast, so sessions.db is auto-archived via `VACUUM INTO` to `~/.ethan/archive/sessions.{start}~{end}.db` (filename carries the date span) once it exceeds 10 MB, keeping the active db small while old chats remain queryable by date
+- **Manual archive (Settings → Data)**: back up conversations older than 1 month / 3 months / 6 months into standalone files and remove them from the main db to keep it lean; a preview shows the affected session count and date range before running, archive filenames carry the date span (`sessions.{start}~{end}.db`), the settings page lists existing backups (restore-from-backup coming next), and pinned sessions are never archived
 
 **Companion mode — 苏念 (Surrender Experiment counselor)**  *(built-in skill, no install needed)*
 - Toggle "苏念 · 陪伴倾听" in the chat UI (or `/mode 苏念` in the CLI) to switch from the work assistant into a young, gentle female listener grounded in *The Surrender Experiment* (道法自然)
