@@ -142,7 +142,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
         <div className="relative hidden md:flex flex-col shrink-0">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-6 h-12 flex items-center justify-center rounded-full bg-background border border-border hover:bg-muted hover:border-primary transition-all shadow-sm text-muted-foreground hover:text-foreground"
+            className="absolute -left-3 top-1/2 -translate-y-1/2 z-30 w-6 h-12 flex items-center justify-center rounded-full bg-background border border-border hover:bg-muted hover:border-primary transition-all shadow-sm text-muted-foreground hover:text-foreground"
             title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
           >
             {sidebarOpen ? (

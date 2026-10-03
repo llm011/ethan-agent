@@ -63,13 +63,14 @@ export function ResizeHandle({ onResize, onResizeEnd, variant = "flow", edge = "
   if (variant === "overlay") {
     // 视觉仍是那 1px 的 border，这里只做命中区 + hover 高亮；
     // 命中区向两侧各扩 4px —— 1px 的线在触控板上几乎点不中。
-    // z-[5]：压过 sidebar 内容（z-auto），但要让位给横跨分隔线的折叠箭头（z-10），
-    // 否则箭头中段会被命中区挡住点不到；箭头上下两段仍可拖拽。
+    // z-20：压过 sidebar 内容（z-auto）。横跨分隔线的折叠箭头是 z-30（在
+    // layout-shell），压在本命中区之上——箭头中段点箭头、上下两段拖拽，
+    // 「箭头 > 命中区 > 内容」的次序固定，sidebar 内以后加 sticky 元素也不会顶掉拖拽区。
     const atRight = edge === "right";
     return (
       <div
         {...baseProps}
-        className={`group absolute inset-y-0 z-[5] w-[9px] cursor-col-resize ${
+        className={`group absolute inset-y-0 z-20 w-[9px] cursor-col-resize ${
           atRight ? "right-0 translate-x-1/2" : "left-0 -translate-x-1/2"
         }`}
       >
