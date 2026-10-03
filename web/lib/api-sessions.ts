@@ -363,3 +363,59 @@ export async function fetchToolRaw(
   if (!res.ok) throw new Error(`Failed to fetch tool raw: ${res.status}`);
   return res.json();
 }
+
+// ── 会话归档（设置 → 数据管理）──────────────────────────────────────────
+
+export interface ArchivePreview {
+  days: number;
+  cutoff_ts: number;
+  cutoff_date: string;
+  session_count: number;
+  message_count: number;
+  oldest_date: string | null;
+  newest_date: string | null;
+}
+
+export interface ArchiveEntry {
+  file: string;
+  start_date: string;
+  end_date: string;
+  size_bytes: number;
+  created_at: number;
+}
+
+export interface ArchiveRunResult {
+  archived_sessions: number;
+  archived_messages: number;
+  removed_sessions?: number;
+  archive_file: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  size_bytes: number;
+}
+
+/** 预览：归档 N 天前的会话会命中多少（不执行）。 */
+export async function previewArchive(days: number): Promise<ArchivePreview> {
+  const res = await fetchWithTimeout(`${API_URL}/sessions/archive/preview?days=${days}`, { headers: headers() });
+  if (!res.ok) throw new Error("Archive preview failed");
+  return res.json();
+}
+
+/** 执行归档：备份 N 天前的未置顶会话到 archive/ 并从主库移除。大库可能耗时较长。 */
+export async function runArchive(days: number): Promise<ArchiveRunResult> {
+  const res = await fetchWithTimeout(`${API_URL}/sessions/archive/run`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ days }),
+    timeoutMs: LLM_TASK_TIMEOUT_MS,
+  });
+  if (!res.ok) throw new Error("Archive run failed");
+  return res.json();
+}
+
+/** 列出已有归档备份（文件名含时间范围）。 */
+export async function listArchives(): Promise<{ archives: ArchiveEntry[] }> {
+  const res = await fetchWithTimeout(`${API_URL}/sessions/archives`, { headers: headers() });
+  if (!res.ok) throw new Error("List archives failed");
+  return res.json();
+}

@@ -17,6 +17,10 @@ class AuthRequest(BaseModel):
     token: str
 
 
+class ArchiveRunRequest(BaseModel):
+    days: int
+
+
 @router.post("/auth")
 async def auth(req: AuthRequest):
     from ethan.core.users import get_user_store
@@ -132,6 +136,46 @@ async def list_pinned(user_id: str = Depends(verify_token)):
         }
         for s in sessions
     ]}
+
+
+# ── 会话归档（设置 → 数据管理）──────────────────────────────────────────────
+# 注意：GET 归档路由必须注册在 /sessions/{session_id} 之前，否则 "archive"
+# "archives" 会被当成 session id 吞掉（FastAPI 按注册顺序匹配，不做特异性排序）。
+
+
+@router.get("/sessions/archive/preview")
+async def archive_preview(days: int, user_id: str = Depends(verify_token)):
+    """预览归档 N 天前的会话会命中多少，供前端确认弹窗展示。"""
+    from ethan.memory.session_archive import preview_archive
+
+    store = await get_session_store()
+    try:
+        return await preview_archive(store, days)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/sessions/archive/run")
+async def archive_run(req: ArchiveRunRequest, user_id: str = Depends(verify_token)):
+    """执行归档：把 N 天前的未置顶会话备份到 archive/ 并从主库移除。
+
+    置顶会话永不归档；快照与删除之间重新活跃的会话保留在主库（宁重勿丢）。
+    """
+    from ethan.memory.session_archive import archive_old_sessions
+
+    store = await get_session_store()
+    try:
+        return await archive_old_sessions(store, req.days)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/sessions/archives")
+async def list_archives(user_id: str = Depends(verify_token)):
+    """列出 archive/ 下的归档库（文件名含时间范围），恢复功能据此选文件。"""
+    from ethan.memory.session_archive import list_archives as _list
+
+    return {"archives": _list()}
 
 
 @router.post("/sessions/{session_id}/read")

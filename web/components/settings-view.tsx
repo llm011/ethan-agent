@@ -26,6 +26,7 @@ import { ThemeSwatch } from "@ethan/shared/components/theme-swatch";
 import { PromptPreview } from "./settings/prompt-preview";
 import { ProfileEditor } from "./settings/profile-editor";
 import { FastRulesTab } from "./settings/fast-rules-tab";
+import { DataTab } from "./settings/data-tab";
 import { PluginsTab } from "./settings/plugins-tab";
 import { ToolTiersView } from "./tool-tiers-view";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -35,13 +36,14 @@ interface SettingsViewProps {
   initialTab?: TabId;
 }
 
-type TabId = "general" | "fast-rules" | "providers" | "channels" | "plugins" | "identity" | "soul" | "tools" | "heartbeat" | "naming" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers";
+type TabId = "general" | "data" | "fast-rules" | "providers" | "channels" | "plugins" | "identity" | "soul" | "tools" | "heartbeat" | "naming" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers";
 
 const TAB_GROUPS = [
   {
     group: "基础配置",
     items: [
       { id: "general" as TabId, label: "通用" },
+      { id: "data" as TabId, label: "数据管理" },
       { id: "fast-rules" as TabId, label: "快捷路由" },
       { id: "providers" as TabId, label: "模型 provider" },
       { id: "channels" as TabId, label: "渠道" },
@@ -860,6 +862,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
               </div>
             )}
 
+            {activeTab === "data" && <DataTab />}
             {activeTab === "fast-rules" && <FastRulesTab />}
 
             {activeTab === "providers" && (
