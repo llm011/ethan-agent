@@ -13,6 +13,12 @@ class ScheduleFormatTest {
     }
 
     @Test
+    fun `每小时多个分钟`() {
+        val trigger = "cron[month='*', day='*', day_of_week='*', hour='*', minute='0,30']"
+        assertEquals("每小时 00、30 分", ScheduleFormat.formatTrigger(trigger))
+    }
+
+    @Test
     fun `每小时整点`() {
         val trigger = "cron[month='*', day='*', day_of_week='*', hour='*', minute='0']"
         assertEquals("每小时整点", ScheduleFormat.formatTrigger(trigger))

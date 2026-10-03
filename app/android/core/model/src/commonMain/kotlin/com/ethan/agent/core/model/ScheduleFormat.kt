@@ -50,7 +50,7 @@ object ScheduleFormat {
         }
         if (minute.contains(",")) {
             val mins = minute.split(",").joinToString("、") { pad2(it.trim()) }
-            return "第 ${mins} 分"
+            return "$mins 分"
         }
         if (isWild(minute) || minute == "0") return "整点"
         return "第 ${pad2(minute)} 分"
@@ -139,10 +139,11 @@ object ScheduleFormat {
             // 2. 每小时（hour 通配符，如 hour='*'）：常见如每小时第 17 分、每小时整点
             if (isWild(hour)) {
                 val minStr = formatMinutes(minute)
+                val joiner = if (minStr.firstOrNull()?.isDigit() == true) " " else ""
                 return if (dowPrefix.isNotEmpty()) {
-                    "${dowPrefix}每小时$minStr"
+                    "${dowPrefix}每小时$joiner$minStr"
                 } else {
-                    "每小时$minStr"
+                    "每小时$joiner$minStr"
                 }
             }
 

@@ -90,7 +90,7 @@ export function formatTrigger(trigger: string): string {
 
     const formatMinutes = (min: string) => {
       if (min.startsWith("*/")) return `每 ${min.slice(2)} 分钟`
-      if (min.includes(",")) return `第 ${min.split(",").map(x => pad2(x.trim())).join("、")} 分`
+      if (min.includes(",")) return `${min.split(",").map(x => pad2(x.trim())).join("、")} 分`
       if (isWild(min) || min === "0") return "整点"
       return `第 ${pad2(min)} 分`
     }
@@ -109,7 +109,8 @@ export function formatTrigger(trigger: string): string {
     // 2. 每小时（hour 通配符，如 hour='*'）
     if (isWild(hour)) {
       const minStr = formatMinutes(minute)
-      return `${dowPrefix}每小时${minStr}`
+      const joiner = /^\d/.test(minStr) ? " " : ""
+      return `${dowPrefix}每小时${joiner}${minStr}`
     }
 
     // 3. 小时范围（如 hour='9-18' 或 '10-23'）
