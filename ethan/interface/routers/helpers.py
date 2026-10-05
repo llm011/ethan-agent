@@ -279,6 +279,7 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
             continue
         resolved = []
         file_paths: list[str] = []
+        missing_paths: list[str] = []
         # 收集 split_group → 段数，用于给 LLM 加顺序提示
         split_groups: dict[int, int] = {}
         for img in msg.images:
@@ -302,7 +303,11 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
                         split_groups[sg] = split_groups.get(sg, 0) + 1
                     resolved.append(entry)
                     file_paths.append(str(image_file_path(img["path"])))
-                # 文件不存在则跳过（不影响 LLM 调用）
+                else:
+                    # 文件丢失（会话清理/迁移）：不能静默跳过——那样消息里的图片
+                    # 引用凭空消失，模型不知道用户发过图，回复会驴唇不对马嘴。
+                    # 显式告知模型图已不可用，模型可以向用户说明而不是凭空编造。
+                    missing_paths.append(str(image_file_path(img["path"])))
             else:
                 resolved.append(img)
         msg.images = resolved
@@ -315,3 +320,7 @@ def _resolve_images_for_llm(messages: list[Message]) -> None:
             if multi_seg:
                 parts = [f"图片{g + 1}切分为{n}段（按顺序展示）" for g, n in sorted(multi_seg.items())]
                 msg.content = f"{msg.content}\n[image_split: {'; '.join(parts)}]"
+        # 丢失的图显式告知模型（不附进 images，避免 API 报错）
+        if missing_paths and msg.content is not None:
+            missing_hint = ", ".join(missing_paths)
+            msg.content = f"{msg.content}\n\n[系统提示：本消息中的 {len(missing_paths)} 张图片文件已不存在（{missing_hint}），无法提供图片内容。如用户意图依赖看图，请告知用户图片已丢失。]"

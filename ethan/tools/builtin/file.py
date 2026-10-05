@@ -240,7 +240,27 @@ class FileReadTool(BaseTool):
                     scaled_b64, _, img_mime = downscale_image_b64(
                         base64.b64encode(data).decode("ascii"), mime, max_dim=VISION_MAX_DIM
                     )
-                    images = [{"data": scaled_b64, "media_type": img_mime}]
+                    # 缩放失败（Pillow 缺失/解码异常）时 downscale 返回原图原 mime——
+                    # 此时若原图超 API 尺寸限制，发出去就是 400 + reactive strip 循环。
+                    # 附图前校验：downscale 没能真正缩图且原图超 1568px，就不附图，
+                    # 并把文案改成如实的「未附上」，避免模型以为看到了其实没有。
+                    try:
+                        import io as _io
+
+                        from PIL import Image as _Image
+
+                        with _Image.open(_io.BytesIO(data)) as _im:
+                            _too_big = max(_im.size) > VISION_MAX_DIM and scaled_b64 == base64.b64encode(data).decode("ascii")
+                    except Exception:
+                        _too_big = False  # 无法判断时按原逻辑走，交给 reactive 兜底
+                    if _too_big:
+                        model_content = (
+                            f"📷 已读取图片文件 {p.name}（{mime}）。"
+                            "注意：图片尺寸超出视觉输入限制且本地缩放不可用（Pillow 缺失），未能附图，"
+                            "你无法直接看到图片内容。可先用 shell（sips 或 PIL）缩小后再 file_read。"
+                        )
+                    else:
+                        images = [{"data": scaled_b64, "media_type": img_mime}]
                 return ToolResult(tool_call_id="", content=model_content, cards=[card], images=images)
             except Exception as e:
                 return f"Read image error: {e}"
