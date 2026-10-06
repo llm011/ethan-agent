@@ -87,8 +87,24 @@ class SessionsViewModel(
     val state: StateFlow<SessionsUiState> = _state.asStateFlow()
     private var pollJob: Job? = null
 
-    // 记录每个 session 上次已知的 updatedAt，用于检测新消息
-    private val knownUpdatedAt = mutableMapOf<String, Long>()
+    /** 未读红点的判定（服务端水位 + 本地乐观水位，详见 [SessionUnreadTracker]） */
+    private val unreadTracker = SessionUnreadTracker()
+
+    /** 正在飞 /read 上报的会话 id，避免进入会话时重复发请求 */
+    private val readReportInFlight = mutableSetOf<String>()
+
+    /**
+     * **所有** state 变更的唯一入口。
+     *
+     * `unreadSessionIds` 是 sessions / drawerSessions 的派生值，必须在这里统一重算：
+     * 任何一条写入路径漏算，红点就会「清了又回来」（老 bug 的一部分）。
+     */
+    private fun updateState(transform: (SessionsUiState) -> SessionsUiState) {
+        _state.update { current ->
+            val next = transform(current)
+            next.copy(unreadSessionIds = unreadTracker.unreadIds(next.sessions + next.drawerSessions))
+        }
+    }
 
     init {
         load()
@@ -115,12 +131,14 @@ class SessionsViewModel(
             return
         }
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            updateState { it.copy(isLoading = true, error = null) }
             // 抽屉要的未过滤列表单独拉一次：不能复用 cachedSessions（那里的缓存
             // 现在带 hide_* 过滤参数，读出来会缺定时/心跳，抽屉分组就空了）
             launch {
                 try {
-                    _state.update { it.copy(drawerSessions = repository.poll()) }
+                    val all = repository.poll()
+                    unreadTracker.observe(all)
+                    updateState { it.copy(drawerSessions = all) }
                 } catch (_: Exception) {}
             }
             if (query.isBlank()) {
@@ -130,18 +148,14 @@ class SessionsViewModel(
                 // 客户端的 categoryFiltered 仍做一道兜底（缓存里的旧数据未过滤）。
                 try {
                     repository.cachedSessions(limit = 50, hideHeartbeat = true, hideScheduled = true, hideBackground = true).collect { sessions ->
-                        if (knownUpdatedAt.isEmpty()) {
-                            sessions.forEach { s -> knownUpdatedAt[s.id] = s.updatedAt }
-                        } else {
-                            detectUnread(sessions)
-                        }
-                        _state.update { it.copy(sessions = sessions, isLoading = false) }
+                        unreadTracker.observe(sessions)
+                        updateState { it.copy(sessions = sessions, isLoading = false) }
                     }
                 } catch (e: Exception) {
                     if (_state.value.sessions.isEmpty()) {
-                        _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                        updateState { it.copy(isLoading = false, error = repository.friendlyError(e)) }
                     } else {
-                        _state.update { it.copy(isLoading = false) }
+                        updateState { it.copy(isLoading = false) }
                     }
                 }
             } else {
@@ -154,9 +168,10 @@ class SessionsViewModel(
                         else -> null
                     }
                     val sessions = repository.getSessions(limit = 50, query = query, titlePrefixes = prefixes)
-                    _state.update { it.copy(sessions = sessions, isLoading = false) }
+                    unreadTracker.observe(sessions)
+                    updateState { it.copy(sessions = sessions, isLoading = false) }
                 } catch (e: Exception) {
-                    _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                    updateState { it.copy(isLoading = false, error = repository.friendlyError(e)) }
                 }
             }
         }
@@ -165,9 +180,13 @@ class SessionsViewModel(
     private suspend fun refreshQuietly() {
         try {
             val sessions = repository.poll()
+            // 服务端水位已追平的乐观水位在此退休（否则红点会一直按本地状态算）
+            unreadTracker.observe(sessions)
+            // 正在查看的会话若服务端还标着未读（/read 丢包，或落消息时没有订阅者），
+            // 补一次上报：本地红点已被乐观水位按住，这里是为了让 Web/桌面端也同步消掉
+            unreadTracker.activeNeedsReadReport(sessions)?.let { reportReadToServer(it) }
             if (_state.value.query.isBlank()) {
-                detectUnread(sessions)
-                _state.update { st ->
+                updateState { st ->
                     // /api/poll 是轻量接口，不回 snippet（首条 query 预览）——直接灌回
                     // 会把刚加载好的卡片预览 3 秒后冲成空。按 id 把旧列表的 snippet
                     // 补回去（轮询里新出现的会话本来就没有，置 null 不动）。
@@ -184,58 +203,80 @@ class SessionsViewModel(
         } catch (_: Exception) {}
     }
 
-    private fun detectUnread(sessions: List<SessionInfo>) {
-        val newUnread = mutableSetOf<String>()
-        for (s in sessions) {
-            val known = knownUpdatedAt[s.id]
-            if (known != null && s.updatedAt > known) {
-                // session 有更新 → 标记为未读
-                newUnread.add(s.id)
-            } else if (known == null) {
-                // 全新 session → 标记为未读
-                newUnread.add(s.id)
-                knownUpdatedAt[s.id] = s.updatedAt
-            }
-        }
-        if (newUnread.isNotEmpty()) {
-            _state.update { it.copy(unreadSessionIds = it.unreadSessionIds + newUnread) }
+    /**
+     * 当前正在查看的会话（由导航层在路由变化时写入）。
+     *
+     * 进入会话即标记已读（与 Web/Desktop 的 activeSessionId 行为一致），并且查看期间
+     * **永不亮红点**。由 EthanApp 监听导航栈统一调用，覆盖抽屉 / 全部对话页 / 定时任务页 /
+     * 后台任务页 / 深链等所有入口——老实现只在抽屉点击时清，从「全部对话」进去就清不掉。
+     */
+    fun setActiveSession(sessionId: String?) {
+        if (unreadTracker.activeSessionId == sessionId) return
+        unreadTracker.setActive(sessionId)
+        if (sessionId != null) {
+            markRead(sessionId)
+        } else {
+            updateState { it }
         }
     }
 
-    /** 用户打开了某个 session，清除其未读标记 */
+    /** 用户打开了某个 session：本地乐观推进水位 + 上报服务端。幂等，可重复调用。 */
     fun markRead(sessionId: String) {
-        val session = _state.value.sessions.find { it.id == sessionId }
-        if (session != null) {
-            knownUpdatedAt[sessionId] = session.updatedAt
+        // 水位取「当前已知的最新 updated_at」：主列表和抽屉列表两边都要看（见
+        // latestKnownUpdatedAt）——抽屉独有的会话只在 drawerSessions 里。
+        val known = latestKnownUpdatedAt(_state.value.sessions, _state.value.drawerSessions, sessionId)
+        unreadTracker.markRead(sessionId, known)
+        updateState { it }
+        reportReadToServer(sessionId)
+    }
+
+    /**
+     * 上报服务端 `POST /sessions/{id}/read`。
+     *
+     * 失败不抛出也不回滚：本地乐观水位已经生效，红点不会回弹；下一次轮询
+     * （[refreshQuietly] 里的 activeNeedsReadReport）或重新进入会话时会再补报。
+     */
+    private fun reportReadToServer(sessionId: String) {
+        if (!readReportInFlight.add(sessionId)) return
+        viewModelScope.launch {
+            try {
+                repository.markSessionRead(sessionId)
+                // 回执成功 → 立刻拉一次，把服务端水位落地（乐观水位随之退休），
+                // 这样离开会话时抽屉不会再闪一下红点。
+                refreshQuietly()
+            } catch (_: Exception) {
+                // 忽略：本地水位兜底，后续轮询补报
+            } finally {
+                readReportInFlight.remove(sessionId)
+            }
         }
-        _state.update { it.copy(unreadSessionIds = it.unreadSessionIds - sessionId) }
     }
 
     fun onQueryChange(query: String) {
-        _state.update { it.copy(query = query) }
+        updateState { it.copy(query = query) }
         viewModelScope.launch { delay(300); load() }
     }
 
     fun startRename(session: SessionInfo) {
-        _state.update { it.copy(renameTarget = session, renameText = session.title) }
+        updateState { it.copy(renameTarget = session, renameText = session.title) }
     }
 
-    fun onRenameTextChange(text: String) { _state.update { it.copy(renameText = text) } }
+    fun onRenameTextChange(text: String) { updateState { it.copy(renameText = text) } }
 
     fun confirmRename() {
         val target = _state.value.renameTarget ?: return
         viewModelScope.launch {
             try {
                 repository.renameSession(target.id, _state.value.renameText)
-                _state.update { it.copy(renameTarget = null) }
+                updateState { it.copy(renameTarget = null) }
                 load()
             } catch (e: Exception) {
-                _state.update { it.copy(error = repository.friendlyError(e)) }
+                updateState { it.copy(error = repository.friendlyError(e)) }
             }
         }
     }
 
-    fun cancelRename() { _state.update { it.copy(renameTarget = null) } }
+    fun cancelRename() { updateState { it.copy(renameTarget = null) } }
 
     /** 置顶/取消置顶的 in-flight 会话 ID：防快速双击时两个反向操作交错（viewModelScope 在主线程，无需同步）。 */
     private val pinInFlight = mutableSetOf<String>()
@@ -245,7 +286,7 @@ class SessionsViewModel(
         if (!pinInFlight.add(session.id)) return
         val nowSec = kotlinx.datetime.Clock.System.now().toEpochMilliseconds() / 1000
         // 乐观更新：先改本地，UI 即时反馈
-        _state.update { s ->
+        updateState { s ->
             s.copy(
                 sessions = s.sessions.map {
                     if (it.id == session.id) {
@@ -265,7 +306,7 @@ class SessionsViewModel(
                 }
             } catch (e: Exception) {
                 // 失败回滚到操作前的状态
-                _state.update { s ->
+                updateState { s ->
                     s.copy(
                         sessions = s.sessions.map {
                             if (it.id == session.id) it.copy(pinnedAt = session.pinnedAt) else it
@@ -282,51 +323,51 @@ class SessionsViewModel(
     fun deleteSession(id: String) {
         viewModelScope.launch {
             try { repository.deleteSessionCached(id); load() }
-            catch (e: Exception) { _state.update { it.copy(error = repository.friendlyError(e)) } }
+            catch (e: Exception) { updateState { it.copy(error = repository.friendlyError(e)) } }
         }
     }
 
     fun regenTitle(id: String) {
         viewModelScope.launch {
-            _state.update { it.copy(regeningIds = it.regeningIds + id) }
+            updateState { it.copy(regeningIds = it.regeningIds + id) }
             try {
                 val resp = repository.regenTitle(id)
                 if (resp.ok) {
-                    _state.update { s ->
+                    updateState { s ->
                         s.copy(
                             sessions = s.sessions.map { if (it.id == id) it.copy(title = resp.title) else it },
                             regeningIds = s.regeningIds - id,
                         )
                     }
                 } else {
-                    _state.update { it.copy(regeningIds = it.regeningIds - id, error = resp.error ?: "重生成失败") }
+                    updateState { it.copy(regeningIds = it.regeningIds - id, error = resp.error ?: "重生成失败") }
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(regeningIds = it.regeningIds - id, error = repository.friendlyError(e)) }
+                updateState { it.copy(regeningIds = it.regeningIds - id, error = repository.friendlyError(e)) }
             }
         }
     }
 
     fun summarySession(id: String) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
+            updateState { it.copy(isLoading = true) }
             try {
                 val resp = repository.summarySession(id)
-                _state.update { it.copy(isLoading = false, summarySheet = resp) }
+                updateState { it.copy(isLoading = false, summarySheet = resp) }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                updateState { it.copy(isLoading = false, error = repository.friendlyError(e)) }
             }
         }
     }
 
-    fun dismissSummary() { _state.update { it.copy(summarySheet = null) } }
-    fun setSourceFilter(source: String) { _state.update { it.copy(sourceFilter = source) } }
+    fun dismissSummary() { updateState { it.copy(summarySheet = null) } }
+    fun setSourceFilter(source: String) { updateState { it.copy(sourceFilter = source) } }
 
     /** 类别切换（排他，对齐 web：点已选中的类别取消，回到「全部对话」）。
      *  定时/心跳类别走服务端 title_prefixes 单独拉取；回「全部对话」重新走默认 cached 加载。 */
     fun toggleCategory(category: String) {
         val next = if (_state.value.categoryFilter == category) "" else category
-        _state.update { it.copy(categoryFilter = next) }
+        updateState { it.copy(categoryFilter = next) }
         when (next) {
             "scheduled", "heartbeat" -> fetchCategory(next)
             else -> load()
@@ -336,24 +377,24 @@ class SessionsViewModel(
     /** 按类别单独拉列表（对齐 web 的 title_prefixes 请求）：只取该前缀的会话 */
     private fun fetchCategory(category: String) {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
+            updateState { it.copy(isLoading = true) }
             try {
                 val prefixes = if (category == "scheduled") "[定时]" else "[心跳]"
                 val sessions = repository.getSessions(limit = 50, titlePrefixes = prefixes, hideBackground = true)
-                _state.update { it.copy(sessions = sessions, isLoading = false) }
+                updateState { it.copy(sessions = sessions, isLoading = false) }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = repository.friendlyError(e)) }
+                updateState { it.copy(isLoading = false, error = repository.friendlyError(e)) }
             }
         }
     }
     fun toggleSource(source: String) {
-        _state.update { st ->
+        updateState { st ->
             val current = st.selectedSources
             val next = if (current.contains(source)) current - source else current + source
             st.copy(selectedSources = next)
         }
     }
     /** 清空来源筛选，显示全部 session */
-    fun selectAllSources() { _state.update { it.copy(selectedSources = emptySet()) } }
-    fun clearError() { _state.update { it.copy(error = null) } }
+    fun selectAllSources() { updateState { it.copy(selectedSources = emptySet()) } }
+    fun clearError() { updateState { it.copy(error = null) } }
 }
