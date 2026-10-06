@@ -1,5 +1,6 @@
 package com.ethan.agent.ui.chat
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +31,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.shared.UiMessage
@@ -39,7 +44,7 @@ import com.ethan.agent.ui.components.SimpleMarkdown
  *
  * 手机上把「阅读」这件事和「聊天气泡」分开：气泡里是消息流，字小、宽窄跟着气泡走、
  * 周围还有工具日志和统计条干扰；阅读模式则是全屏、居中定宽（对齐 Web 的 max-w-[720px]）、
- * 行高放宽、背景纯净，只留一个退出按钮。
+ * 行高放宽、背景纯净，只留退出与「复制原文」。
  *
  * 与 Web 的差异（有意为之）：
  *   - 不做标注/划线/批注（Android 端的标注在独立的「标注」页管理，不在这里重复造一套选区体系）；
@@ -51,6 +56,9 @@ fun ReadingModeScreen(
     message: UiMessage,
     onClose: () -> Unit,
 ) {
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
@@ -63,7 +71,7 @@ fun ReadingModeScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding(),
         ) {
-            // 顶部条：只放退出 + 标题，尽量少占垂直空间（正文才是主角）
+            // 顶部条：只放退出 + 标题 + 复制原文，尽量少占垂直空间（正文才是主角）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -91,8 +99,25 @@ fun ReadingModeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(end = 12.dp),
+                        modifier = Modifier.padding(end = 4.dp),
                     )
+                }
+                // 正文是按 markdown 块拆成多个原生 TextView 的（标题/代码块会切断），
+                // 选区跨不了块 —— 想整条拿走只能靠这里。给的是**原文（Markdown 源）**，
+                // 方便粘到别处继续用；想要渲染后的文字用长按选中复制。
+                if (message.content.isNotBlank()) {
+                    IconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(message.content))
+                            Toast.makeText(context, "已复制原文", Toast.LENGTH_SHORT).show()
+                        },
+                    ) {
+                        Icon(
+                            Icons.Default.ContentCopy,
+                            contentDescription = "复制原文",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 

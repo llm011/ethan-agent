@@ -234,15 +234,13 @@ fun SimpleMarkdown(
      */
     relaxedLeading: Boolean = false,
     /**
-     * 阅读模式用：允许长按选中正文并复制。
+     * 允许长按选中正文并复制（阅读模式用）。
      *
-     * 默认 false —— 聊天气泡里开着它，长按会被正文的选区抢走，气泡自己的长按菜单
-     * （引用/复制整条消息等）就再也弹不出来了。
+     * 默认 false：聊天气泡里开着它，长按会被正文的选区抢走，气泡自己的长按菜单
+     * （引用整条消息）就再也弹不出来。
      *
-     * 正文（[MdToken.Text]）走 compose-markdown 的原生 TextView：`isTextSelectable = true`
-     * 之后长按选中、拖手柄、系统菜单「复制」都是系统行为，不需要我们再搓一套选区。
-     * 标题（[MdToken.Heading]）是我们自己用 Compose `Text` 画的，天然接不上那套，
-     * 所以单独包一层 [SelectionContainer]。
+     * 实现上分两条路（正文走库的原生 TextView，标题走 SelectionContainer），
+     * 具体见下面两个分支的注释。
      */
     selectable: Boolean = false,
 ) {
@@ -293,10 +291,18 @@ fun SimpleMarkdown(
                             markdown = token.value,
                             style = bodyTextStyle,
                             // 阅读模式：让原生 TextView 接管长按 → 系统选区 + 「复制」菜单。
-                            // 不会吃掉滚动：Compose 与原生 View 的 interop 把 MOVE 事件放在
-                            // Final pass 才交给原生 View（DOWN/UP 走 Initial），所以拖动手势
-                            // 先被父级 verticalScroll 消费，原生 View 收到的是 ACTION_CANCEL，
-                            // 按下不动（长按选字）才轮得到它。
+                            //
+                            // 为什么不会吃掉滚动：Compose↔原生 View 的 interop
+                            // （PointerInteropFilter）里 DOWN/UP 走 Initial pass、MOVE 留到
+                            // Final pass 才下发给原生 View，所以拖动先被父级 verticalScroll
+                            // 消费，原生 View 收到的是 ACTION_CANCEL。长按后拖动扩选时，
+                            // Editor 会 requestDisallowInterceptTouchEvent(true)，interop
+                            // 随即把 MOVE 改回 Initial pass —— 扩选优先于滚动，正是我们要的。
+                            //
+                            // 已知边界：长按**直接落在链接上**不会起选区 —— 库的
+                            // CustomTextView 在 ACTION_DOWN 命中 ClickableSpan 时先 return
+                            // true（在 super 之前），TextView 收不到 DOWN。从链接旁边的
+                            // 普通文字起手则正常。
                             isTextSelectable = selectable,
                             onLinkClicked = { url ->
                                 // Check if URL is an image — open lightbox
@@ -342,7 +348,8 @@ fun SimpleMarkdown(
                             modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                         )
                     }
-                    // 阅读模式下标题也是正文的一部分，同样要能选中/复制。
+                    // 标题是我们自绘的 Compose Text，接不上上面原生 TextView 那套选区，
+                    // 所以单独包一层 SelectionContainer。
                     // 只包这一块，而不是把整个 Column 包起来：整个包会连 AndroidView
                     // （正文 token）一起吞进选区手势，和原生 TextView 各选各的，反而打架。
                     if (selectable) SelectionContainer { heading() } else heading()
