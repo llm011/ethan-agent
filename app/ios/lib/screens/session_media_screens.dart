@@ -419,6 +419,209 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
   }
 }
 
+class AudioPreviewScreen extends StatefulWidget {
+  const AudioPreviewScreen({
+    required this.api,
+    required this.sessionId,
+    required this.path,
+    this.title = '深度听书音频',
+    super.key,
+  });
+
+  final EthanApiClient api;
+  final String sessionId;
+  final String path;
+  final String title;
+
+  @override
+  State<AudioPreviewScreen> createState() => _AudioPreviewScreenState();
+}
+
+/// 深度听书交付音频的内嵌播放页。
+///
+/// 用 video_player 播音频（iOS 侧就是 AVPlayer，mp3/m4a 原生支持），但不渲染
+/// VideoPlayer widget——音频没有画面，只需要自己的控制条。状态机：
+/// loading → ready / error，error 一律给「重试」出口，绝不无限转圈。
+class _AudioPreviewScreenState extends State<AudioPreviewScreen> {
+  VideoPlayerController? _controller;
+  Object? _error;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final uri =
+          widget.api.mediaUri(widget.path, sessionId: widget.sessionId);
+      final controller = VideoPlayerController.networkUrl(uri,
+          httpHeaders: widget.api.headersFor(uri));
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _controller = controller;
+        _loading = false;
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _retry() async {
+    final previous = _controller;
+    _controller = null;
+    await previous?.dispose();
+    await _init();
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  static String _clock(Duration value) {
+    final safe = value.isNegative ? Duration.zero : value;
+    final minutes = safe.inMinutes;
+    final seconds = safe.inSeconds.remainder(60);
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  Widget _message({
+    required IconData icon,
+    required String text,
+    Widget? action,
+  }) =>
+      Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 48, color: Theme.of(context).colorScheme.error),
+            const SizedBox(height: 12),
+            Text(text, textAlign: TextAlign.center),
+            if (action != null) ...[
+              const SizedBox(height: 16),
+              action,
+            ],
+          ],
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.title)),
+      body: Center(
+        child: _loading
+            ? const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 12),
+                  Text('音频加载中…'),
+                ],
+              )
+            : _controller == null
+                ? _message(
+                    icon: Icons.cloud_off_rounded,
+                    text: '音频加载失败：${_error ?? '未知错误'}',
+                    action: FilledButton.icon(
+                      onPressed: _retry,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('重试'),
+                    ),
+                  )
+                : ValueListenableBuilder<VideoPlayerValue>(
+                    valueListenable: controller!,
+                    builder: (context, value, _) {
+                      // 播放中途出错（文件损坏/链接失效）也要有出口，不能停在旧画面上。
+                      if (value.hasError) {
+                        return _message(
+                          icon: Icons.error_outline_rounded,
+                          text: '音频播放失败：${value.errorDescription ?? '未知错误'}',
+                          action: FilledButton.icon(
+                            onPressed: _retry,
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('重试'),
+                          ),
+                        );
+                      }
+                      final duration = value.duration;
+                      final maxMs = duration.inMilliseconds > 0
+                          ? duration.inMilliseconds.toDouble()
+                          : 1.0;
+                      final positionMs = value.position.inMilliseconds
+                          .clamp(0, maxMs.toInt())
+                          .toDouble();
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.graphic_eq_rounded, size: 64),
+                            const SizedBox(height: 12),
+                            Text(widget.title,
+                                style: Theme.of(context).textTheme.titleMedium,
+                                textAlign: TextAlign.center),
+                            const SizedBox(height: 4),
+                            Text(
+                              '深度听书 · 可后台收听',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 16),
+                            Slider(
+                              value: positionMs,
+                              max: maxMs,
+                              onChanged: (value) => controller.seekTo(
+                                  Duration(milliseconds: value.round())),
+                            ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(_clock(value.position)),
+                                Text(_clock(duration)),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            IconButton.filled(
+                              iconSize: 48,
+                              tooltip: value.isPlaying ? '暂停' : '播放',
+                              onPressed: () => value.isPlaying
+                                  ? controller.pause()
+                                  : controller.play(),
+                              icon: Icon(value.isPlaying
+                                  ? Icons.pause_rounded
+                                  : Icons.play_arrow_rounded),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+      ),
+    );
+  }
+}
+
 class _DeckData {
   const _DeckData({required this.name, required this.slides});
   final String name;
