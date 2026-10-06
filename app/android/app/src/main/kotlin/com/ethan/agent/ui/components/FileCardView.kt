@@ -76,6 +76,8 @@ fun FileCardView(
     var signedAtMs by remember(card.path) { mutableLongStateOf(0L) }
     var signing by remember(card.path) { mutableStateOf(false) }
     var error by remember(card.path) { mutableStateOf<String?>(null) }
+    // 用户点了「播放/下载」之后、真正打开之前的等待（换签 + 启动外部应用）
+    var actionPending by remember(card.path) { mutableStateOf(false) }
     // 非空 = 打开应用内音频播放器
     var playingUrl by remember(card.path) { mutableStateOf<String?>(null) }
 
@@ -117,9 +119,23 @@ fun FileCardView(
         return refreshSignature()
     }
 
-    // 组合期先签一次：图片卡片必须立刻拿到 URL 才能开始加载。
+    // 只在图片卡片上组合期先签一次：图片要立即拿到 URL 才能开始加载；
+    // 音频/视频/普通文件是「点击才用」，集中在那时签（否则一屏 N 张卡片会打 N 个
+    // /files/sign，而且每张卡片都会闪一下「正在获取文件授权…」）。
     LaunchedEffect(card.path) {
-        if (signFile != null) refreshSignature()
+        if (signFile != null && IMAGE_KINDS.contains(card.kind)) refreshSignature()
+    }
+
+    /** 用户动作：期间给「在准备」的反馈，避免慢网络下「点了没反应」。 */
+    fun runAction(block: suspend () -> Unit) {
+        scope.launch {
+            actionPending = true
+            try {
+                block()
+            } finally {
+                actionPending = false
+            }
+        }
     }
 
     fun openExternally(url: String) {
@@ -147,44 +163,33 @@ fun FileCardView(
             AUDIO_KINDS.contains(card.kind) -> AudioFileCardView(
                 card = card,
                 onPlay = {
-                    scope.launch {
-                        usableSignature()?.let { playingUrl = signedUrl("view", it) }
-                    }
+                    runAction { usableSignature()?.let { playingUrl = signedUrl("view", it) } }
                 },
                 onDownload = {
-                    scope.launch {
-                        usableSignature()?.let { openExternally(signedUrl("download", it)) }
-                    }
+                    runAction { usableSignature()?.let { openExternally(signedUrl("download", it)) } }
                 },
             )
 
             VIDEO_KINDS.contains(card.kind) -> VideoFileCardView(
                 card = card,
                 onPlay = {
-                    scope.launch {
-                        usableSignature()?.let { openExternally(signedUrl("view", it)) }
-                    }
+                    runAction { usableSignature()?.let { openExternally(signedUrl("view", it)) } }
                 },
                 onDownload = {
-                    scope.launch {
-                        usableSignature()?.let { openExternally(signedUrl("download", it)) }
-                    }
+                    runAction { usableSignature()?.let { openExternally(signedUrl("download", it)) } }
                 },
             )
 
             else -> GenericFileCardView(
                 card = card,
                 onDownload = {
-                    scope.launch {
-                        usableSignature()?.let { openExternally(signedUrl("download", it)) }
-                    }
+                    runAction { usableSignature()?.let { openExternally(signedUrl("download", it)) } }
                 },
             )
         }
 
-        // 只在首次签名（还没拿到任何签名）时提示：后续换签是点击触发的，
-        // 结果会立刻体现在播放器/浏览器上，不需要额外一行噪声。
-        if (signing && signature == null) {
+        // 首次签名（图片卡片）或用户点击后正在换签：都得有「在准备」的可见反馈。
+        if (actionPending || (signing && signature == null)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -204,7 +209,7 @@ fun FileCardView(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                 )
-                TextButton(onClick = { scope.launch { refreshSignature() } }) {
+                TextButton(onClick = { runAction { refreshSignature() } }) {
                     Text("重试", style = MaterialTheme.typography.labelSmall)
                 }
             }

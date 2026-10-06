@@ -454,12 +454,6 @@ class _AudioPreviewScreenState extends State<AudioPreviewScreen> {
   }
 
   Future<void> _init() async {
-    if (mounted) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
     try {
       final uri =
           widget.api.mediaUri(widget.path, sessionId: widget.sessionId);
@@ -484,9 +478,14 @@ class _AudioPreviewScreenState extends State<AudioPreviewScreen> {
     }
   }
 
+  // 初始化期间不 setState（initState 里 markNeedsBuild 无意义）；复位只发生在重试。
   Future<void> _retry() async {
     final previous = _controller;
-    _controller = null;
+    setState(() {
+      _controller = null;
+      _loading = true;
+      _error = null;
+    });
     await previous?.dispose();
     await _init();
   }

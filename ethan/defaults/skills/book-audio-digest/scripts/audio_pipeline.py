@@ -322,14 +322,14 @@ def synthesize_sections(manifest: dict[str, Any], output_dir: Path, *, retries: 
         )
 
     results = asyncio.run(_synthesize_all())
-    failed = [(i, r) for i, r in enumerate(results) if isinstance(r, BaseException)]
-    if failed:
+    failure = next((r for r in results if isinstance(r, BaseException)), None)
+    if failure is not None:
         for tmp in cache_dir.glob(".*.tmp"):
             tmp.unlink(missing_ok=True)
         # _synthesize_section 抛出的异常已经写了 "TTS failed for section <id>: …"，
         # 这里再包一层前缀会得到「TTS failed for section x: TTS failed for section x: 真因」
         # 这种看不出真因的报错。原样抛出，保留原始异常类型与信息。
-        raise failed[0][1]
+        raise failure
 
     artifacts: list[dict[str, Any]] = []
     for section in manifest["sections"]:
