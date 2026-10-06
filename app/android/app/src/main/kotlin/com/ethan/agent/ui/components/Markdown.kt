@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -232,6 +233,16 @@ fun SimpleMarkdown(
      * 聊天气泡里保持默认紧凑行高——气泡本来就窄，行距再大就撑爆了。
      */
     relaxedLeading: Boolean = false,
+    /**
+     * 允许长按选中正文并复制（阅读模式用）。
+     *
+     * 默认 false：聊天气泡里开着它，长按会被正文的选区抢走，气泡自己的长按菜单
+     * （引用整条消息）就再也弹不出来。
+     *
+     * 实现上分两条路（正文走库的原生 TextView，标题走 SelectionContainer），
+     * 具体见下面两个分支的注释。
+     */
+    selectable: Boolean = false,
 ) {
     val context = LocalContext.current
     val defaultColor = MaterialTheme.colorScheme.onSurface
@@ -279,6 +290,20 @@ fun SimpleMarkdown(
                         MarkdownText(
                             markdown = token.value,
                             style = bodyTextStyle,
+                            // 阅读模式：让原生 TextView 接管长按 → 系统选区 + 「复制」菜单。
+                            //
+                            // 为什么不会吃掉滚动：Compose↔原生 View 的 interop
+                            // （PointerInteropFilter）里 DOWN/UP 走 Initial pass、MOVE 留到
+                            // Final pass 才下发给原生 View，所以拖动先被父级 verticalScroll
+                            // 消费，原生 View 收到的是 ACTION_CANCEL。长按后拖动扩选时，
+                            // Editor 会 requestDisallowInterceptTouchEvent(true)，interop
+                            // 随即把 MOVE 改回 Initial pass —— 扩选优先于滚动，正是我们要的。
+                            //
+                            // 已知边界：长按**直接落在链接上**不会起选区 —— 库的
+                            // CustomTextView 在 ACTION_DOWN 命中 ClickableSpan 时先 return
+                            // true（在 super 之前），TextView 收不到 DOWN。从链接旁边的
+                            // 普通文字起手则正常。
+                            isTextSelectable = selectable,
                             onLinkClicked = { url ->
                                 // Check if URL is an image — open lightbox
                                 val imgIdx = imageUrls.indexOf(url)
@@ -313,14 +338,21 @@ fun SimpleMarkdown(
                         3 -> MaterialTheme.typography.titleMedium
                         else -> MaterialTheme.typography.titleSmall
                     }
-                    Text(
-                        text = token.value,
-                        style = style.copy(
-                            color = resolvedTextColor,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
-                    )
+                    val heading: @Composable () -> Unit = {
+                        Text(
+                            text = token.value,
+                            style = style.copy(
+                                color = resolvedTextColor,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                        )
+                    }
+                    // 标题是我们自绘的 Compose Text，接不上上面原生 TextView 那套选区，
+                    // 所以单独包一层 SelectionContainer。
+                    // 只包这一块，而不是把整个 Column 包起来：整个包会连 AndroidView
+                    // （正文 token）一起吞进选区手势，和原生 TextView 各选各的，反而打架。
+                    if (selectable) SelectionContainer { heading() } else heading()
                 }
                 is MdToken.Table -> {
                     MarkdownTable(
