@@ -235,6 +235,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (mounted && nextId == null) setState(() => loading = false);
   }
 
+  /// 右上角「重新拉取会话最新内容」。
+  ///
+  /// **不能直接用 [_load]**：那个取的是 `widget.sessionId`，而它只在抽屉/全部对话页
+  /// 选中会话时被赋值（`lib/app.dart` 的 `_MainShellState`）。会话是在对话页里被创建时
+  /// （新对话发出第一条消息），State 字段 `sessionId` 已经更新，`widget.sessionId` 却
+  /// 还是 null —— 此时走 `_load` 会被当成新会话，把眼前这段对话清掉。所以刷新只认
+  /// **当前正在显示的那个** `sessionId`。
+  ///
+  /// 另一处与 [_load] 不同：拉取失败时**保留原内容**。`_load` 是先清空再拉，失败后
+  /// 只剩一条错误横幅，一次刷新失败就丢掉用户正在看的东西；Android 侧是只在成功时
+  /// 替换，两端应该一致。
+  Future<void> _reloadCurrent() async {
+    final id = sessionId;
+    // 还没有会话（新对话尚未发出第一条消息）：没有“当前会话”可刷，按重新进入处理。
+    if (id == null) return _load();
+    if (loading || streaming) return;
+    final previous = messages;
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      final detail = await widget.api.session(id);
+      if (!mounted || sessionId != id) return;
+      setState(() {
+        title = detail.title;
+        messages = detail.messages;
+        selectedModel = detail.model.isEmpty ? selectedModel : detail.model;
+        selectedMode = detail.mode ?? '';
+        loading = false;
+      });
+      // 服务端那边可能还有一轮在跑（比如另一台设备发起的）——和 _load 一样接回去。
+      await _resume();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        messages = previous;
+        loading = false;
+        error = e.toString();
+      });
+    }
+  }
+
   /// 接回进行中的生成。
   ///
   /// [force] 表示「刚刚探活证明服务端是通的」，此时**跳过 `streaming` 检查**。
@@ -820,7 +863,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             actions: [
               IconButton(
                   tooltip: '重新拉取会话最新内容',
-                  onPressed: streaming || loading ? null : _load,
+                  onPressed: streaming || loading ? null : _reloadCurrent,
                   icon: const Icon(Icons.refresh_rounded)),
               // 复制会话链接（对齐桌面端 chat-header 的「复制 Web 地址」）。
               // 只在已有 sessionId 时出现：新会话还没建出来，没有可复制的地址，

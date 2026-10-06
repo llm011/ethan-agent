@@ -603,11 +603,17 @@ class ChatViewModel(
      * 流式生成中**不允许**刷新（UI 也把按钮置灰）：本地气泡是按 [assistantIndex] 逐帧
      * 覆写消息列表的，刷新会把列表换成服务端版本，索引一旦错位，正在生成的那条就被写到
      * 别的消息上（症状：旧气泡内容被新输出覆盖）。生成中要看最新内容，SSE 本身就在推。
+     *
+     * 上面的（置灰 + 入口守卫）都是**发起前**的检查，挡不住「发起之后用户才点发送」。
+     * 所以结果回来时还会再判一次（见下面的 apply）——两处都要，缺哪一处都会复现索引错位。
      */
     fun reloadSession() {
         val sid = _state.value.sessionId ?: return
         if (_state.value.isReloading) return
         if (_state.value.isStreaming || _state.value.isResuming) return
+        // 发起时的消息条数。结果回来时要拿它和当下的条数对比（见下面的 apply）：
+        // 数量变了就说明这中间又有了一轮本地写入，快照已经不能代表现在的列表。
+        val messagesBefore = _state.value.messages.size
         viewModelScope.launch {
             _state.update { it.copy(isReloading = true) }
             try {
@@ -619,9 +625,19 @@ class ChatViewModel(
                 }
                 val detail = repository.refreshSession(sid)
                 _state.update { st ->
-                    // 刷新期间用户可能已经切到别的会话（那个会话有自己的 VM，这里一般不会，
-                    // 但删会话 / 重新进入是可能的）—— 回来发现 id 变了就别拿旧数据覆盖。
-                    if (st.sessionId != sid) return@update st.copy(isReloading = false)
+                    // 放弃应用这次结果的三种情况（都只收起转圈，不动消息）：
+                    //   1. 会话变了（删会话 / 重新进入）；
+                    //   2. 这期间用户发了新消息或开始接流 —— 发起前的那次检查挡不住它，
+                    //      本地气泡是按 assistantIndex 逐帧写列表的，这时换成服务端版本
+                    //      会让索引错位（新输出写到别的气泡上）；
+                    //   3. 条数变了 —— 上面那种「这一轮刚好跑完」的同族竞态。
+                    // 代价是这种情况下刷新静默失效，用户再点一次即可 —— 比覆掉正在
+                    // 生成的一轮轻得多。
+                    if (st.sessionId != sid || st.isStreaming || st.isResuming ||
+                        st.messages.size != messagesBefore
+                    ) {
+                        return@update st.copy(isReloading = false)
+                    }
                     st.copy(
                         title = detail.title.ifBlank { st.title },
                         selectedModel = detail.model.ifBlank { null }
