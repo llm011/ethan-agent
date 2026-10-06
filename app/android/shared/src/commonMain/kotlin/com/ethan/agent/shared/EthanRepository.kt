@@ -390,6 +390,17 @@ class EthanRepository(
         return api.getPinnedSessions().sessions
     }
 
+    /**
+     * 标记会话已读（服务端未读水位推进到 updated_at）。
+     *
+     * 调用方（[com.ethan.agent.shared.viewmodel.SessionsViewModel]）已经先做了本地乐观
+     * 标记，这里失败不抛错也不回滚——红点清除不该被一次网络抖动推翻，下一次轮询/
+     * 进入会话时还会再补报。
+     */
+    suspend fun markSessionRead(id: String) {
+        api.markSessionRead(id)
+    }
+
     suspend fun uploadAttachment(data: ByteArray, filename: String): String {
         return api.uploadFile(data, filename, "application/octet-stream").path
     }

@@ -213,6 +213,14 @@ class EthanApiService(
         client.delete(url("sessions/$id"))
     }
 
+    /**
+     * 标记会话已读：服务端把未读水位（last_read_at）推进到 updated_at，
+     * 与 Web/Desktop 的 `markSessionRead` 是同一个接口（`POST /api/sessions/{id}/read`）。
+     */
+    suspend fun markSessionRead(id: String) {
+        client.post(url("sessions/$id/read"))
+    }
+
     suspend fun compactSession(id: String): CompactResponse =
         client.post(url("sessions/$id/compact")).body()
 

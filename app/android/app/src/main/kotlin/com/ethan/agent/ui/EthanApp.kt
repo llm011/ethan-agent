@@ -22,6 +22,7 @@ import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.ethan.agent.core.model.AgendaEvent
@@ -114,6 +115,19 @@ private fun MainContent(authViewModel: AuthViewModel) {
     val sessionsVm: SessionsViewModel = koinViewModel()
     val sessionsState by sessionsVm.state.collectAsState()
 
+    // 未读红点只有一个挂钩点：路由一变就告诉 SessionsViewModel「用户现在在看哪个会话」。
+    // 这样抽屉 / 全部对话页 / 定时任务页 / 后台任务页 / 深链进去都能进会话即已读，
+    // 而且正在看的会话永不亮红点（对齐 Web sidebar 的 activeSessionId）。
+    // 只看 Chat 目的地：PPT 预览 / 标注页虽然也带 sessionId 路径参数，但不算「在读对话」，
+    // 不该因此把会话标成已读。
+    // 注意：不能注册在 Chat 页内部（Compose Navigation 要等转场动画结束才销毁上一页，
+    // 上一页的 onDispose 会把刚设好的 active 清掉）。
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val activeSessionId = backStackEntry
+        ?.takeIf { it.destination.route == Screen.Chat.route }
+        ?.arguments?.getString("sessionId")
+    LaunchedEffect(activeSessionId) { sessionsVm.setActiveSession(activeSessionId) }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = true,
@@ -136,7 +150,8 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     }
                 },
                 onSessionClick = { id ->
-                    sessionsVm.markRead(id)
+                    // 不再在这里单独 markRead：路由变化会被上面的 activeSessionId 监听到，
+                    // 由 SessionsViewModel 统一「进入即已读」，避免同一个会话发两次 /read
                     navController.navigate(Screen.Chat.createRoute(id))
                 },
                 onSearchClick = {

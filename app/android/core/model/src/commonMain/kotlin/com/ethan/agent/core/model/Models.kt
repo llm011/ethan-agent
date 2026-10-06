@@ -106,6 +106,13 @@ data class SessionInfo(
     val mode: String? = null,
     /** 置顶时间戳（epoch 秒）；0/null 表示未置顶 */
     @SerialName("pinned_at") @Serializable(with = EpochSecondsSerializer::class) val pinnedAt: Long = 0,
+    /**
+     * 未读水位（epoch 秒，服务端 `last_read_at`）：`updatedAt > lastReadAt` 即有未读。
+     *
+     * 用可空类型是为了区分「服务端明确返回 0（没读过，算未读）」与「旧后端根本不返回
+     * 这个字段（null → 视为已读，不误报满屏红点）」——用 0 兜底会把旧后端全都点亮。
+     */
+    @SerialName("last_read_at") @Serializable(with = NullableEpochSecondsSerializer::class) val lastReadAt: Long? = null,
 )
 
 @Serializable

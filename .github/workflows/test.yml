@@ -40,4 +40,6 @@ jobs:
           tests/test_mcp_apps.py
           tests/test_file_read_vision_content.py
           tests/test_server_bind_conflict.py
+          tests/test_session_unread.py
+          tests/test_session_unread_api.py
           -q

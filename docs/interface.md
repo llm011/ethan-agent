@@ -479,6 +479,41 @@ iOS 侧**没有 CI 覆盖**（`.github/workflows/test.yml` 不碰 `app/ios`，`a
 **从那个 PR 起就编不过**，只是没人跑 `flutter analyze` 所以一直没暴露。改动 iOS 时至少跑一次
 `flutter analyze`（error 级别必须为零），别只看 `flutter test`。
 
+### 会话未读红点（不要往回退）
+
+侧边栏 / 抽屉里的会话红点，三端共用**服务端水位**这一个判据：
+
+```
+未读 = updated_at > last_read_at
+```
+
+`last_read_at` 由 `sessions` 表维护（`SessionStore.mark_read()` 原子 UPDATE，幂等），
+`GET /sessions`、`GET /sessions/pinned`、`GET /poll` 都会回；清除走
+`POST /sessions/{id}/read`。前端判定分别落在 `packages/shared/src/lib/unread.ts`（Web/Desktop）
+与 `SessionUnreadTracker`（Android，`app/android/shared/.../viewmodel/`）。
+
+**别再退回「客户端比较两次轮询的 updatedAt」那种启发式**（Android 旧实现就是这样，
+用户报的「点进会话红点不清除、要点好几次才消失」即源于此）：它只能看到客户端快照，
+消息刚好在点击前到达时水位推不上去，下一次轮询红点就回弹；而且「抽屉吃未过滤全量列表、
+主列表被 hide_* 过滤」时，抽屉独有的会话（定时/心跳/后台、掉出前 50 条）水位更是永远推不动。
+
+三条约束：
+
+1. **正在查看的会话永不亮红点**，且进入即已读——Android 由 `EthanApp` 监听导航栈调用
+   `setActiveSession()` 统一挂钩（覆盖抽屉 / 全部对话页 / 定时 / 后台 / 深链；只认 Chat 目的地，
+   PPT 预览与标注页虽带 `sessionId` 路径参数但不算在读对话）。别把钩子放进 Chat 页内部：
+   Compose Navigation 要等转场动画结束才销毁上一页，上一页的 `onDispose` 会把刚设好的 active 清掉。
+2. **本地乐观水位只增不减、不退休**：点开时先把水位推到已知的 `updated_at`（不等 `/read` 回执），
+   之后不再删。`/poll` 的响应会乱序（一次在飞、一次刚发起），较新的先落地、较旧的后落地时
+   带的是 `/read` 之前的水位——一旦提前删掉乐观水位，红点就会被重新点亮。代价只是「每个打开过的
+   会话一个 Long」，跟 VM 生命周期（进程内）走。回执慢/丢包时红点也不会闪回来；同时轮询发现
+   「正在查看但服务端仍标未读」会补一次 `/read` 上报（不让 Web/桌面端继续亮着）。
+3. **旧后端兼容**：不返回 `last_read_at`（JSON 里缺字段 → `null`）时按「已读」兜底，
+   不能默认成 0，否则升级后满屏假红点。注意区分「`null` = 后端不支持」与「`0` = 明确没读过」。
+
+iOS（Flutter，`app/ios`）目前**没有**会话列表红点，只有聊天页内「新消息 N」气泡
+（滚动位置相关，与未读水位无关），所以这条修复只影响 Android。
+
 ### 会话页：生成中反馈与右上角动作
 
 三端（Web `message-bubble.tsx` / Android `TypingDots` / iOS `TypingDots`）用同一套语义：
