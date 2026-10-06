@@ -42,7 +42,8 @@ import com.ethan.agent.ui.components.SimpleMarkdown
  * 行高放宽、背景纯净，只留一个退出按钮。
  *
  * 与 Web 的差异（有意为之）：
- *   - 不做标注/划线/批注（Android 端的标注在独立的「标注」页管理，不在这里重复造一套选区体系）。
+ *   - 不做标注/划线/批注（Android 端的标注在独立的「标注」页管理，不在这里重复造一套选区体系）；
+ *     但**正文选中复制**是阅读本身的基本能力，所以这里开着 `selectable`。
  *   - 不做正文编辑（移动端改 Markdown 正文体验差，且需要与后端 PATCH 对齐，超出本次范围）。
  */
 @Composable
@@ -112,6 +113,9 @@ fun ReadingModeScreen(
                         text = message.content,
                         textColor = MaterialTheme.colorScheme.onSurface,
                         relaxedLeading = true,
+                        // 长按选中文字 → 系统浮层菜单「复制」。正文走原生 TextView 的选区，
+                        // 标题（Compose Text）由 SimpleMarkdown 内部包 SelectionContainer。
+                        selectable = true,
                     )
                 }
                 Spacer(Modifier.height(32.dp))

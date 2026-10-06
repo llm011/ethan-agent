@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -232,6 +233,18 @@ fun SimpleMarkdown(
      * 聊天气泡里保持默认紧凑行高——气泡本来就窄，行距再大就撑爆了。
      */
     relaxedLeading: Boolean = false,
+    /**
+     * 阅读模式用：允许长按选中正文并复制。
+     *
+     * 默认 false —— 聊天气泡里开着它，长按会被正文的选区抢走，气泡自己的长按菜单
+     * （引用/复制整条消息等）就再也弹不出来了。
+     *
+     * 正文（[MdToken.Text]）走 compose-markdown 的原生 TextView：`isTextSelectable = true`
+     * 之后长按选中、拖手柄、系统菜单「复制」都是系统行为，不需要我们再搓一套选区。
+     * 标题（[MdToken.Heading]）是我们自己用 Compose `Text` 画的，天然接不上那套，
+     * 所以单独包一层 [SelectionContainer]。
+     */
+    selectable: Boolean = false,
 ) {
     val context = LocalContext.current
     val defaultColor = MaterialTheme.colorScheme.onSurface
@@ -279,6 +292,12 @@ fun SimpleMarkdown(
                         MarkdownText(
                             markdown = token.value,
                             style = bodyTextStyle,
+                            // 阅读模式：让原生 TextView 接管长按 → 系统选区 + 「复制」菜单。
+                            // 不会吃掉滚动：Compose 与原生 View 的 interop 把 MOVE 事件放在
+                            // Final pass 才交给原生 View（DOWN/UP 走 Initial），所以拖动手势
+                            // 先被父级 verticalScroll 消费，原生 View 收到的是 ACTION_CANCEL，
+                            // 按下不动（长按选字）才轮得到它。
+                            isTextSelectable = selectable,
                             onLinkClicked = { url ->
                                 // Check if URL is an image — open lightbox
                                 val imgIdx = imageUrls.indexOf(url)
@@ -313,14 +332,20 @@ fun SimpleMarkdown(
                         3 -> MaterialTheme.typography.titleMedium
                         else -> MaterialTheme.typography.titleSmall
                     }
-                    Text(
-                        text = token.value,
-                        style = style.copy(
-                            color = resolvedTextColor,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
-                    )
+                    val heading: @Composable () -> Unit = {
+                        Text(
+                            text = token.value,
+                            style = style.copy(
+                                color = resolvedTextColor,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                        )
+                    }
+                    // 阅读模式下标题也是正文的一部分，同样要能选中/复制。
+                    // 只包这一块，而不是把整个 Column 包起来：整个包会连 AndroidView
+                    // （正文 token）一起吞进选区手势，和原生 TextView 各选各的，反而打架。
+                    if (selectable) SelectionContainer { heading() } else heading()
                 }
                 is MdToken.Table -> {
                     MarkdownTable(
