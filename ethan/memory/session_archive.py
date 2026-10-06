@@ -196,7 +196,19 @@ async def archive_old_sessions(store, days: int) -> dict[str, Any]:
             "size_bytes": size_bytes,
         }
     except Exception:
-        # 任一步失败：清理临时快照，主库未删（或已删的部分在一个事务里一起回滚），数据不丢
+        # 任一步失败：先回滚主库上可能挂着的未提交事务——第 3 步三条 DELETE 走的是
+        # 连接的隐式事务（isolation_level 默认值），不显式回滚的话，常驻服务后续任何
+        # 一次写库 commit 会把部分删除连带提交掉，而 tmp 快照也被清理，那就真丢数据
+        # 了；且挂着的未提交事务会一直持锁，堵住其他写操作。回滚成功才清临时快照；
+        # 回滚失败时快照留在原地并记日志——宁可多个垃圾文件，不可丢数据。
+        try:
+            await db.rollback()
+        except Exception:
+            logger.exception(
+                "[SessionArchive] 归档失败且主库回滚失败，临时快照保留在 %s（勿手动删除，含未归档数据）",
+                tmp_path,
+            )
+            raise
         try:
             tmp_path.unlink(missing_ok=True)
             for ext in ("-wal", "-shm", "-journal"):

@@ -182,3 +182,50 @@ def test_router_archive_endpoints(client, store, tmp_path):
     res = client.get("/sessions")
     ids = [s["id"] for s in res.json()["sessions"]]
     assert "old1" not in ids
+
+
+def test_archive_failure_rolls_back_partial_main_db_deletes(store, tmp_path):
+    """第 3 步主库删除中途失败：隐式事务必须回滚，消息不能被部分删掉。
+
+    回归背景：except 里若不 rollback，挂着的未提交事务会被常驻服务后续任意
+    一次写库 commit 连带提交——部分删除落定、tmp 快照又被清理，等于真丢数据。
+    """
+    now = time.time()
+    old_ts = now - 100 * 86400
+    _mk_session(store, "old1", n_msgs=3, updated_at=old_ts)
+    _mk_session(store, "fresh", updated_at=now)
+
+    real_db = store._db
+
+    class _FailOnBlobDelete:
+        """包一层真实连接：DELETE message_intermediate_blobs 时抛错，模拟中途失败。"""
+
+        def __getattr__(self, name):
+            return getattr(real_db, name)
+
+        async def execute(self, sql, *args, **kwargs):
+            if "DELETE FROM message_intermediate_blobs" in sql:
+                raise RuntimeError("simulated mid-archive failure")
+            return await real_db.execute(sql, *args, **kwargs)
+
+    store._db = _FailOnBlobDelete()
+    with pytest.raises(RuntimeError, match="simulated"):
+        asyncio.run(archive_old_sessions(store, 90))
+    store._db = real_db
+
+    # 回滚生效：旧会话与全部消息仍在主库（未提交的部分删除被撤销）
+    async def _count():
+        async with real_db.execute(
+            "SELECT COUNT(*) FROM messages WHERE session_id='old1'"
+        ) as cur:
+            return (await cur.fetchone())[0]
+
+    assert asyncio.run(_count()) == 3
+
+    # 后续一次无关写库 commit 也不会把「幽灵删除」带出来
+    _mk_session(store, "fresh2", updated_at=now)
+    assert asyncio.run(_count()) == 3
+
+    # tmp 快照已清理、没有产出归档文件
+    assert list(list_archives()) == []
+    assert not any(p.name.startswith(".archive-tmp-") for p in (tmp_path / "archive").iterdir())
