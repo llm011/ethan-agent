@@ -28,6 +28,18 @@ class ApiConfig {
   }
 
   String get apiBase => '$origin/api';
+
+  /// 会话分享链接 —— 与桌面端 chat-header「复制 Web 地址」同口径：
+  /// `${origin}/chat/{sessionId}/`，粘到浏览器里直接打开这个会话的 Web 页面。
+  ///
+  /// 用 origin 而不是 [apiBase]：`/api` 是给客户端调的，人打开只会拿到 JSON。
+  /// 返回 null 表示没有可复制的地址（会话还没建出来），调用方据此不显示复制入口。
+  /// Android 侧同一算法在 `ServerUrlUtils.toSessionWebUrl`。
+  String? sessionWebUrl(String sessionId) {
+    final id = sessionId.trim();
+    if (id.isEmpty) return null;
+    return '$origin/chat/$id/';
+  }
 }
 
 class ChatMessage {

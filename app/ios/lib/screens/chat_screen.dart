@@ -4,11 +4,15 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 
 import 'package:flutter/material.dart';
+// 只取 Clipboard：`dart:typed_data` 已经在上面显式导入，全量导入 services 会让那个
+// 导入被判成多余（unnecessary_import）。
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../data/api_client.dart';
 import '../models/app_models.dart';
 import '../role_palette.dart';
 import '../services/api_service.dart';
+import '../widgets/common.dart';
 import 'session_media_screens.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -807,14 +811,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 onPressed: widget.onMenu, icon: const Icon(Icons.menu_rounded)),
             title:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title),
+              // 右上角现在有三个动作（刷新 / 复制链接 / 溢出菜单），标题必须单行截断，
+              // 否则长标题会折行把标题栏撞高，甚至把右侧按钮顶出去。
+              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
               if (streaming || resuming)
                 const Text('正在生成…', style: TextStyle(fontSize: 12))
             ]),
             actions: [
               IconButton(
+                  tooltip: '重新拉取会话最新内容',
                   onPressed: streaming || loading ? null : _load,
                   icon: const Icon(Icons.refresh_rounded)),
+              // 复制会话链接（对齐桌面端 chat-header 的「复制 Web 地址」）。
+              // 只在已有 sessionId 时出现：新会话还没建出来，没有可复制的地址，
+              // 摆一个点了没反应的按钮比不显示更像坏了。
+              if (sessionId != null)
+                IconButton(
+                    tooltip: '复制会话链接',
+                    onPressed: () async {
+                      final id = sessionId;
+                      final link =
+                          id == null ? null : widget.api.config.sessionWebUrl(id);
+                      if (link == null) return;
+                      // 先取 messenger 再 await：回调醒来后就不再碰 context，
+                      // 免得踩 use_build_context_synchronously。
+                      final messenger = ScaffoldMessenger.of(context);
+                      await Clipboard.setData(ClipboardData(text: link));
+                      messenger.showSnackBar(
+                          const SnackBar(content: Text('已复制会话链接')));
+                    },
+                    icon: const Icon(Icons.link_rounded)),
               PopupMenuButton<String>(
                   onSelected: (v) {
                     if (v == 'model') _pickModel();
@@ -1080,7 +1106,9 @@ class _Bubble extends StatelessWidget {
                               if (isActive) ...[
                                 const SizedBox(width: 8),
                                 _StatusPill(
-                                    label: '生成中', color: theme.colorScheme.primary),
+                                    label: '生成中',
+                                    color: theme.colorScheme.primary,
+                                    dots: true),
                               ],
                               const Spacer(),
                               if (message.time.isNotEmpty)
@@ -1149,9 +1177,13 @@ class _Bubble extends StatelessWidget {
 }
 
 class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.label, required this.color});
+  const _StatusPill(
+      {required this.label, required this.color, this.dots = false});
   final String label;
   final Color color;
+
+  /// 运行中的状态用跳动的三点代替纯文字：静态「生成中」看不出是在推进还是卡住了。
+  final bool dots;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1159,11 +1191,17 @@ class _StatusPill extends StatelessWidget {
         decoration: BoxDecoration(
             color: color.withOpacity(.12),
             borderRadius: BorderRadius.circular(20)),
-        child: Text(label,
-            style: Theme.of(context)
-                .textTheme
-                .labelSmall
-                ?.copyWith(color: color, fontWeight: FontWeight.w700)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (dots) ...[
+            TypingDots(color: color, dotSize: 3, gap: 2),
+            const SizedBox(width: 5),
+          ],
+          Text(label,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelSmall
+                  ?.copyWith(color: color, fontWeight: FontWeight.w700)),
+        ]),
       );
 }
 
@@ -1257,7 +1295,7 @@ class _ToolTimeline extends StatelessWidget {
             title: Text(step.tool.isEmpty ? '工具步骤 ${entry.key + 1}' : step.tool,
                 style: const TextStyle(fontWeight: FontWeight.w700)),
             subtitle: Row(children: [
-              _StatusPill(label: statusText, color: statusColor),
+              _StatusPill(label: statusText, color: statusColor, dots: active),
               if (step.durationMs != null) ...[
                 const SizedBox(width: 7),
                 Text('${step.durationMs} ms'),

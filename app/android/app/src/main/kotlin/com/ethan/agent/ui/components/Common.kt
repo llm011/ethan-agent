@@ -43,7 +43,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,6 +60,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -61,6 +70,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.ToolStep
 
@@ -68,6 +78,53 @@ import com.ethan.agent.core.model.ToolStep
 fun LoadingBox(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         CircularProgressIndicator()
+    }
+}
+
+/**
+ * 「正在生成」的三点跳动指示器（对齐 Web `message-bubble.tsx` 的 animate-bounce 三点）。
+ *
+ * 为什么不是 [CircularProgressIndicator]：转圈表达的是「这个控件在忙」，放在聊天气泡里
+ * 更像加载失败；三个错峰呼吸的点才读作「对方正在打字」。两处都保留：首次等待用转圈 +
+ * 文案，气泡里的持续态用这个。
+ *
+ * 颜色由调用方传入 —— 组件不应该假设背景，否则深色气泡上的点会看不见。
+ * 三个点共享一个 `rememberInfiniteTransition`，只错开启动相位（`StartOffset`），
+ * 比开三个独立动画更好预测，也不会因为各自漂移而看起来乱。
+ */
+@Composable
+fun TypingDots(
+    color: Color,
+    modifier: Modifier = Modifier,
+    dotSize: Dp = 4.dp,
+    gap: Dp = 3.dp,
+) {
+    val transition = rememberInfiniteTransition(label = "typing-dots")
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(gap),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(3) { index ->
+            val alpha by transition.animateFloat(
+                // 0.25 是「熄灭」的下限而不是 0：完全不透明的消失会让气泡看起来像空了。
+                initialValue = 0.25f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 450, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse,
+                    initialStartOffset = StartOffset(index * 150),
+                ),
+                label = "typing-dot-$index",
+            )
+            Box(
+                modifier = Modifier
+                    .size(dotSize)
+                    .alpha(alpha)
+                    .clip(CircleShape)
+                    .background(color),
+            )
+        }
     }
 }
 

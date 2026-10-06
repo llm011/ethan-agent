@@ -75,6 +75,21 @@ object ServerUrlUtils {
         return if (idx > 0) input.substring(idx) else input
     }
 
+    /**
+     * 会话分享链接 —— 与桌面端 chat-header「复制 Web 地址」同口径：
+     * `${origin}/chat/{sessionId}/`，粘到浏览器里直接打开这个会话的 Web 页面。
+     *
+     * 用 **origin** 而不是 apiBaseUrl（`/api` 是给客户端调的，人打开只会拿到 JSON）。
+     * serverUrl 解析不出 origin（空串 / 非法）或 sessionId 为空时返回 null，
+     * 调用方据此不显示复制入口 —— 复制一个打不开的地址比不复制更糟。
+     */
+    fun toSessionWebUrl(serverUrl: String, sessionId: String): String? {
+        val id = sessionId.trim()
+        if (id.isEmpty()) return null
+        val origin = normalize(serverUrl) ?: return null
+        return "${origin.trimEnd('/')}/chat/$id/"
+    }
+
     fun toApiBaseUrl(serverUrl: String, fallback: String = DEFAULT_SERVER_URL): String {
         val origin = normalize(serverUrl) ?: normalize(fallback) ?: fallback
         return "${origin.trimEnd('/')}/api"
