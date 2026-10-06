@@ -26,6 +26,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - **fact_sync 镜像**：每次做梦前，把 active 记忆/playbook 内容全量镜像到向量库（type=`fact_sync`），让 insight 的 L2 去重天然覆盖已有记忆；镜像每次全量重建
 - **永久保留**：洞察不会被自动删除；`last_accessed` 仅作活跃度观察，不作为淘汰依据（memory.db 体量天然可控，每条洞察约 15KB）
 - **sessions.db 轮转**：完整消息历史增长快，sessions.db 超 10 MB 时用 `VACUUM INTO` 原子快照到 `~/.ethan/archive/sessions.{start}~{end}.db`（文件名带日期跨度），保持 active db 轻量，旧会话仍可按日期查归档
+- **手动归档（设置 → 数据管理）**：可按「1 个月 / 3 个月 / 半年前」把旧会话备份成独立文件并从主库移除，为主库瘦身；执行前先预览命中的会话数与时间范围，备份文件名自带日期跨度（`sessions.{start}~{end}.db`），设置页列出已有备份，后续将支持从备份恢复；置顶会话永不归档
 
 **陪伴倾听模式 · 苏念（《臣服实验》心理咨询师）**  *（内置技能，无需安装）*
 - 在聊天界面一键切换「苏念 · 陪伴倾听」（或 CLI 里 `/mode 苏念`），从工作助手变成一位年轻温柔的女性陪伴者，熟读《臣服实验》、深谙道法自然

@@ -290,7 +290,7 @@ CLI 内部维护 `WorkingMemory` 实例：
 | `/schedule` | 定时任务列表，支持暂停/恢复/删除/重命名 |
 | `/skills` | Skill 列表及内容预览 |
 | `/sessions` | 历史会话列表，支持按标题搜索 |
-| `/settings` | 配置项：代理、max_tokens、max_tool_iterations、fast-path 关键词、心跳配置、System Prompt 预览 |
+| `/settings` | 配置项：代理、max_tokens、max_tool_iterations、fast-path 关键词、心跳配置、System Prompt 预览；「数据管理」Tab 支持旧会话归档（备份 + 从主库移除） |
 | `/channels` | 渠道管理：查看/编辑已配置的通知渠道 |
 
 ### 与后端通信
@@ -558,6 +558,18 @@ iOS 标题同样加了 `maxLines: 1 + ellipsis`，否则长标题会折行把三
 | DELETE | `/documents?path=...` | 删除文档（连同其元数据） |
 | GET | `/documents/root` | 文档库根目录路径与是否存在（设置页展示用） |
 | GET | `/releases/android/{tag}/app-release.apk` | Android 客户端 APK 下载（**公开、无鉴权**，见下） |
+| GET | `/sessions/archive/preview?days=N` | 预览归档 N 天前的会话会命中多少（会话/消息数 + 时间范围），不执行 |
+| POST | `/sessions/archive/run` | 归档 N 天前的未置顶会话：`VACUUM INTO` 快照 → 副本删掉保留集 → 主库按同一谓词删除，产出 `archive/sessions.{start}~{end}.db` |
+| GET | `/sessions/archives` | 列出 archive/ 下已有归档库（文件名含日期跨度），设置页展示 + 后续恢复功能选文件 |
+
+**会话归档**（设置 → 数据管理，`ethan/memory/session_archive.py`）：把「1 个月 /
+3 个月 / 半年前」的旧会话备份成独立 SQLite 并从主库移除。要点：
+`days` 只允许 `(30, 90, 180)` 三档（挡住 days=0 误删全库）；置顶会话
+（`pinned_at > 0`）永不归档；快照与主库删除**各自**按同一谓词求值——快照后重新
+活跃的会话留在主库，宁可归档里多一份副本（恢复时去重），不可丢数据；intermediate
+blob 的落盘文件不移动，归档/恢复期间保持原位。GET 归档路由必须注册在
+`/sessions/{session_id}` 之前，否则 `archive`/`archives` 会被当成 session id 吞掉
+（FastAPI 按注册顺序匹配）。
 
 `/api/releases/android/*` 是 Android 应用内自更新的下载源，**不带鉴权**：更新检查本身
 就是匿名可用的，下载也不应该要求登录。`{tag}` 走白名单正则（`^v\d+\.\d+\.\d+...`），
