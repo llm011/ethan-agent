@@ -210,6 +210,7 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onInject = vm::injectMessage,
                     onQueueRemove = vm::queueRemove,
                     onQueueEdit = vm::queueEdit,
+                    onReloadSession = vm::reloadSession,
                 )
             }
 

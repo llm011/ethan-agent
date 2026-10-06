@@ -474,6 +474,37 @@ socket 被回收），而且挂起/恢复都**收不到任何断线回调**。We
 
 iOS 侧**没有 CI 覆盖**（`.github/workflows/test.yml` 不碰 `app/ios`，`android.yml` 只触发
 `app/android/**`），android 侧由 `android.yml` 跑 lint/test/assemble。
+因为这条盲区，`app/ios/lib/data/api_client.dart` 里曾同时存在两个同名 `health()`
+（旧的无返回值版 + PR #381 新加的 `Future<bool>` 版）—— Dart 不允许同类重名，整个 iOS 端
+**从那个 PR 起就编不过**，只是没人跑 `flutter analyze` 所以一直没暴露。改动 iOS 时至少跑一次
+`flutter analyze`（error 级别必须为零），别只看 `flutter test`。
+
+### 会话页：生成中反馈与右上角动作
+
+三端（Web `message-bubble.tsx` / Android `TypingDots` / iOS `TypingDots`）用同一套语义：
+**生成中用三个错峰呼吸的点**，而不是转圈。转圈读作「这个控件在忙 / 加载失败」，
+三点才读作「对方正在打字」。Android 在气泡角色名行尾 + 「思考中…」前各放一处，
+iOS 把它嵌进「生成中」状态胶囊里（工具步骤运行中同样带点），回复结束随 `isStreaming` 一起消失。
+
+会话页右上角两个动作，与桌面端 `chat-header` 对齐：
+
+| 动作 | 行为 | 为什么这么做 |
+|------|------|--------------|
+| 重新拉取会话最新内容 | 绕过 SWR 缓存重取 `GET /sessions/{id}`，就地替换消息列表；拉取中按钮转圈，失败弹 Snackbar | 不走进页面那条 `loadInitial`：那会重置草稿/模型/开屏 loading 并重新订阅 cached flow |
+| 复制会话链接 | 把 `${origin}/chat/{id}/` 写入剪贴板并轻提示「已复制会话链接」 | 用 **origin** 而不是 apiBase —— `/api` 是给客户端调的，人打开只会拿到 JSON |
+
+两条约束：
+
+1. **链接为空就不显示复制入口**（新会话还没建出来）。Android/iOS 各自的纯函数
+   （`ServerUrlUtils.toSessionWebUrl` / `ApiConfig.sessionWebUrl`）都返回可空值，
+   并都有单测覆盖；两边算法必须保持一致。
+2. **生成中禁用「重新拉取」**（置灰而不是隐藏，按钮留在原位）。本地气泡是**按索引**
+   覆写消息列表的（`collectSseStream(assistantIndex)`），刷新会把列表换成服务端版本，
+   索引一旦错位，正在生成的那条就被写到别的消息上。生成中想看最新内容，SSE 本身就在推。
+
+右上角空间：Android 标题保持 `weight(1f, fill = false)` + 单行省略，两个图标按钮排在
+连接状态徽章**之前**（徽章只在离线/重连中出现，不该把常驻按钮的位置推来推去）；
+iOS 标题同样加了 `maxLines: 1 + ellipsis`，否则长标题会折行把三个动作挤出去。
 
 ### 气泡与头像
 

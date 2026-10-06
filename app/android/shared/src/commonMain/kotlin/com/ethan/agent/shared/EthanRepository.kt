@@ -316,6 +316,20 @@ class EthanRepository(
         return api.getSession(id)
     }
 
+    /**
+     * 强制重新拉取会话（绕过 SWR 缓存）并回写本地缓存。
+     *
+     * 与 [cachedSession] 的区别：那个是「先吐缓存再刷网络」的订阅流，适合进入页面时用；
+     * 这里是用户主动点「刷新」——必须拿到服务端此刻的最新内容，且拉完要把缓存对齐，
+     * 否则下次进页面又会先闪一下旧数据。拉取失败时异常向上抛，由调用方展示错误，
+     * 缓存保持原样（不拿半成品覆写）。
+     */
+    suspend fun refreshSession(id: String): SessionDetail {
+        val fresh = getSession(id)
+        localCache.write("session_$id", fresh, SessionDetail.serializer())
+        return fresh
+    }
+
     suspend fun renameSession(id: String, title: String) {
         api.renameSession(id, RenameSessionRequest(title))
     }

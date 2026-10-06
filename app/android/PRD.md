@@ -88,6 +88,9 @@ Ethan Android 是 [Ethan Agent](https://github.com/ethan-agent/ethan-agent) 的�
 | 9 | 首次使用显示 Onboarding 横幅 | `GET/POST /api/onboarding/*` |
 | 10 | 生成中「补充信息」独立入口：立即注入当前 run（无活跃 run 时 409 自动降级普通发送） | `POST /api/chat/{id}/inject` |
 | 11 | 输入框展开全屏编辑（长文本写完再发）；双击气泡进阅读模式，返回键只退阅读不退会话 | — |
+| 12 | 回复生成中：角色名行尾与「思考中…」前显示跳动的三点动画，回复结束自动消失 | — |
+| 13 | 右上角「重新拉取会话最新内容」：绕过缓存重取历史并就地刷新（生成中置灰），拉取中转圈、失败弹 Snackbar | `GET /api/sessions/{id}` |
+| 14 | 右上角「复制会话链接」：把 `${origin}/chat/{id}/` 写入剪贴板并轻提示（无 session 时不显示） | — |
 
 **Slash 命令（客户端拦截）**：
 - `/new` — 新建对话

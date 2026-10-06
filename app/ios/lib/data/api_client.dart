@@ -140,7 +140,11 @@ class EthanApiClient {
     await _request('POST', 'auth', body: {'token': config.token});
   }
 
-  Future<void> health() async => _request('GET', 'health');
+  // 注意：健康检查只有一个入口，就是下面那个返回 bool 的 [health]。
+  // 这里曾经还有一个 `Future<void> health() => _request('GET', 'health')`，与它重名 ——
+  // Dart 不允许同一类里出现两个同名成员，整个 iOS 端从 PR #381 起就编不过
+  // （告警级别是 error，只是没有 iOS CI 所以没人发现）。旧版本用 `_request` 还会把
+  // 非 2xx 抛成异常，而「服务端活着但内部报错」不该被判成离线 —— 语义上也该删。
 
   Future<List<ModelEntry>> models() async {
     final data = await _request('GET', 'models');

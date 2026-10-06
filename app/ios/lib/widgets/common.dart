@@ -254,3 +254,67 @@ class EmptyHint extends StatelessWidget {
         ),
       );
 }
+
+/// 「正在生成」的三点跳动指示器。
+///
+/// 对应 Web `message-bubble.tsx` 的 animate-bounce 三点、Android 的 `TypingDots`：
+/// 转圈表达的是「这个控件在忙」，放在聊天气泡里更像加载失败；三个错峰呼吸的点才读作
+/// 「对方正在打字」。颜色由调用方传入 —— 组件不该假设背景，否则深色气泡上会看不见。
+class TypingDots extends StatefulWidget {
+  const TypingDots({
+    required this.color,
+    super.key,
+    this.dotSize = 4,
+    this.gap = 3,
+  });
+  final Color color;
+  final double dotSize;
+  final double gap;
+
+  @override
+  State<TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    // 一个点 450ms 亮起 + 450ms 暗下，三个点各错开 150ms → 总周期 900ms。
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _controller,
+        builder: (_, __) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (index) {
+            // 每个点把自己的相位往前推 150ms/900ms，形成「依次亮起」的波浪。
+            final phase = (_controller.value + index / 6) % 1.0;
+            // 三角波：相位 0 → 亮度下限，0.5 → 全亮，1 → 回到下限。
+            final wave = 1 - (2 * phase - 1).abs();
+            // 下限不取 0：点完全消失会让气泡看起来是空的。
+            final alpha = 0.25 + 0.75 * wave;
+            return Padding(
+              padding: EdgeInsets.only(right: index == 2 ? 0 : widget.gap),
+              child: Container(
+                width: widget.dotSize,
+                height: widget.dotSize,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  // withValues 是 Flutter 3.27+ 的 API（本项目其余地方已在用），
+                  // 不复用已废弃的 withOpacity。
+                  color: widget.color.withValues(alpha: alpha),
+                ),
+              ),
+            );
+          }),
+        ),
+      );
+}

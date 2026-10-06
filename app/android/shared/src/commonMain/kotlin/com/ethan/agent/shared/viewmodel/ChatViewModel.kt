@@ -7,6 +7,7 @@ import com.ethan.agent.core.model.ChatMessage
 import com.ethan.agent.core.model.ChatStreamEvent
 import com.ethan.agent.core.model.ConsentInfo
 import com.ethan.agent.core.model.FileSignature
+import com.ethan.agent.core.model.Message
 import com.ethan.agent.core.model.ModeEntry
 import com.ethan.agent.core.model.ModelEntry
 import com.ethan.agent.core.model.ModelSelection
@@ -137,6 +138,13 @@ data class ChatUiState(
     val isStreaming: Boolean = false,
     val isResuming: Boolean = false,
     val isStopping: Boolean = false,
+    /**
+     * 用户点了右上角的「重新拉取会话」并且请求还在飞。
+     *
+     * 与 [isLoading] 分开：那个是「整页首屏还没数据」，会让内容区整块换成 LoadingBox；
+     * 刷新时页面上已经有内容，只在按钮位置转圈，不能把用户正在看的东西抽掉。
+     */
+    val isReloading: Boolean = false,
     val connectionState: ConnectionState = ConnectionState.Idle,
     /**
      * 最近一次探活的结论：false = 服务端不可达。
@@ -545,20 +553,7 @@ class ChatViewModel(
                                 title = session.title,
                                 selectedModel = upgradeModelRef(st.models, session.model),
                                 selectedMode = session.mode ?: "",
-                                messages = session.messages.map { msg ->
-                                    UiMessage(
-                                        role = msg.role,
-                                        content = msg.content,
-                                        toolSteps = msg.toolSteps ?: emptyList(),
-                                        usage = msg.usage,
-                                        quote = msg.quote,
-                                        createdAt = msg.createdAt,
-                                        images = msg.images?.mapNotNull { img ->
-                                            img.url?.let { UiMessageImage(displayUrl = "${serverUrl.trimEnd('/')}/api/${it}") }
-                                        } ?: emptyList(),
-                                        cards = msg.cards ?: emptyList(),
-                                    )
-                                },
+                                messages = session.messages.toUiMessages(serverUrl),
                                 isLoading = false,
                             )
                         }
@@ -573,6 +568,89 @@ class ChatViewModel(
                 }
             } else {
                 _state.update { it.copy(isLoading = false) }
+            }
+        }
+    }
+
+    /**
+     * 历史消息（服务端模型）→ 界面消息。
+     *
+     * 抽成一处而不是在 [loadInitial] 与 [reloadSession] 各写一遍：两处任何一处漏字段
+     * （比如忘了把图片相对路径拼成绝对 URL），都会表现为「进页面好好的，一刷新图片就没了」
+     * 这类难查的不一致。
+     */
+    private fun List<Message>.toUiMessages(serverUrl: String): List<UiMessage> = map { msg ->
+        UiMessage(
+            role = msg.role,
+            content = msg.content,
+            toolSteps = msg.toolSteps ?: emptyList(),
+            usage = msg.usage,
+            quote = msg.quote,
+            createdAt = msg.createdAt,
+            images = msg.images?.mapNotNull { img ->
+                img.url?.let { UiMessageImage(displayUrl = "${serverUrl.trimEnd('/')}/api/${it}") }
+            } ?: emptyList(),
+            cards = msg.cards ?: emptyList(),
+        )
+    }
+
+    /**
+     * 右上角「重新拉取会话最新内容」：绕过缓存拉一次服务端的最新历史，就地替换消息列表。
+     *
+     * 为什么不复用 [loadInitial]：那是「进页面」的路径，会重置草稿、模型、开屏 loading，
+     * 还会订阅一堆 cached flow（再订一遍就重复了）。刷新只该做一件事 —— 把消息换成最新。
+     *
+     * 流式生成中**不允许**刷新（UI 也把按钮置灰）：本地气泡是按 [assistantIndex] 逐帧
+     * 覆写消息列表的，刷新会把列表换成服务端版本，索引一旦错位，正在生成的那条就被写到
+     * 别的消息上（症状：旧气泡内容被新输出覆盖）。生成中要看最新内容，SSE 本身就在推。
+     *
+     * 上面的（置灰 + 入口守卫）都是**发起前**的检查，挡不住「发起之后用户才点发送」。
+     * 所以结果回来时还会再判一次（见下面的 apply）——两处都要，缺哪一处都会复现索引错位。
+     */
+    fun reloadSession() {
+        val sid = _state.value.sessionId ?: return
+        if (_state.value.isReloading) return
+        if (_state.value.isStreaming || _state.value.isResuming) return
+        // 发起时的消息条数。结果回来时要拿它和当下的条数对比（见下面的 apply）：
+        // 数量变了就说明这中间又有了一轮本地写入，快照已经不能代表现在的列表。
+        val messagesBefore = _state.value.messages.size
+        viewModelScope.launch {
+            _state.update { it.copy(isReloading = true) }
+            try {
+                // 图片相对路径要靠 serverUrl 拼绝对地址。正常走不到 ifBlank 分支
+                // （loadInitial 已经把配置读进 state），但刷新是个用户随时能按的按钮，
+                // 宁可多读一次配置，也不能让图片变成 `/api/...` 这种加载不出的相对地址。
+                val serverUrl = _state.value.serverUrl.ifBlank {
+                    repository.config.first().serverUrl
+                }
+                val detail = repository.refreshSession(sid)
+                _state.update { st ->
+                    // 放弃应用这次结果的三种情况（都只收起转圈，不动消息）：
+                    //   1. 会话变了（删会话 / 重新进入）；
+                    //   2. 这期间用户发了新消息或开始接流 —— 发起前的那次检查挡不住它，
+                    //      本地气泡是按 assistantIndex 逐帧写列表的，这时换成服务端版本
+                    //      会让索引错位（新输出写到别的气泡上）；
+                    //   3. 条数变了 —— 上面那种「这一轮刚好跑完」的同族竞态。
+                    // 代价是这种情况下刷新静默失效，用户再点一次即可 —— 比覆掉正在
+                    // 生成的一轮轻得多。
+                    if (st.sessionId != sid || st.isStreaming || st.isResuming ||
+                        st.messages.size != messagesBefore
+                    ) {
+                        return@update st.copy(isReloading = false)
+                    }
+                    st.copy(
+                        title = detail.title.ifBlank { st.title },
+                        selectedModel = detail.model.ifBlank { null }
+                            ?.let { upgradeModelRef(st.models, it) } ?: st.selectedModel,
+                        selectedMode = detail.mode ?: st.selectedMode,
+                        messages = detail.messages.toUiMessages(serverUrl),
+                        isReloading = false,
+                    )
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                // 失败要留痕：只把按钮的转圈收回来，同时把错误抛给 Snackbar。
+                _state.update { it.copy(isReloading = false, error = repository.friendlyError(e)) }
             }
         }
     }

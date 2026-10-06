@@ -58,7 +58,9 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.VerifiedUser
@@ -102,9 +104,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -114,6 +118,7 @@ import com.ethan.agent.R
 import com.ethan.agent.core.model.FileSignature
 import com.ethan.agent.core.model.ModelSelection
 import com.ethan.agent.core.model.Quote
+import com.ethan.agent.core.model.ServerUrlUtils
 import com.ethan.agent.core.model.UserIdentity
 import com.ethan.agent.core.model.fullId
 import com.ethan.agent.shared.UiMessage
@@ -128,6 +133,7 @@ import com.ethan.agent.ui.components.LoadingBox
 import com.ethan.agent.ui.components.ModelDropdown
 import com.ethan.agent.ui.components.SnackbarContainer
 import com.ethan.agent.ui.components.ToolTimeline
+import com.ethan.agent.ui.components.TypingDots
 import com.ethan.agent.ui.components.SimpleMarkdown
 import java.io.File
 import java.text.SimpleDateFormat
@@ -178,8 +184,11 @@ fun ChatScreen(
     // 排队消息管理：× 移除 / 点击取回输入框编辑（对齐 Web 的 QueuedMessages）
     onQueueRemove: (Long) -> Unit = {},
     onQueueEdit: (Long) -> Unit = {},
+    // 右上角「重新拉取会话最新内容」
+    onReloadSession: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
+    val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -578,6 +587,54 @@ fun ChatScreen(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                // 右上角动作区：重新拉取 + 复制会话链接（对齐桌面端 chat-header 的两个图标）。
+                //
+                // 排布上放在连接状态徽章**之前**：徽章是环境态（只在离线/重连中/生成中
+                // 才出现），按钮是常驻操作。按钮放在标题旁边，徽章出现在最右端时不会把
+                // 已形成的肌肉记忆位置推走。
+                //
+                // 新会话（sessionId == null）两件都没有对象（无线可重拉、无链可复制），
+                // 直接不渲染 —— 显一个点不动的死按钮比不显示更容易让人以为坏了。
+                val sessionLink = state.sessionId?.let {
+                    ServerUrlUtils.toSessionWebUrl(state.serverUrl, it)
+                }
+                if (state.sessionId != null) {
+                    // 生成中禁用（不是隐藏）：按钮留在原位、置灰，用户能看出「现在不能刷」。
+                    // 生成中不给刷的理由见 ChatViewModel.reloadSession —— 本地是按索引覆写
+                    // 消息列表的，刷新会把正在生成的那条写到别的消息上。
+                    val reloadBusy = state.isReloading
+                    IconButton(
+                        onClick = onReloadSession,
+                        enabled = !reloadBusy && !state.isStreaming && !state.isResuming,
+                    ) {
+                        if (reloadBusy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "重新拉取会话最新内容",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+                if (sessionLink != null) {
+                    IconButton(onClick = {
+                        // 剪贴板写入本身不会失败（没有权限/异步确认），拿到链接就一定能置入；
+                        // 仍然给一次轻提示，否则用户无法确认到底复制没复制。
+                        clipboard.setText(AnnotatedString(sessionLink))
+                        scope.launch { snackbar.showSnackbar("已复制会话链接") }
+                    }) {
+                        Icon(
+                            Icons.Default.Link,
+                            contentDescription = "复制会话链接",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
                 ConnectionStateIndicator(state.connectionState, state.isResuming)
             }
         },
@@ -1478,12 +1535,22 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
             } else {
                 bubbleRoleLabel(roleKind)
             }
-            Text(
-                roleLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = bubbleRoleLabelColor(),
-                modifier = Modifier.padding(bottom = 2.dp),
-            )
+            // 角色名行。生成中在这行尾部接一串跳动的三点（对齐 Web 在气泡里放
+            // animate-bounce 三点的做法）—— 它是**持续可见**的进行中动画：
+            // 正文还没吐字时看得到，吐字过程中也看得到，不需要用户去找页脚那个小圆点。
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    roleLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = bubbleRoleLabelColor(),
+                )
+                if (message.isStreaming) {
+                    Spacer(Modifier.width(6.dp))
+                    TypingDots(color = accentColor.takeIf { it != Color.Transparent }
+                        ?: bubbleRoleLabelColor(), dotSize = 3.dp, gap = 2.dp)
+                }
+            }
+            Spacer(Modifier.height(2.dp))
             Surface(
                 modifier = Modifier.combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -1662,11 +1729,19 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                         }
                     }
                     if (message.isStreaming && message.content.isEmpty() && message.toolSteps.isEmpty()) {
-                        Text(
-                            "思考中…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = textColor.copy(alpha = 0.7f),
-                        )
+                        // 首字之前的等待：动画 + 文案。只有静态「思考中…」时用户分不清
+                        // 「在跑」和「卡住了」，这也正是问题里说的「看不出它在处理中」。
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            TypingDots(color = textColor.copy(alpha = 0.7f))
+                            Text(
+                                "思考中…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = textColor.copy(alpha = 0.7f),
+                            )
+                        }
                     }
             } // end Column（气泡正文）
             } // end Surface
