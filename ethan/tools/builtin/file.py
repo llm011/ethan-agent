@@ -240,24 +240,27 @@ class FileReadTool(BaseTool):
                     scaled_b64, _, img_mime = downscale_image_b64(
                         base64.b64encode(data).decode("ascii"), mime, max_dim=VISION_MAX_DIM
                     )
-                    # 缩放失败（Pillow 缺失/解码异常）时 downscale 返回原图原 mime——
-                    # 此时若原图超 API 尺寸限制，发出去就是 400 + reactive strip 循环。
-                    # 附图前校验：downscale 没能真正缩图且原图超 1568px，就不附图，
-                    # 并把文案改成如实的「未附上」，避免模型以为看到了其实没有。
+                    # 附图前校验「图是否可解码」：图损坏时（如 adb 截图被 CRLF 污染）
+                    # 原样附出去必然 400 + reactive strip 循环，改为如实告知未附图，
+                    # 避免模型以为看到了其实没有。Pillow 缺失时无法本地校验，维持附图
+                    # 交由 reactive 兜底（Pillow 是正式依赖，这只在异常环境里发生）。
                     try:
                         import io as _io
 
                         from PIL import Image as _Image
-
-                        with _Image.open(_io.BytesIO(data)) as _im:
-                            _too_big = max(_im.size) > VISION_MAX_DIM and scaled_b64 == base64.b64encode(data).decode("ascii")
-                    except Exception:
-                        _too_big = False  # 无法判断时按原逻辑走，交给 reactive 兜底
-                    if _too_big:
+                    except ImportError:
+                        _Image = None
+                    _undecodable = False
+                    if _Image is not None:
+                        try:
+                            with _Image.open(_io.BytesIO(data)):
+                                pass
+                        except Exception:
+                            _undecodable = True
+                    if _undecodable:
                         model_content = (
-                            f"📷 已读取图片文件 {p.name}（{mime}）。"
-                            "注意：图片尺寸超出视觉输入限制且本地缩放不可用（Pillow 缺失），未能附图，"
-                            "你无法直接看到图片内容。可先用 shell（sips 或 PIL）缩小后再 file_read。"
+                            f"📷 已尝试读取图片文件 {p.name}（{mime}），但图片数据无法解码（文件可能已损坏）。"
+                            "未能附图，你无法直接看到图片内容。"
                         )
                     else:
                         images = [{"data": scaled_b64, "media_type": img_mime}]

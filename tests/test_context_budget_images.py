@@ -60,3 +60,24 @@ def test_budget_truncation_of_image_message_keeps_images():
     ]
     enforce_context_budget(msgs)
     assert msgs[2].images == _IMG
+
+
+def test_budget_eviction_drops_images_on_evicted_stub():
+    """被驱逐压成 stub 的旧截图：图随折叠一并移除（省 token），文案注明，不让模型误以为还能看。
+
+    注意：截图消息 content 须低于单条封顶（20000）——先被封顶就走了保图的截断路径，
+    到不了驱逐。用 ~19000 字的截图 + 5 条 17000 字的消息把总量顶过 100000 预算，
+    驱逐按长度降序会先淘汰截图这条。
+    """
+    msgs = [Message(role="user", content="go")]
+    for i in range(6):
+        msgs.append(Message(role="assistant", content="", tool_calls=[]))
+        if i == 0:
+            msgs.append(Message(role="tool", content="📷 图片内容已附上\n" + "x" * 18980, tool_call_id=f"c{i}", images=list(_IMG)))
+        else:
+            msgs.append(Message(role="tool", content="y" * 17000, tool_call_id=f"c{i}"))
+    enforce_context_budget(msgs)
+    stub = msgs[2]
+    assert "已折叠" in stub.content, "旧截图消息应被驱逐压成 stub"
+    assert stub.images == [], "被驱逐的旧截图应连图一起移除"
+    assert "截图已随折叠一并移除" in stub.content, "文案必须注明图已移除"
