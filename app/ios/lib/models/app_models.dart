@@ -115,6 +115,17 @@ class MediaCard {
   bool get isVideo => _extension == 'mp4' || mime.startsWith('video/');
   bool get isPpt => _extension == 'pptx' || kind.toLowerCase() == 'pptx';
 
+  /// 可内嵌播放的音频扩展名（深度听书交付的 MP3/M4A 走这条路径）。
+  static const audioExtensions = {'mp3', 'm4a', 'wav', 'aac', 'ogg', 'flac'};
+
+  /// 音频卡片：不认出来就会掉进「已交付文件」的通用卡片——那张卡片没有 onTap，
+  /// 于是深度听书的通勤音频在 iOS 上变成点了没反应的死卡（历史 bug）。
+  /// 三个来源都认：路径扩展名 / 后端卡片的 kind / mime。
+  bool get isAudio =>
+      audioExtensions.contains(_extension) ||
+      audioExtensions.contains(kind.toLowerCase()) ||
+      mime.startsWith('audio/');
+
   String get _extension {
     final value = path.isNotEmpty ? path : localPath;
     final dot = value.lastIndexOf('.');

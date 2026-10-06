@@ -5,6 +5,14 @@
 缓存、原子发布、并发去重、指数退避重试），但只负责音频：合成 → 按章节拼接
 （章节间插入静音）→ 合并字幕 → 产出 final.mp3 + subtitles.srt + run-status.json。
 
+状态回显约定（SKILL 的后台合成 `nohup ... > render.log 2>&1` 依赖它）：
+  - run-status.json 在开工时先落 `{"status": "running", "stage": ...}`，结束后改写为
+    ok / error；失败时带 `stage`（哪一步炸的）+ `error`（可直接展示的原因）。
+  - 进度走 **stderr**（stdout 只留给最终 JSON），逐节打印合成/缓存命中/重试，
+    这样 1–3 分钟的合成期里 render.log 不是空的，轮询者能区分「在跑」和「挂了」。
+  - 失败时清掉 final.mp3 / subtitles.srt 等旧产物：否则上一轮成功的音频会和新写的
+    error 状态并存，「status 是 ok 且文件存在」的复核会拿陈年产物当本次交付。
+
 用法：
   python audio_pipeline.py validate --manifest manifest.json
   python audio_pipeline.py run --manifest manifest.json --output-dir PROJECT_DIR
@@ -26,6 +34,7 @@ import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +51,19 @@ EDGE_SAMPLE_RATE = 24_000
 
 class ManifestError(ValueError):
     pass
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _progress(message: str) -> None:
+    """把进度写到 stderr：stdout 只留给最终 JSON，进度混进去会让解析方读坏。"""
+    print(f"[audio-pipeline] {message}", file=sys.stderr, flush=True)
+
+
+# 失败时可以安全删掉的旧产物：状态是 error 时它们绝不能看起来像本次结果。
+MOOT_OUTPUTS = ("final.mp3", "subtitles.srt")
 
 
 @dataclass(frozen=True)
@@ -239,8 +261,10 @@ async def _synthesize_section(
     cached_audio = cache_dir / f"{key}.mp3"
     cached_srt = cache_dir / f"{key}.srt"
     if _valid_tts_cache(cached_audio, cached_srt):
+        _progress(f"缓存命中 {section['id']}")
         return
     if key in _inflight_tts:
+        _progress(f"等待重复文本的同一份合成结果 {section['id']}")
         await _inflight_tts[key]
         return
     loop = asyncio.get_running_loop()
@@ -250,6 +274,7 @@ async def _synthesize_section(
         cached_audio.unlink(missing_ok=True)
         cached_srt.unlink(missing_ok=True)
         last_error: Exception | None = None
+        _progress(f"合成中 {section['id']}（{len(section['narration'])} 字）")
         for attempt in range(1, retries + 1):
             nonce = uuid.uuid4().hex
             pending_audio = cache_dir / f".{key}.{nonce}.mp3.tmp"
@@ -261,12 +286,14 @@ async def _synthesize_section(
                 pending_audio.replace(cached_audio)
                 pending_srt.replace(cached_srt)
                 last_error = None
+                _progress(f"合成完成 {section['id']}")
                 break
             except Exception as exc:  # network/service failures are retriable
                 last_error = exc
                 pending_audio.unlink(missing_ok=True)
                 pending_srt.unlink(missing_ok=True)
                 if attempt < retries:
+                    _progress(f"第 {attempt} 次失败，{attempt * 1.5:.1f}s 后重试 {section['id']}：{exc}")
                     await asyncio.sleep(attempt * 1.5)
         if last_error is not None:
             raise RuntimeError(f"TTS failed for section {section['id']}: {last_error}") from last_error
@@ -275,6 +302,9 @@ async def _synthesize_section(
     except BaseException as exc:
         if not fut.done():
             fut.set_exception(exc)
+            # 消费掉一次：无 awaiter（没人等这份重复合成）时，asyncio 会在 GC 时打
+            # "Future exception was never retrieved" 噪声到 render.log，把真因淹没。
+            fut.exception()
         raise
     finally:
         _inflight_tts.pop(key, None)
@@ -292,12 +322,14 @@ def synthesize_sections(manifest: dict[str, Any], output_dir: Path, *, retries: 
         )
 
     results = asyncio.run(_synthesize_all())
-    failed = [(i, r) for i, r in enumerate(results) if isinstance(r, BaseException)]
-    if failed:
+    failure = next((r for r in results if isinstance(r, BaseException)), None)
+    if failure is not None:
         for tmp in cache_dir.glob(".*.tmp"):
             tmp.unlink(missing_ok=True)
-        idx, exc = failed[0]
-        raise RuntimeError(f"TTS failed for section {manifest['sections'][idx]['id']}: {exc}") from exc
+        # _synthesize_section 抛出的异常已经写了 "TTS failed for section <id>: …"，
+        # 这里再包一层前缀会得到「TTS failed for section x: TTS failed for section x: 真因」
+        # 这种看不出真因的报错。原样抛出，保留原始异常类型与信息。
+        raise failure
 
     artifacts: list[dict[str, Any]] = []
     for section in manifest["sections"]:
@@ -416,35 +448,86 @@ def build_merged_subtitles(
 # ---------------------------------------------------------------------------
 
 
+def _clear_moot_outputs(output_dir: Path) -> None:
+    """删掉上一轮可能残留的产物与半成品（失败路径专用）。"""
+    for name in MOOT_OUTPUTS:
+        (output_dir / name).unlink(missing_ok=True)
+    work_dir = output_dir / "work"
+    if work_dir.is_dir():
+        for leftover in list(work_dir.glob("*.tmp")) + [work_dir / "final.pending.mp3"]:
+            leftover.unlink(missing_ok=True)
+
+
 def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     status_path = output_dir / "run-status.json"
+    started_at = _now_iso()
 
-    def _fail(error: str) -> dict[str, Any]:
-        status = {"status": "error", "error": error}
+    def _write(status: dict[str, Any]) -> dict[str, Any]:
         status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
         return status
 
+    def _fail(error: str, stage: str) -> dict[str, Any]:
+        # 先毁产物再写状态：反过来（先写 error、产物还在）会让「status ok 且文件存在」的
+        # 复核步骤误把上一轮/本次的残缺音频当成可交付结果。
+        _clear_moot_outputs(output_dir)
+        _progress(f"失败（{stage}）：{error}")
+        return _write(
+            {
+                "status": "error",
+                "stage": stage,
+                "error": error,
+                "startedAt": started_at,
+                "finishedAt": _now_iso(),
+            }
+        )
+
+    # 先落 running 状态：否则整个合成期 status 文件根本不存在，轮询者分不清
+    # 「还没开始」和「正在跑」（SKILL 的复核/进度回显都读这个文件）。
+    _write(
+        {
+            "status": "running",
+            "stage": "preflight",
+            "title": manifest["title"],
+            "sectionCount": len(manifest["sections"]),
+            "targetDurationSec": manifest["targetDurationSec"],
+            "startedAt": started_at,
+        }
+    )
+
+    stage = "preflight"
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
-        return _fail("FFmpeg (ffmpeg + ffprobe) is required for audio assembly")
+        return _fail("FFmpeg (ffmpeg + ffprobe) is required for audio assembly", stage)
 
     try:
+        stage = "synthesis"
+        _progress(f"开始合成 {len(manifest['sections'])} 节（voice={manifest['voice']['name']}）")
         artifacts = synthesize_sections(manifest, output_dir)
+
+        stage = "duration-probe"
+        _progress("探测各章节时长…")
         durations_ms = [probe_duration_ms(artifact["audio"]) for artifact in artifacts]
         silence_path = None
         if manifest["gapMs"] > 0:
             silence_path = generate_silence(output_dir / "work", manifest["gapMs"])
+
+        stage = "concat"
+        _progress(f"拼接 {len(artifacts)} 节（章节间静音 {manifest['gapMs']}ms）…")
         concat_audio(manifest, artifacts, output_dir, silence_path)
 
+        stage = "verify"
         final_path = output_dir / "final.mp3"
         total_duration_ms = probe_duration_ms(final_path)
         if not MIN_TOTAL_DURATION_MS <= total_duration_ms <= MAX_TOTAL_DURATION_MS:
             return _fail(
                 f"final audio duration {total_duration_ms / 1000:.1f}s outside allowed range "
-                f"[{MIN_TOTAL_DURATION_MS / 1000:.0f}s, {MAX_TOTAL_DURATION_MS / 1000:.0f}s]"
+                f"[{MIN_TOTAL_DURATION_MS / 1000:.0f}s, {MAX_TOTAL_DURATION_MS / 1000:.0f}s]; "
+                "请调整 manifest 的 sections 长度或 targetDurationSec 后重跑",
+                stage,
             )
 
+        stage = "subtitles"
         combined = build_merged_subtitles(manifest, artifacts, durations_ms)
         (output_dir / "subtitles.srt").write_text(serialize_srt(combined), encoding="utf-8")
 
@@ -463,10 +546,14 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
         if target is not None:
             status["targetDurationSec"] = target
             status["durationDeviationSec"] = round(total_duration_ms / 1000 - target, 1)
-        status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
-        return status
+        status["startedAt"] = started_at
+        status["finishedAt"] = _now_iso()
+        _progress(
+            f"完成：{total_duration_ms / 1000:.1f}s → {final_path}（字幕 {output_dir / 'subtitles.srt'}）"
+        )
+        return _write(status)
     except Exception as exc:
-        return _fail(str(exc))
+        return _fail(str(exc), stage)
 
 
 def build_parser() -> argparse.ArgumentParser:

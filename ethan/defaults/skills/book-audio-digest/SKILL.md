@@ -67,11 +67,16 @@ nohup env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
   > "$PROJECT/render.log" 2>&1 &
 ```
 
-合成 1–3 分钟，轮询 render.log。脚本按 narration+voice 内容哈希缓存，重跑只重做变化章节。
+合成 1–3 分钟，轮询 `render.log` 看进度：脚本按节打 `[audio-pipeline] 合成中/完成/缓存命中`，
+同时 `run-status.json` 在开工时就落 `{"status": "running", "stage": ...}`（不再是「文件不存在」），
+所以「没反应」和「在跑」分得开。`status` 变 `ok`/`error` 即结束；出错时 `stage` 指出炸在哪一步。
+脚本按 narration+voice 内容哈希缓存，重跑只重做变化章节。
 
 ### 6. 复核与交付
 
 - `run-status.json` 的 `status` 是 `ok`，`final.mp3` 与 `subtitles.srt` 存在
+- 失败（`status: error`）时脚本会**删掉** `final.mp3`/`subtitles.srt`：产物和状态永远一致，
+  所以「文件在 = 本次成功」。别拿上一轮残留的音频兜底交付；按 `stage`/`error` 修问题后重跑
 - 必须调用 `deliver_file(path="<PROJECT>/final.mp3", title="《书名》深度听书笔记")`，正文附飞书文档链接
 - 实际时长超出 target ±40% 时调整脚本重跑（保持章节 id 不变则命中缓存）
 

@@ -1540,6 +1540,29 @@ class _MediaCardsState extends State<_MediaCards> {
                 );
               }
             }
+            if (card.isAudio) {
+              // 深度听书交付的是 MP3：必须给一个「播」入口。以前这类卡片落到下面
+              // 的通用 file 卡片（无 onTap），等于把交付的音频变成死卡。
+              final audioTitle =
+                  card.title.isEmpty ? card.path.split('/').last : card.title;
+              return Card(
+                margin: const EdgeInsets.only(top: 8),
+                child: ListTile(
+                  leading: const Icon(Icons.graphic_eq_rounded),
+                  title: Text(audioTitle),
+                  subtitle: const Text('音频文件 · 点击播放'),
+                  trailing: const Icon(Icons.play_circle_outline_rounded),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => AudioPreviewScreen(
+                      api: widget.api,
+                      sessionId: widget.sessionId ?? '',
+                      path: card.path,
+                      title: audioTitle,
+                    ),
+                  )),
+                ),
+              );
+            }
             return Card(
               margin: const EdgeInsets.only(top: 8),
               child: ListTile(
