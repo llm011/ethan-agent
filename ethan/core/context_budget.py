@@ -47,21 +47,35 @@ _EVICTED_NOTE = (
 
 
 def _truncated_copy(msg: Message, keep: int, *, evicted: bool = False) -> Message:
-    """复制一条 tool 消息，把 content 截到 keep 字并加标注（不改原对象）。"""
+    """复制一条 tool 消息，把 content 截到 keep 字并加标注（不改原对象）。
+
+    **必须透传 images**（evicted=False 时）：file_read/browser/computer_use 读
+    截图时图挂在 tool 消息的 images 上（dataclasses 默认值是 []，漏传即静默丢图）。
+    此前这里漏传，截图说明文案（"图片内容已附在本结果中"）还在而图没了，
+    模型下一轮就「看图失败」且无报错可查——这正是 adb 截图后读图失败的根因。
+
+    驱逐（evicted=True）例外：图随文本一起丢——一张 1568px 截图每轮约 1.5-3K
+    tokens，留着会让「省上下文」的驱逐白做；文案里注明截图已移除，需要时重新读取。
+    """
     original = msg.content or ""
     omitted = max(0, len(original) - keep)
     if omitted == 0:
         return msg
     if evicted:
         body = _EVICTED_NOTE.format(omitted=omitted) + original[:keep]
+        images = []
+        if msg.images:
+            body += "[该消息附带的截图已随折叠一并移除，需要时请重新读取。]\n"
     else:
         body = original[:keep] + _TRUNCATION_NOTE.format(omitted=omitted)
+        images = msg.images
     return Message(
         role=msg.role, content=body,
         tool_calls=msg.tool_calls, tool_call_id=msg.tool_call_id,
         usage=msg.usage, created_at=msg.created_at,
         tool_steps=msg.tool_steps, thought=msg.thought,
         quote=msg.quote, a2ui=msg.a2ui, mcp_apps=msg.mcp_apps,
+        images=images,
     )
 
 
@@ -185,13 +199,14 @@ def _offload_fetch_content(content: str, session_id: str, tool_call_id: str) -> 
 
 
 def _replace_content(msg: Message, new_content: str) -> Message:
-    """复制一条 tool 消息，替换 content（不改原对象）。"""
+    """复制一条 tool 消息，替换 content（不改原对象）。images 必须透传（见 _truncated_copy）。"""
     return Message(
         role=msg.role, content=new_content,
         tool_calls=msg.tool_calls, tool_call_id=msg.tool_call_id,
         usage=msg.usage, created_at=msg.created_at,
         tool_steps=msg.tool_steps, thought=msg.thought,
         quote=msg.quote, a2ui=msg.a2ui, mcp_apps=msg.mcp_apps,
+        images=msg.images,
     )
 
 

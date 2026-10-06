@@ -189,6 +189,15 @@ file_read(path="~/config.yaml", max_lines=100)
 - 读图片：前端渲染卡片（资产落盘），同时把缩放后的图（≤1568px，png/jpeg/gif/webp）
   附进 ToolResult.images，VLM 模型可直接「看到」内容——agent 用 file_read 看
   浏览器/CUA 截图就走这条路；svg/bmp 不被视觉 API 接受，只给卡片
+- 图片数据无法解码（如传输/落盘损坏，adb 截图被 CRLF 污染即属此类）时不附图，
+  文案如实告知「未能附图」——绝不声称「已附上」而实际没有，那会让模型以为
+  自己看过了；Pillow 缺失时无法本地校验，维持附图交给 reactive 兜底
+- ⚠️ tool 消息上的 images 在上下文预算管控（`enforce_context_budget`）时：
+  **截断/内容替换必须透传**，重建 Message 漏掉 `images=` 字段即静默丢图
+  （dataclass 默认 `[]`），表现为「截图后模型读不了图」且无报错；**驱逐例外**——
+  被压成 stub 的旧截图连图一并移除（文案注明），一张 1568px 图每轮约 1.5-3K
+  tokens，留着会让驱逐省上下文的目的落空。回归测试：
+  `tests/test_context_budget_images.py`
 
 ### FileWriteTool — `ethan/tools/builtin/file.py`
 

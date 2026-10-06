@@ -240,7 +240,30 @@ class FileReadTool(BaseTool):
                     scaled_b64, _, img_mime = downscale_image_b64(
                         base64.b64encode(data).decode("ascii"), mime, max_dim=VISION_MAX_DIM
                     )
-                    images = [{"data": scaled_b64, "media_type": img_mime}]
+                    # 附图前校验「图是否可解码」：图损坏时（如 adb 截图被 CRLF 污染）
+                    # 原样附出去必然 400 + reactive strip 循环，改为如实告知未附图，
+                    # 避免模型以为看到了其实没有。Pillow 缺失时无法本地校验，维持附图
+                    # 交由 reactive 兜底（Pillow 是正式依赖，这只在异常环境里发生）。
+                    try:
+                        import io as _io
+
+                        from PIL import Image as _Image
+                    except ImportError:
+                        _Image = None
+                    _undecodable = False
+                    if _Image is not None:
+                        try:
+                            with _Image.open(_io.BytesIO(data)):
+                                pass
+                        except Exception:
+                            _undecodable = True
+                    if _undecodable:
+                        model_content = (
+                            f"📷 已尝试读取图片文件 {p.name}（{mime}），但图片数据无法解码（文件可能已损坏）。"
+                            "未能附图，你无法直接看到图片内容。"
+                        )
+                    else:
+                        images = [{"data": scaled_b64, "media_type": img_mime}]
                 return ToolResult(tool_call_id="", content=model_content, cards=[card], images=images)
             except Exception as e:
                 return f"Read image error: {e}"

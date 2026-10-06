@@ -256,7 +256,9 @@ class TaskFanoutTool(BaseTool):
                     if len(content) > TOOL_RESULT_CHAR_CAP:
                         half = TOOL_RESULT_CHAR_CAP // 2
                         content = f"{content[:half]}\n…(中段过长已截断)…\n{content[-half:]}"
-                    messages.append(Message(role="tool", content=content, tool_call_id=r.tool_call_id))
+                    # images 必须透传：子任务里 file_read/browser 截图的视觉内容挂在
+                    # ToolResult.images 上，漏传会让子 agent「截图后看不到图」。
+                    messages.append(Message(role="tool", content=content, tool_call_id=r.tool_call_id, images=r.images or []))
             exhausted = True
         except asyncio.TimeoutError:
             raise
