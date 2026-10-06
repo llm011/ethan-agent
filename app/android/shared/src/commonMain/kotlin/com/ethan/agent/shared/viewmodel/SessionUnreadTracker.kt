@@ -27,15 +27,18 @@ import com.ethan.agent.core.model.SessionInfo
  * ```
  *
  * 客户端只额外叠一层**本地乐观水位**：点开会话时立刻把水位推到已知的 `updatedAt`，
- * 不等 `/sessions/{id}/read` 回执。服务端水位一旦追平，乐观水位即退休（[observe]），
- * 保证「清掉的红点不会因为回执慢/丢包而闪回来」。
+ * 不等 `/sessions/{id}/read` 回执。这层水位**只增不减、不退休**（[markRead] 单调推进）：
+ * `/poll` 的响应是可以乱序的（一次还在飞、一次刚发起），较新的响应先落地、较旧的响应
+ * 后落地时带的是 `/read` 之前的水位，一旦此时把乐观水位提前删掉，红点就会被重新点亮。
+ * 留着它的代价只是「每个打开过的会话一个 Long」，生命周期跟 VM 走（进程内），可以忽略；
+ * 换来的是无论响应怎么乱序，判定都是 `max(服务端水位, 本地乐观水位)`、只可能更「已读」。
  *
  * 另外，正在查看的会话永不亮红点（对齐 Web sidebar 的 activeSessionId）——后台回复
  * 实时到达时不该给用户自己正在看的会话点一个红点。
  */
 class SessionUnreadTracker {
 
-    /** 本地乐观水位：sessionId -> 已读到（含）的 updated_at（epoch 秒） */
+    /** 本地乐观水位：sessionId -> 已读到（含）的 updated_at（epoch 秒）。只增不减，见类注释。 */
     private val optimisticWatermarks = mutableMapOf<String, Long>()
 
     /** 正在查看的会话 id；null 表示当前不在任何会话里 */
@@ -89,18 +92,6 @@ class SessionUnreadTracker {
     }
 
     /**
-     * 新一批服务端数据到达时调用：服务端水位已追平本地乐观水位的，可以退休，
-     * 避免这张表随会话数无限增长。
-     */
-    fun observe(sessions: List<SessionInfo>) {
-        for (session in sessions) {
-            val server = session.lastReadAt ?: continue
-            val local = optimisticWatermarks[session.id] ?: continue
-            if (server >= local) optimisticWatermarks.remove(session.id)
-        }
-    }
-
-    /**
      * 正在查看、且服务端仍标未读的会话（需要补一次 /read 上报）。
      *
      * 覆盖两种场景：`/read` 请求丢包；以及后台落消息时该会话没有活跃订阅者
@@ -110,12 +101,6 @@ class SessionUnreadTracker {
         val id = activeSessionId ?: return null
         val session = sessions.firstOrNull { it.id == id } ?: return null
         return if (serverUnread(session)) id else null
-    }
-
-    /** 切换服务器/登出时清空，避免上一个后端的会话水位带过来。 */
-    fun reset() {
-        optimisticWatermarks.clear()
-        activeSessionId = null
     }
 }
 

@@ -137,7 +137,6 @@ class SessionsViewModel(
             launch {
                 try {
                     val all = repository.poll()
-                    unreadTracker.observe(all)
                     updateState { it.copy(drawerSessions = all) }
                 } catch (_: Exception) {}
             }
@@ -148,7 +147,6 @@ class SessionsViewModel(
                 // 客户端的 categoryFiltered 仍做一道兜底（缓存里的旧数据未过滤）。
                 try {
                     repository.cachedSessions(limit = 50, hideHeartbeat = true, hideScheduled = true, hideBackground = true).collect { sessions ->
-                        unreadTracker.observe(sessions)
                         updateState { it.copy(sessions = sessions, isLoading = false) }
                     }
                 } catch (e: Exception) {
@@ -168,7 +166,6 @@ class SessionsViewModel(
                         else -> null
                     }
                     val sessions = repository.getSessions(limit = 50, query = query, titlePrefixes = prefixes)
-                    unreadTracker.observe(sessions)
                     updateState { it.copy(sessions = sessions, isLoading = false) }
                 } catch (e: Exception) {
                     updateState { it.copy(isLoading = false, error = repository.friendlyError(e)) }
@@ -180,8 +177,6 @@ class SessionsViewModel(
     private suspend fun refreshQuietly() {
         try {
             val sessions = repository.poll()
-            // 服务端水位已追平的乐观水位在此退休（否则红点会一直按本地状态算）
-            unreadTracker.observe(sessions)
             // 正在查看的会话若服务端还标着未读（/read 丢包，或落消息时没有订阅者），
             // 补一次上报：本地红点已被乐观水位按住，这里是为了让 Web/桌面端也同步消掉
             unreadTracker.activeNeedsReadReport(sessions)?.let { reportReadToServer(it) }
@@ -235,15 +230,14 @@ class SessionsViewModel(
      *
      * 失败不抛出也不回滚：本地乐观水位已经生效，红点不会回弹；下一次轮询
      * （[refreshQuietly] 里的 activeNeedsReadReport）或重新进入会话时会再补报。
+     * 成功也不再额外拉一次列表：常驻轮询（3s）会把新水位带回来，这期间红点
+     * 由乐观水位按住；多一次请求反而会多一个响应乱序的机会。
      */
     private fun reportReadToServer(sessionId: String) {
         if (!readReportInFlight.add(sessionId)) return
         viewModelScope.launch {
             try {
                 repository.markSessionRead(sessionId)
-                // 回执成功 → 立刻拉一次，把服务端水位落地（乐观水位随之退休），
-                // 这样离开会话时抽屉不会再闪一下红点。
-                refreshQuietly()
             } catch (_: Exception) {
                 // 忽略：本地水位兜底，后续轮询补报
             } finally {

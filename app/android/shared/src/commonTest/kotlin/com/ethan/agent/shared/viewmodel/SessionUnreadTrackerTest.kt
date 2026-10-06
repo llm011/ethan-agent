@@ -79,10 +79,23 @@ class SessionUnreadTrackerTest {
         tracker.markRead("a", updatedAt = 200)
 
         repeat(3) {
-            tracker.observe(listOf(stalePoll))
             assertFalse(tracker.isUnread(stalePoll), "轮询不能让已清掉的红点回来")
             assertEquals(emptySet(), tracker.unreadIds(listOf(stalePoll)))
         }
+    }
+
+    @Test
+    fun staleResponseLandingAfterFreshResponseCannotRelightTheDot() {
+        // 乱序响应：较新的那次先落地（服务端已追平），较旧的那次后落地（还带 /read
+        // 之前的水位）。乐观水位只增不减，所以后者也不能把红点带回来。
+        val tracker = SessionUnreadTracker()
+        tracker.markRead("a", updatedAt = 200)
+
+        val fresh = session("a", updatedAt = 200, lastReadAt = 200)
+        val stale = session("a", updatedAt = 200, lastReadAt = 100)
+
+        assertFalse(tracker.isUnread(fresh))
+        assertFalse(tracker.isUnread(stale), "旧响应后落地也不能点亮红点")
     }
 
     @Test
@@ -111,28 +124,16 @@ class SessionUnreadTrackerTest {
         assertTrue(tracker.isUnread(session("a", updatedAt = 100, lastReadAt = 0)))
     }
 
-    // ── 服务端水位追平后乐观水位退休 ───────────────────────────────────────
+    // ── 服务端水位推进到更前面时，乐观水位不会拦住后续的新消息 ──────────────
 
     @Test
-    fun observeRetiresOptimisticWatermarkOnceServerCatchesUp() {
+    fun laterMessagesStillShowUnreadAfterServerWatermarkMovesOn() {
         val tracker = SessionUnreadTracker()
         tracker.markRead("a", updatedAt = 200)
 
-        // 服务端水位追平 → 乐观水位退休
-        tracker.observe(listOf(session("a", updatedAt = 200, lastReadAt = 200)))
-
-        // 之后再来新消息，依旧按服务端水位正确判未读（说明退休没有把状态搞脏）
-        assertTrue(tracker.isUnread(session("a", updatedAt = 300, lastReadAt = 200)))
+        // 服务端水位走到 200（与本地乐观水位一致）之后又来新消息：仍然正确判未读
         assertFalse(tracker.isUnread(session("a", updatedAt = 200, lastReadAt = 200)))
-    }
-
-    @Test
-    fun observeIgnoresSessionsWithoutServerWatermark() {
-        val tracker = SessionUnreadTracker()
-        tracker.markRead("a", updatedAt = 200)
-        // 旧后端：没有 last_read_at，observe 不能把乐观水位误删（否则红点会回来）
-        tracker.observe(listOf(session("a", updatedAt = 200, lastReadAt = null)))
-        assertFalse(tracker.isUnread(session("a", updatedAt = 200, lastReadAt = null)))
+        assertTrue(tracker.isUnread(session("a", updatedAt = 300, lastReadAt = 200)))
     }
 
     // ── 正在查看的会话 ────────────────────────────────────────────────────
@@ -220,7 +221,6 @@ class SessionUnreadTrackerTest {
 
         // 之后几轮轮询（服务端水位还没追上）都不能让红点回来
         repeat(3) {
-            tracker.observe(drawer)
             assertEquals(emptySet(), tracker.unreadIds(main + drawer))
         }
 
@@ -230,7 +230,6 @@ class SessionUnreadTrackerTest {
 
         // 服务端追平后照常判新消息
         val caughtUp = listOf(session("scheduled", updatedAt = 900, lastReadAt = 900))
-        tracker.observe(caughtUp)
         assertEquals(emptySet(), tracker.unreadIds(caughtUp))
         assertEquals(setOf("scheduled"), tracker.unreadIds(listOf(session("scheduled", updatedAt = 1200, lastReadAt = 900))))
     }
