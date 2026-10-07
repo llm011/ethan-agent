@@ -214,10 +214,22 @@ class _SessionsScreenState extends State<SessionsScreen> {
   bool _refreshing = false;
   bool _loadingMore = false;
   String? _moreError;
+
+  /// 「加载更多」的代币：显式刷新自增作废在飞的追加结果（防旧页覆盖新列表）。
+  int _loadMoreToken = 0;
+
+  /// 最近一页的分页元数据（total/totalKnown/pageFilled），驱动 [hasMore]。
+  SessionPage? _lastPage;
   String? error;
 
-  /// 已取条数追上服务端 total 才算到底；total 未知时不显示「没有更多了」。
-  bool get hasMore => sessions.length < _total;
+  /// 已取条数追上服务端 total 才算到底；total 未知时退回「末页是否取满」
+  /// （未取满一页说明服务端已经没有更多了）。
+  bool get hasMore {
+    final page = _lastPage;
+    if (page == null) return sessions.length < _total;
+    if (page.totalKnown) return sessions.length < page.total;
+    return page.pageFilled;
+  }
 
   @override
   void initState() {
@@ -236,12 +248,20 @@ class _SessionsScreenState extends State<SessionsScreen> {
   ///
   /// 返回真实完成的 Future：RefreshIndicator 拿它决定指示器何时收起 ——
   /// 之前指示器「一闪就没」就是因为把一个立刻完成的空 Future 交给了它。
-  /// 同一时刻只允许一个刷新或加载更多在飞（防抖 + 单飞）。
-  Future<void> load() async {
-    if (!mounted || _refreshing || _loadingMore) return;
+  /// 同一时刻只允许一个刷新在飞（防抖 + 单飞）。
+  ///
+  /// [resetPage] 标记这是一次会改变列表内容的显式动作（搜索/下拉/手动刷新）：
+  /// 它优先于正在进行的「加载更多」—— 加载更多在飞时被挤掉的只是追加结果，
+  /// 用户显式输入的新搜索不能被静默吞掉。
+  Future<void> load({bool resetPage = false}) async {
+    if (!mounted || _refreshing) return;
+    if (_loadingMore && !resetPage) return;
+    _loadMoreToken++; // 使在飞的「加载更多」落地时不再写回旧分页。
     setState(() {
       _refreshing = true;
+      _loadingMore = false;
       error = null;
+      _moreError = null;
       // 只有首屏（还没有任何数据）才整页转圈；已有列表时刷新交给
       // RefreshIndicator 表达，避免把用户正在看的列表整个拆掉。
       if (sessions.isEmpty) loading = true;
@@ -254,7 +274,8 @@ class _SessionsScreenState extends State<SessionsScreen> {
       if (!mounted) return;
       setState(() {
         sessions = (result[0] as SessionPage).sessions;
-        _total = (result[0] as SessionPage).total;
+        _lastPage = result[0] as SessionPage;
+        _total = _lastPage!.total;
         pinned = result[1] as List<Session>;
         _moreError = null;
       });
@@ -271,8 +292,12 @@ class _SessionsScreenState extends State<SessionsScreen> {
   }
 
   /// 加载下一页并追加。失败只把错误写在 footer 上，绝不动已有列表。
+  ///
+  /// [_loadMoreToken] 单调递增：显式刷新（[load]）会先自增令牌作废在飞的
+  /// 追加，避免它带着旧分页/旧关键词的结果覆盖新列表。
   Future<void> _loadMore() async {
     if (!mounted || loading || _refreshing || _loadingMore || !hasMore) return;
+    final token = _loadMoreToken;
     setState(() {
       _loadingMore = true;
       _moreError = null;
@@ -280,7 +305,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
     try {
       final page = await widget.api.sessionsPage(
           query: query.text, limit: _pageSize, offset: sessions.length);
-      if (!mounted) return;
+      if (!mounted || token != _loadMoreToken) return;
       setState(() {
         // 追加前按 id 去重：刷新窗口里服务端水位变了，offset 可能与旧页重叠。
         final known = {for (final session in sessions) session.id};
@@ -288,12 +313,17 @@ class _SessionsScreenState extends State<SessionsScreen> {
           ...sessions,
           ...page.sessions.where((session) => !known.contains(session.id)),
         ];
+        _lastPage = page;
         _total = page.total;
       });
     } catch (e) {
-      if (mounted) setState(() => _moreError = e.toString());
+      if (mounted && token == _loadMoreToken) {
+        setState(() => _moreError = e.toString());
+      }
     } finally {
-      if (mounted) setState(() => _loadingMore = false);
+      if (mounted && token == _loadMoreToken) {
+        setState(() => _loadingMore = false);
+      }
     }
   }
 
@@ -498,7 +528,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
         subtitle: '${_total > 0 ? _total : sessions.length} 个会话',
         actions: [
           IconButton(
-              onPressed: loading ? null : load,
+              onPressed: loading ? null : () => load(resetPage: true),
               icon: const Icon(Icons.refresh_rounded))
         ],
         child: Column(children: [
@@ -537,13 +567,15 @@ class _SessionsScreenState extends State<SessionsScreen> {
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
               child: TextField(
                   controller: query,
-                  onSubmitted: (_) => load(),
+                  onSubmitted: (_) => load(resetPage: true),
                   decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.search_rounded),
                       hintText: '搜索会话…'))),
           if (error != null)
             MaterialBanner(content: Text('加载会话失败：$error'), actions: [
-              TextButton(onPressed: load, child: const Text('重试')),
+              TextButton(
+                  onPressed: () => load(resetPage: true),
+                  child: const Text('重试')),
               TextButton(
                   onPressed: () => setState(() => error = null),
                   child: const Text('关闭')),

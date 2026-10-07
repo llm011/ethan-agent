@@ -17,9 +17,21 @@ class ApiException implements Exception {
 /// `/sessions` 的一页结果：`total` 是服务端给出的会话总数，
 /// 客户端用「已取条数 < total」判定还有没有下一页。
 class SessionPage {
-  const SessionPage({required this.sessions, required this.total});
+  const SessionPage({
+    required this.sessions,
+    required this.total,
+    required this.totalKnown,
+    required this.pageFilled,
+  });
+
   final List<Session> sessions;
   final int total;
+
+  /// 服务端有没有给出 total。没有时只能靠 [pageFilled] 猜有没有下一页。
+  final bool totalKnown;
+
+  /// 本页是否取满（条数 >= limit）。total 未知时，未取满即到底。
+  final bool pageFilled;
 }
 
 /// 单条 SSE 流内部最多连续重连几次。与 [ChatScreen] 自己的「跨流 resume 重连」
@@ -212,8 +224,11 @@ class EthanApiClient {
     final total = data is Map ? data['total'] : null;
     return SessionPage(
       sessions: sessions,
-      // total 缺失时退回「本页不满一页即到底」，避免 hasMore 永远为真。
+      // total 缺失时退回「本页不满一页即到底」：用 offset+条数 冒充 total 会让
+      // hasMore 恒真，一次接一次空转拉不到头。
       total: total is num ? total.toInt() : offset + sessions.length,
+      totalKnown: total is num,
+      pageFilled: sessions.length >= limit,
     );
   }
 
