@@ -14,6 +14,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - **记忆衰减与强化**：纯确定性 tier 规则（零 LLM）——身份/偏好/陪伴记忆豁免不衰减；闲置 21 天的项目 scope 批量归档（dormant，保留可唤醒）；"先试试"类临时决定按 3 天半衰期快速沉底；跨 session 反复发生的证据自动阶梯晋升置信度。价值由未来行为投票：复现即强化，长期无信号即归档
 - **维度注册表**：提取 prompt 的维度说明与校验白名单由同一份声明式注册表生成——扩展维度不再需要手写 prompt
 - 热区/温区滑动窗口维持长对话上下文（REPL），廉价模型自动压缩较早内容
+- **输入长度防护**：每次调模型前按字符估算全量输入（system + 历史），超过可配置预算（上游硬上限扣 5% 余量，`ETHAN_MAX_INPUT_CHARS` / `ETHAN_INPUT_LIMIT_MARGIN_PCT`）就从最旧轮次开始裁剪（在 user 消息边界切割，不拆散 tool_call/tool 配对）。若上游仍返回长度越界 400（如 DashScope `Range of input length should be [1, 997952]`），agent 会自动裁剪历史重试一次，而不是把 `provider_error` 原文抛给用户
 - 行为准则 Procedures：从用户纠正中自动学习，每次对话加载（`playbook.json`）
 - 用户画像 Profile：叙事型文档，按章节存储个人语言、目标、约定等（`user_profile.md`）；含「基础特征」「心理与情绪」等章节
 - **主动写记忆**：Agent 在对话中识别到可记忆信息时调用 `memory_write`——写入走同一条候选→准入管道（同一个库、同样的证据语义）

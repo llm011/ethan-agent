@@ -6,6 +6,7 @@ import json
 import logging
 from typing import AsyncGenerator
 
+from ethan.core.context_limit import is_input_length_error
 from ethan.providers.base import MIDSTREAM_BREAK_KEYWORDS, Message, MidstreamBreakError
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,12 @@ def _friendly_error(e: Exception, agent) -> str:
             f"当前模型 {model_id} 的 API 不支持当前所在地区（Error 400 FAILED_PRECONDITION）。"
             "请在设置页切换到其他模型（如 Claude / OpenAI），或为服务端配置代理后重试。"
         )
+    # 输入超过模型上下文上限（DashScope「Range of input length should be [1, 997952]」
+    # 等，识别特征与 agent 层共用 is_input_length_error）。正常情况下 agent 层已
+    # 自动裁剪历史并重试；走到这里说明兜底也失败（如单条消息本身就超限），
+    # 给可操作的建议，不透传 provider_error 原文。
+    if is_input_length_error(e):
+        return "会话内容过长，已超过当前模型的输入上限（自动截断重试仍未成功）。请新开会话，或在设置页切换上下文更大的模型。"
     # 中途断连且 provider 层自动重试已耗尽（全程未产出任何内容）→ 如实提示重试
     # 失败。此时说"已生成内容已保存"是不实文案，用户发「继续」也接不上任何内容。
     if isinstance(e, MidstreamBreakError):
