@@ -372,7 +372,16 @@ class _MemoryScreenState extends State<MemoryScreen>
       _ => null,
     };
     if (active == null) return;
-    setState(() => _future = _load());
+    // 记下发起重读时的 tab：落地时用户可能已切走，旧 tab 的结果不能再
+    // 写回 _future（否则新 tab 会闪现旧 tab 的数据）。
+    final requestedTab = _tabs.index;
+    final reload = _load();
+    setState(() {
+      _future = reload;
+    });
+    reload.whenComplete(() {
+      if (mounted && _tabs.index != requestedTab) _refresh(force: false);
+    });
   }
 
   @override
