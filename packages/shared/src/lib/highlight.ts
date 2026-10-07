@@ -40,6 +40,85 @@ export function getSelectionOffsets(root: HTMLElement): { start: number; end: nu
   return a <= b ? { start: a, end: b } : { start: b, end: a };
 }
 
+/**
+ * 取当前选区落在 root 内的那段 Range；选区塌缩或跨出 root 时返回 null。
+ *
+ * 不用 `window.getSelection()?.toString()` 的原因见下方两个导出函数：选区跨到
+ * root 之外（例如把正文和右侧标注面板一起拖进来）时它会把面板文字一并带上。
+ */
+function currentRootRange(root: HTMLElement): Range | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+  // getRangeAt(0) 已归一化为文档序（反向拖拽体现在 selection 的 anchor/focus 上，
+  // 不在 Range 上），起止必是 start在前/end在后，直接用。
+  return range;
+}
+
+/**
+ * 选区在 root 内的原始纯文本（textContent 口径，与 [getSelectionOffsets] 一致）。
+ *
+ * 标注 quote 必须用这份：locateQuote 编辑重定位时拿 quote 去 `root.textContent`
+ * 里 includes，带任何补充换行的版本都匹配不上，跨段标注会被误判为「原文已删」。
+ */
+export function getSelectionRawText(root: HTMLElement): string {
+  const range = currentRootRange(root);
+  if (!range) return "";
+  // 与 [getSelectionOffsets] 的 TreeWalker 口径一致：只用 textContent，
+  // 不取 innerText（后者会按 CSS 可见性/display 增删文本，offset 就对不上了）。
+  return range.cloneContents().textContent ?? "";
+}
+
+/**
+ * 选区在 root 内的纯文本，块级边界补 `\n`。**给复制（剪贴板）专用**。
+ *
+ * 直接 textContent 会把相邻段落粘成一行（`<p>a</p><p>b</p>` → "ab"），复制出去
+ * 没法读；而 `selection.toString()` 又会插双份空行（段落间 `\n\n`）。这里以
+ * textContent 为唯一事实（见 [getSelectionRawText]），只在块级元素之间插一个 `\n`，
+ * 行内元素（strong/em/code/a）不打断句子。
+ */
+export function getSelectionText(root: HTMLElement): string {
+  const range = currentRootRange(root);
+  if (!range) return "";
+  return textContentWithBreaks(range.cloneContents());
+}
+
+/**
+ * 拼接片段的纯文本，并在块级边界补换行。
+ *
+ * 只在块级元素之间插一个 `\n`，行内元素（strong/em/code/a）不打断句子；
+ * `<br>` 也保留换行。末尾多余空白去掉，段内/段间换行保留。
+ */
+function textContentWithBreaks(fragment: DocumentFragment): string {
+  const BLOCK = new Set([
+    "P", "DIV", "LI", "UL", "OL", "H1", "H2", "H3", "H4", "H5", "H6",
+    "BLOCKQUOTE", "TR", "PRE", "SECTION", "ARTICLE", "TABLE", "DT", "DD",
+  ]);
+  let out = "";
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.nodeValue ?? "";
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+    const el = node as Element;
+    const tag = el.nodeName;
+    // 行内代码/公式里的 <br> 也要保留换行，所以 br 单独处理
+    if (tag === "BR") {
+      out += "\n";
+      return;
+    }
+    const isBlock = BLOCK.has(tag);
+    if (isBlock && out && !out.endsWith("\n")) out += "\n";
+    node.childNodes.forEach(walk);
+    if (isBlock && out && !out.endsWith("\n")) out += "\n";
+  };
+  fragment.childNodes.forEach(walk);
+  // 去掉文件末尾多余的空白，但保留段内/段间换行
+  return out.replace(/\s+$/, "");
+}
+
 /** 移除所有已渲染的标注（把 <mark> 拆掉、文本合并回父节点）。 */
 function unwrapMarks(root: HTMLElement) {
   root.querySelectorAll("mark[data-anno-id]").forEach((mark) => {

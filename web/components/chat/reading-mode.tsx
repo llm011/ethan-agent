@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   X,
   Underline as UnderlineIcon,
@@ -10,13 +10,15 @@ import {
   Pencil,
   Check,
   AlertCircle,
+  Copy,
 } from "lucide-react";
 import type { Message } from "@ethan/shared/chat/types";
 import type { Annotation, AnnotationColor, AnnotationType } from "@/lib/api";
 import { createAnnotation, deleteAnnotation, updateAnnotationOffset, updateMessage } from "@/lib/api";
 import { isPersistedId } from "@ethan/shared/chat/history";
 import { MarkdownContent } from "./markdown";
-import { applyHighlights, getSelectionOffsets, type HighlightSpan } from "@/lib/highlight";
+import { applyHighlights, getSelectionOffsets, getSelectionRawText, getSelectionText, type HighlightSpan } from "@/lib/highlight";
+import { copyToClipboard } from "@ethan/shared/lib/clipboard";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 
 interface ReadingModeProps {
@@ -93,6 +95,11 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
   // 重开会话后 offset/正文不一致，这里收集起来明确提示并支持重试
   const [saveError, setSaveError] = useState<string | null>(null);
   const [syncFails, setSyncFails] = useState<{ id: number; kind: "offset" | "delete"; start: number; end: number }[]>([]);
+  // 选中复制：copied 短暂显示「已复制」，copyFailed 明确提示失败（不静默）
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  // 复制反馈 / 失败提示的定时器与工具条闪烁定时器，卸载时统一清掉
+  const copiedTimer = useRef<number | null>(null);
   const localRef = useRef(local);
   localRef.current = local;
   // 保存后待重定位标记：等 message.content 更新并重新渲染完成，再按 quote 重算标注 offset
@@ -179,7 +186,32 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
     return () => cancelAnimationFrame(raf);
   }, [message?.content, editing]);
 
+  // 卸载时清掉「已复制」的定时器，避免关闭阅读模式后对已卸载组件 setState
+  useEffect(() => {
+    return () => {
+      if (copiedTimer.current != null) window.clearTimeout(copiedTimer.current);
+    };
+  }, []);
+
+  // 复制当前选中的正文。走共享的 copyToClipboard（Clipboard API + execCommand 回退），
+  // 失败时明确提示而不是静默——否则用户以为复制成功了。
+  // useCallback 让快捷键 effect 能安全依赖它，而不必每次渲染重绑监听。
+  const doCopy = useCallback(async () => {
+    if (!contentRef.current) return;
+    const text = getSelectionText(contentRef.current) || sel?.text || "";
+    if (!text) return;
+    const ok = await copyToClipboard(text);
+    setCopied(ok);
+    setCopyFailed(!ok);
+    if (copiedTimer.current != null) window.clearTimeout(copiedTimer.current);
+    if (ok) {
+      copiedTimer.current = window.setTimeout(() => setCopied(false), 1600);
+    }
+  }, [sel?.text]);
+
   // Esc：编辑态先退出编辑（防误触丢草稿），非编辑态关闭阅读模式
+  // Cmd/Ctrl+C：焦点在正文里时复制选中正文（走同一套回退逻辑，http 局域网也能用）
+  // Cmd/Ctrl+A：只全选正文，避免把左右面板/按钮一起选进来
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -190,11 +222,33 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
         } else {
           onClose();
         }
+        return;
+      }
+      if (editing || !(e.metaKey || e.ctrlKey)) return;
+      // 焦点在输入类元素（批注输入框等）上时放行浏览器默认行为：
+      // ⌘A 应全选输入框自己的文字，⌘C 应复制输入框里选中的内容
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (e.key === "c" || e.key === "C") {
+        // 没有正文选区时放行走浏览器默认行为，别吞掉用户自己在别处的复制
+        if (getSelectionRawText(contentRef.current!).trim()) {
+          e.preventDefault();
+          void doCopy();
+        }
+      } else if (e.key === "a" || e.key === "A") {
+        const root = contentRef.current;
+        if (!root) return;
+        const range = document.createRange();
+        range.selectNodeContents(root);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        e.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose, editing]);
+  }, [open, onClose, editing, doCopy]);
 
   const startEdit = () => {
     setDraft(message?.content ?? "");
@@ -240,11 +294,16 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
     setSel({
       start: off.start,
       end: off.end,
-      text: selObj.toString(),
+      // quote/offset 用 raw textContent 口径（locateQuote 重定位时在 root.textContent
+      // 里 includes，带补充换行的版本匹配不上）；复制的可读版由 doCopy 实时取 getSelectionText
+      text: getSelectionRawText(contentRef.current),
       top: rect.bottom + 8,
       left: rect.left + rect.width / 2,
     });
     setNoteMode(false);
+    // 新选区出现时清掉上一轮的复制反馈
+    setCopied(false);
+    setCopyFailed(false);
   };
 
   const handleClick = (e: React.MouseEvent) => {
@@ -411,6 +470,20 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
         </div>
       )}
 
+      {/* 复制失败提示：Clipboard API 与 execCommand 都不可用时明确告知，避免用户以为已复制 */}
+      {copyFailed && (
+        <div className="flex items-center gap-2 border-b border-border bg-destructive/10 px-4 py-1.5 text-xs text-destructive">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">复制失败：浏览器拒绝了剪贴板访问，请手动选中后复制。</span>
+          <button
+            onClick={() => setCopyFailed(false)}
+            className="rounded-md border border-destructive/40 px-2 py-0.5 hover:bg-destructive/20"
+          >
+            知道了
+          </button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         {editing ? (
           /* 编辑态：与正文同布局的 textarea */
@@ -429,9 +502,10 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
           </div>
         ) : (
         <>
-        {/* 正文（可滚动、居中、舒适行宽） */}
+        {/* 正文（可滚动、居中、舒适行宽）。显式 select-text：外层若被任何
+            `select-none`（如 Tauri 拖拽区、卡片类样式）命中，正文也要可选中复制 */}
         <div
-          className="flex-1 overflow-y-auto px-4 py-10"
+          className="flex-1 select-text overflow-y-auto px-4 py-10"
           onMouseUp={handleMouseUp}
           onClick={handleClick}
         >
@@ -523,6 +597,29 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
         >
           {!noteMode ? (
             <>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      onClick={doCopy}
+                      // 复制是纯读操作，不依赖后端落库，任何消息（含未持久化的）都能复制
+                      aria-label="复制选中文字"
+                      className={`flex h-7 items-center gap-1 rounded px-2 text-xs ${
+                        copyFailed
+                          ? "text-destructive"
+                          : copied
+                            ? "bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copied ? "已复制" : copyFailed ? "复制失败" : "复制"}
+                    </button>
+                  }
+                />
+                <TooltipContent side="top">复制选中文字（⌘/Ctrl + C）</TooltipContent>
+              </Tooltip>
+              <span className="mx-0.5 h-5 w-px bg-border" />
               {HL_COLORS.map((c) => (
                 <Tooltip key={c.key as string}>
                   <TooltipTrigger
