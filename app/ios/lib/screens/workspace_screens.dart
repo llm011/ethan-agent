@@ -1257,23 +1257,31 @@ class _AgendaScreenState extends State<AgendaScreen> {
                         padding: const EdgeInsets.all(8),
                         child: _calendar(all))));
             return LayoutBuilder(builder: (context, constraints) {
-              final eventList = ListView(children: eventCards);
-              final content = constraints.maxWidth >= 700
-                  ? Row(children: [
-                      Expanded(child: calendarCard),
-                      Expanded(child: eventList)
-                    ])
-                  : ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      children: [calendarCard, ...eventCards]);
-              // 内容未满一屏时 Row 布局拉不动，这里包一层可滚动外壳保住下拉刷新。
-              final scrollable = constraints.maxWidth >= 700
-                  ? ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      children: [content])
-                  : content;
+              Widget eventList = ListView(children: eventCards);
+              if (constraints.maxWidth >= 700) {
+                // 宽屏：日历和事件并排。外层统一由 RefreshIndicator + ListView
+                // 提供滚动（未满一屏也能下拉刷新），内层列表用 shrinkWrap +
+                // NeverScrollable 交出滚动权 —— 嵌套可滚动会因 unbounded height
+                // 直接崩溃，不能靠内层 ListView 自己滚。
+                eventList = ListView(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: eventCards);
+                final content = Row(children: [
+                  Expanded(child: calendarCard),
+                  Expanded(child: eventList)
+                ]);
+                return RefreshIndicator(
+                    onRefresh: () async => _refresh(),
+                    child: ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [content]));
+              }
               return RefreshIndicator(
-                  onRefresh: () async => _refresh(), child: scrollable);
+                  onRefresh: () async => _refresh(),
+                  child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [calendarCard, ...eventCards]));
             });
           },
         ),
