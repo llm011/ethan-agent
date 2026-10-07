@@ -55,6 +55,17 @@ for i in range(max_iters):
 
 ---
 
+## 输入长度防护（`core/context_limit.py`）
+
+`context_budget` 只管控 tool result 体积；user/assistant 正文与 system 不设防，会话长期累积后单次请求可能超过上游模型上下文硬限制（DashScope 系：`Range of input length should be [1, 997952]`，直接 400）。两层防护：
+
+- **发送前预检**（proactive）：每次调 provider 前，`Agent._trim_input_if_needed()` 按字符估算全量输入（system + 全部消息 + tool_calls + 图片按每张固定值估算），超过 `effective_input_budget()`（上限 × 95%）就从最旧的轮次裁起。裁剪在 user 消息边界切割——不会出现孤儿 tool 消息或拆散 tool_call/tool 配对；裁剪后在列表开头插入 `[会话历史已截断：…]` 提示。只动 `working`（loop 的浅拷贝），session 持久化历史不受影响。
+- **400 兜底**（reactive）：`is_input_length_error()` 识别各系上游的长度越界文案（DashScope / OpenAI `context_length_exceeded` / Anthropic `prompt is too long` 等），agent 层用减半预算再裁剪并重试一次（stream_chat 会先向用户 yield「会话过长，已自动截断…」提示）；system 本身超预算、裁不动时抛出用户可读的中文错误，不再透传 `provider_error` 原文。interface 层 `_friendly_error` 另有一道同款转译兜底。
+
+阈值环境变量（env 赢过内置默认）：`ETHAN_MAX_INPUT_CHARS`（上游上限，默认 997952，设 0 关闭）、`ETHAN_INPUT_LIMIT_MARGIN_PCT`（安全余量 %，默认 5）。回归测试：`tests/test_context_limit.py`。
+
+---
+
 ## 系统提示词构建（`_build_system`）
 
 Full / Medium Path 按以下顺序拼接，`Current time:` 是稳定层与动态层的分界点（用于 Prompt Caching）：
