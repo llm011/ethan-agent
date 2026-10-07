@@ -557,6 +557,31 @@ iOS 标题同样加了 `maxLines: 1 + ellipsis`，否则长标题会折行把三
   绑定，隐藏头像后**宽度变宽**，该常量需与布局同步调整，否则会系统性高估行数、把没超屏的
   消息也折起来。
 
+### 会话列表分页与刷新反馈（iOS）
+
+`GET /sessions` 自带 `limit` / `offset` / `total`，iOS 端（`app/ios/lib/screens/sessions_screen.dart`）
+按它做「上滑加载更多」：
+
+- **触底 buffer**：距列表底部不足 400px 才触发下一页（`_loadMoreBuffer`），滚动中途的
+  轻微惯性滑动不会误触发。
+- **footer 三态**：加载中 spinner（「加载中…」）→ 到底（「没有更多了」）→ 失败
+  （「加载更多失败 + 重试」）。加载失败**绝不动已有列表**，重试入口在 footer 上。
+- **hasMore 判定**：`total` 已知用「已取条数 < total」；`total` 缺失退回「本页取满
+  即还有下一页」（`totalKnown` + `pageFilled`）。别用 `offset + 本页条数` 冒充 total——
+  那会让 hasMore 恒真、一次接一次空转。
+- **单飞与代币**：刷新（`_refreshing`）与加载更多（`_loadingMore`）互斥；显式动作
+  （搜索提交 / 手动刷新 / 错误重试）走 `load(resetPage: true)`，会自增 `_loadMoreToken`
+  作废在飞的追加，防止旧分页带着旧关键词覆盖新列表。追加前按 session id 去重。
+
+**别往回退**：`RefreshIndicator.onRefresh` 必须返回真实等待的 future（返回立刻完成的
+空 future，指示器会一闪而过，用户以为没触发）；空列表也要包一层可滚动的 ListView
+（`AlwaysScrollableScrollPhysics`），否则内容不满一屏时物理上拉不动、下拉刷新失效。
+
+`EthanRepository`（`app/ios/lib/data/ethan_repository.dart`）的缓存有 30s TTL
+（`staleAfter`）：过期后的命中立即返回旧值并后台重校验，`refresh()` 落地后通过
+`watch()`/`unwatch()` 通知订阅页面重读。**后台刷新的结果必须通知界面**——只写缓存不
+通知，表现就是「请求早发了、界面过很久才突然变新」（本仓库修过的真实回归）。
+
 ---
 
 ## HTTP API（`ethan/interface/api.py`）
