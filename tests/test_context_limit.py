@@ -36,7 +36,7 @@ from ethan.core.context_limit import (
     trim_to_limit,
 )
 from ethan.interface.routers.helpers import _friendly_error
-from ethan.providers.base import Message, StreamChunk, ToolCall
+from ethan.providers.base import Message, ToolCall
 from ethan.providers.openai_compat import OpenAICompatProvider
 from ethan.tools.registry import ToolRegistry
 
@@ -379,9 +379,12 @@ def test_stream_chat_retries_once_after_length_400(monkeypatch, _isolated_data_d
     assert "已根据保留的上下文完成总结" in text, "重试应成功产出回复"
     assert "会话过长" in text and "截断" in text, "应向用户提示已自动截断重试"
     assert len(provider.create_calls) == 2, "应恰好重试一次"
-    # 裁剪后条数可能不变（截断提示占一位），但携带的内容总量必须变小
-    size = lambda msgs: sum(len(str(m.get("content") or "")) for m in msgs)
-    assert size(provider.create_calls[1]) < size(provider.create_calls[0]), "重试时内容总量应变小"
+
+    def _size(msgs: list[dict]) -> int:
+        # 裁剪后条数可能不变（截断提示占一位），但携带的内容总量必须变小
+        return sum(len(str(m.get("content") or "")) for m in msgs)
+
+    assert _size(provider.create_calls[1]) < _size(provider.create_calls[0]), "重试时内容总量应变小"
 
 
 def test_stream_chat_raises_readable_error_when_untrimmable(monkeypatch, _isolated_data_dir):
@@ -420,5 +423,8 @@ def test_chat_retries_once_after_length_400(monkeypatch, _isolated_data_dir):
     resp = asyncio.run(agent.chat(_long_history()))
     assert resp.content == "总结好了"
     assert len(calls) == 2
-    size = lambda msgs: sum(len(m.content or "") for m in msgs)
-    assert size(calls[1]) < size(calls[0])  # 裁剪生效：重试携带的内容总量变小
+
+    def _size(msgs: list[Message]) -> int:
+        return sum(len(m.content or "") for m in msgs)
+
+    assert _size(calls[1]) < _size(calls[0])  # 裁剪生效：重试携带的内容总量变小
