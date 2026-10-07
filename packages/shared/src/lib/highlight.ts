@@ -41,47 +41,54 @@ export function getSelectionOffsets(root: HTMLElement): { start: number; end: nu
 }
 
 /**
- * 取当前选区在 root 内的纯文本。用于「选中即复制」。
+ * 取当前选区落在 root 内的那段 Range；选区塌缩或跨出 root 时返回 null。
  *
- * 不用 `window.getSelection()?.toString()`，因为选区跨到 root 之外（例如把正文和
- * 右侧标注面板一起拖进来）时它会把面板文字一并带上；这里只认 root 内那段 Range，
- * 与 [getSelectionOffsets] 用同一份纯文本口径，保证复制的就是被标注/被复制的原文。
+ * 不用 `window.getSelection()?.toString()` 的原因见下方两个导出函数：选区跨到
+ * root 之外（例如把正文和右侧标注面板一起拖进来）时它会把面板文字一并带上。
  */
-export function getSelectionText(root: HTMLElement): string {
+function currentRootRange(root: HTMLElement): Range | null {
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return "";
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
   const range = sel.getRangeAt(0);
-  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return "";
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+  // getRangeAt(0) 已归一化为文档序（反向拖拽体现在 selection 的 anchor/focus 上，
+  // 不在 Range 上），起止必是 start在前/end在后，直接用。
+  return range;
+}
 
-  // 选区可能反向拖拽（anchor 在后、focus 在前），先按文档顺序归一
-  const ordered =
-    range.startContainer === range.endContainer
-      ? range
-      : root.compareDocumentPosition(range.endContainer) & Node.DOCUMENT_POSITION_FOLLOWING ||
-          range.startContainer.compareDocumentPosition(range.endContainer) & Node.DOCUMENT_POSITION_FOLLOWING
-        ? range
-        : null;
-
-  const clone = (ordered ?? range).cloneRange();
-  // 夹到 root 之内：选区起点若在 root 之前（理论上已被上面的 contains 挡掉，
-  // 但 Range 允许部分重叠），这里再收一次边，避免把 root 外的文字算进来。
-  if (!root.contains(clone.startContainer)) clone.setStart(root, 0);
-  if (!root.contains(clone.endContainer)) clone.setEnd(root, root.childNodes.length);
-
-  const fragment = clone.cloneContents();
+/**
+ * 选区在 root 内的原始纯文本（textContent 口径，与 [getSelectionOffsets] 一致）。
+ *
+ * 标注 quote 必须用这份：locateQuote 编辑重定位时拿 quote 去 `root.textContent`
+ * 里 includes，带任何补充换行的版本都匹配不上，跨段标注会被误判为「原文已删」。
+ */
+export function getSelectionRawText(root: HTMLElement): string {
+  const range = currentRootRange(root);
+  if (!range) return "";
   // 与 [getSelectionOffsets] 的 TreeWalker 口径一致：只用 textContent，
   // 不取 innerText（后者会按 CSS 可见性/display 增删文本，offset 就对不上了）。
-  return textContentWithBreaks(fragment);
+  return range.cloneContents().textContent ?? "";
+}
+
+/**
+ * 选区在 root 内的纯文本，块级边界补 `\n`。**给复制（剪贴板）专用**。
+ *
+ * 直接 textContent 会把相邻段落粘成一行（`<p>a</p><p>b</p>` → "ab"），复制出去
+ * 没法读；而 `selection.toString()` 又会插双份空行（段落间 `\n\n`）。这里以
+ * textContent 为唯一事实（见 [getSelectionRawText]），只在块级元素之间插一个 `\n`，
+ * 行内元素（strong/em/code/a）不打断句子。
+ */
+export function getSelectionText(root: HTMLElement): string {
+  const range = currentRootRange(root);
+  if (!range) return "";
+  return textContentWithBreaks(range.cloneContents());
 }
 
 /**
  * 拼接片段的纯文本，并在块级边界补换行。
  *
- * 直接用 `fragment.textContent` 会把相邻段落粘成一行（`<p>a</p><p>b</p>` → "ab"），
- * 复制出去没法读；而 `selection.toString()` 又会插双份空行（段落间 `\n\n`）。
- * 这里以 textContent 为唯一事实（保证与字符 offset 同口径），只在块级元素之间
- * 插一个 `\n`，行内元素（strong/em/code/a）不打断句子。
- * 表头/单元格是同一行的兄弟节点，所以插空字符串（纯拼接）。
+ * 只在块级元素之间插一个 `\n`，行内元素（strong/em/code/a）不打断句子；
+ * `<br>` 也保留换行。末尾多余空白去掉，段内/段间换行保留。
  */
 function textContentWithBreaks(fragment: DocumentFragment): string {
   const BLOCK = new Set([

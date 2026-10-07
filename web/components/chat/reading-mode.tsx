@@ -17,7 +17,7 @@ import type { Annotation, AnnotationColor, AnnotationType } from "@/lib/api";
 import { createAnnotation, deleteAnnotation, updateAnnotationOffset, updateMessage } from "@/lib/api";
 import { isPersistedId } from "@ethan/shared/chat/history";
 import { MarkdownContent } from "./markdown";
-import { applyHighlights, getSelectionOffsets, getSelectionText, type HighlightSpan } from "@/lib/highlight";
+import { applyHighlights, getSelectionOffsets, getSelectionRawText, getSelectionText, type HighlightSpan } from "@/lib/highlight";
 import { copyToClipboard } from "@ethan/shared/lib/clipboard";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 
@@ -225,9 +225,13 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
         return;
       }
       if (editing || !(e.metaKey || e.ctrlKey)) return;
+      // 焦点在输入类元素（批注输入框等）上时放行浏览器默认行为：
+      // ⌘A 应全选输入框自己的文字，⌘C 应复制输入框里选中的内容
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       if (e.key === "c" || e.key === "C") {
         // 没有正文选区时放行走浏览器默认行为，别吞掉用户自己在别处的复制
-        if (getSelectionText(contentRef.current!).trim()) {
+        if (getSelectionRawText(contentRef.current!).trim()) {
           e.preventDefault();
           void doCopy();
         }
@@ -290,9 +294,9 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
     setSel({
       start: off.start,
       end: off.end,
-      // 只取正文根节点内的纯文本：选区若跨到右侧标注面板，selObj.toString() 会把
-      // 面板文字一并带上，导致复制的 quote 与标注 offset 对不上
-      text: getSelectionText(contentRef.current),
+      // quote/offset 用 raw textContent 口径（locateQuote 重定位时在 root.textContent
+      // 里 includes，带补充换行的版本匹配不上）；复制的可读版由 doCopy 实时取 getSelectionText
+      text: getSelectionRawText(contentRef.current),
       top: rect.bottom + 8,
       left: rect.left + rect.width / 2,
     });
