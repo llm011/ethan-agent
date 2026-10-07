@@ -375,9 +375,13 @@ def test_stream_chat_retries_once_after_length_400(monkeypatch, _isolated_data_d
         [RuntimeError(DASHSCOPE_400), _final_stream()]
     )
     agent = _wire_agent(provider, monkeypatch, budget=100000)  # 预检不触发
-    text, _ = _collect_stream(agent, _long_history())
+    text, chunks = _collect_stream(agent, _long_history())
     assert "已根据保留的上下文完成总结" in text, "重试应成功产出回复"
-    assert "会话过长" in text and "截断" in text, "应向用户提示已自动截断重试"
+    # 提示走 InjectEvent（有现成 UI 通道），不混进正文
+    from ethan.providers.base import InjectEvent
+
+    injected = [c for c in chunks if isinstance(c, InjectEvent)]
+    assert injected and "会话过长" in injected[0].messages[0], "应经事件通道向用户提示已自动截断"
     assert len(provider.create_calls) == 2, "应恰好重试一次"
 
     def _size(msgs: list[dict]) -> int:
@@ -388,12 +392,31 @@ def test_stream_chat_retries_once_after_length_400(monkeypatch, _isolated_data_d
 
 
 def test_stream_chat_raises_readable_error_when_untrimmable(monkeypatch, _isolated_data_dir):
-    """reactive：预算内裁不动（减半后仍容不下任何前缀）→ 抛用户可读错误。"""
+    """reactive：预算内裁不动（减半后仍容不下任何前缀）→ 抛用户可读错误。
+
+    走 trim_to_limit 的 avail<=0 分支（system 本身吃满预算），
+    与下面的 start<=0 分支（单条 user 消息超限）互补。"""
     provider = _make_stream_provider([RuntimeError(DASHSCOPE_400)])
     agent = _wire_agent(provider, monkeypatch, budget=2)  # 减半后为 1，无历史可裁
 
     async def run():
         async for _ in agent.stream_chat([Message(role="user", content="问题")]):
+            pass
+
+    with pytest.raises(RuntimeError, match="会话内容过长"):
+        asyncio.run(run())
+    assert len(provider.create_calls) == 1, "裁不动时不应盲目重试"
+
+
+def test_stream_chat_raises_readable_error_when_single_message_over_limit(monkeypatch, _isolated_data_dir):
+    """reactive：单条 user 消息本身就超减半预算（start<=0 分支，无前缀可丢）
+    → 同样抛用户可读错误，不盲目重试。"""
+    provider = _make_stream_provider([RuntimeError(DASHSCOPE_400)])
+    # 预算 40000：预检放得下（不触发），减半 20000 后首条 5 万字放不下且无前缀可丢
+    agent = _wire_agent(provider, monkeypatch, budget=40000)
+
+    async def run():
+        async for _ in agent.stream_chat([Message(role="user", content="x" * 50000)]):
             pass
 
     with pytest.raises(RuntimeError, match="会话内容过长"):

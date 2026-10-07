@@ -47,6 +47,8 @@ DEFAULT_MARGIN_PCT = 5
 
 # 每张图片的长度估算（字符）。上游按图片分辨率计固定 token（一张 1568px 截图
 # 约 1.5-3K tokens），不按 base64 实长计——按实长会把带图会话全部误判为超限。
+# 4000 字符 = 4K tokens 的保守上界：比 qa 级截图（~1K tokens）高、与高清截图
+# （1280-2560 tokens）同量级，宁可多算不多发。
 _IMAGE_ESTIMATE_CHARS = 4000
 
 _ENV_MAX_CHARS = "ETHAN_MAX_INPUT_CHARS"
@@ -66,7 +68,6 @@ TRIM_NOTICE = (
 # 风格的同族报错（各中转网关透传的错误体都会落在 str(e) 里）。
 _INPUT_LENGTH_ERROR_PATTERNS = (
     "range of input length should be",  # DashScope: Range of input length should be [1, 997952]
-    "input length should be",
     "context_length_exceeded",  # OpenAI error code
     "maximum context length",  # OpenAI: This model's maximum context length is ...
     "prompt is too long",  # Anthropic: prompt is too long: N tokens > M maximum

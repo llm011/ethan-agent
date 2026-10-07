@@ -607,15 +607,13 @@ class Agent:
         不受影响）。返回被省略的字符数（0 = 未触发裁剪）。
         """
         budget = effective_input_budget()
-        if not budget or total_input_chars(working, system) <= budget:
+        raw = total_input_chars(working, system)
+        if not budget or raw <= budget:
             return 0
         trimmed, omitted = trim_to_limit(working, system, budget)
         if omitted:
             working[:] = trimmed
-            logger.warning(
-                "输入超预算（%d 字 > 预算 %d 字），发送前裁剪较早历史 %d 字",
-                total_input_chars(working, system) + omitted, budget, omitted,
-            )
+            logger.warning("输入超预算（%d 字 > 预算 %d 字），发送前裁剪较早历史 %d 字", raw, budget, omitted)
         return omitted
 
     async def _request_consent(self, description: str, tool: str, detail: str = "") -> bool:
@@ -1276,8 +1274,8 @@ class Agent:
                 elif is_input_length_error(e) and not _length_trimmed and not full_content:
                     # 输入超模型上下文上限（如 DashScope「Range of input length
                     # should be [1, 997952]」）：预检没拦住（估算偏差）时的 reactive
-                    # 兜底——激进裁剪历史后重试一次。向用户 yield 一条可见提示完成
-                    # 转译（不再透传 provider_error 原文）；裁不动（无历史可丢，或
+                    # 兜底——激进裁剪历史后重试一次。走 InjectEvent 告知用户（有现成
+                    # UI 通道，不往正文里塞系统腔文案）；裁不动（无历史可丢，或
                     # system 本身就把预算吃满）则抛用户可读错误，不盲目重试。
                     _length_trimmed = True
                     trimmed, omitted = trim_for_retry(working, sys, effective_input_budget())
@@ -1288,7 +1286,7 @@ class Agent:
                         ) from e
                     working[:] = trimmed
                     logger.warning("stream_chat() iter=%d 上游 400 输入超限，裁剪 %d 字历史后重试: %s", i + 1, omitted, e)
-                    yield "\n\n[会话过长，已自动截断较早的历史消息，正在继续处理…]\n\n"
+                    yield InjectEvent(messages=[f"会话过长，已自动截断较早的历史消息（约省略 {omitted} 字），正在继续处理…"])
                     full_content = ""
                     final_chunk = None
                     async for chunk in provider.stream_chat(working, tools=tools, system=sys):
