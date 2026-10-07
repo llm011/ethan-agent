@@ -346,17 +346,40 @@ class _MemoryScreenState extends State<MemoryScreen>
   String _recordDomain = '';
   DateTime? _insightDate;
 
+  // 走 repository 的 tab 对应的缓存 key。后台刷新落地时 repository 会通知这里，
+  // 页面重读一次把新数据接进 FutureBuilder —— 否则后台刷新只写进了缓存，
+  // 界面要等下次手动刷新/重建才能看到（「请求发了、界面不动」的根因）。
+  static const _watchedKeys = {'facts', 'records'};
+
   @override
   void initState() {
     super.initState();
     _future = _load();
     _tabs.addListener(() {
-      if (!_tabs.indexIsChanging) _refresh();
+      if (!_tabs.indexIsChanging) _refresh(force: false);
     });
+    for (final key in _watchedKeys) {
+      widget.repository?.watch(key, _onRepositoryRefreshed);
+    }
+  }
+
+  void _onRepositoryRefreshed() {
+    if (!mounted) return;
+    // 只重读当前 tab 正在用的 key，避免后台一次无关刷新打断别的 tab。
+    final active = switch (_tabs.index) {
+      0 => 'facts',
+      3 => 'records',
+      _ => null,
+    };
+    if (active == null) return;
+    setState(() => _future = _load());
   }
 
   @override
   void dispose() {
+    for (final key in _watchedKeys) {
+      widget.repository?.unwatch(key, _onRepositoryRefreshed);
+    }
     _tabs.dispose();
     _search.dispose();
     super.dispose();
@@ -1240,9 +1263,17 @@ class _AgendaScreenState extends State<AgendaScreen> {
                       Expanded(child: calendarCard),
                       Expanded(child: eventList)
                     ])
-                  : ListView(children: [calendarCard, ...eventCards]);
+                  : ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [calendarCard, ...eventCards]);
+              // 内容未满一屏时 Row 布局拉不动，这里包一层可滚动外壳保住下拉刷新。
+              final scrollable = constraints.maxWidth >= 700
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [content])
+                  : content;
               return RefreshIndicator(
-                  onRefresh: () async => _refresh(), child: content);
+                  onRefresh: () async => _refresh(), child: scrollable);
             });
           },
         ),
@@ -3207,11 +3238,16 @@ class _AsyncList<T> extends StatelessWidget {
       {required this.snapshot,
       required this.emptyText,
       required this.onRetry,
-      required this.itemBuilder});
+      required this.itemBuilder,
+      this.busy = false});
   final AsyncSnapshot<List<T>> snapshot;
   final String emptyText;
   final VoidCallback onRetry;
   final Widget Function(T item) itemBuilder;
+
+  /// 外层是否已有一笔刷新在跑。请求在飞时下拉不再重复触发（同一时刻只允许
+  /// 一个刷新请求），指示器由调用方保证在请求结束后收起。
+  final bool busy;
   @override
   Widget build(BuildContext context) {
     if (snapshot.connectionState == ConnectionState.waiting) {
@@ -3227,16 +3263,30 @@ class _AsyncList<T> extends StatelessWidget {
                 Text('加载失败：${snapshot.error}', textAlign: TextAlign.center),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
-                    onPressed: onRetry,
+                    onPressed: busy ? null : onRetry,
                     icon: const Icon(Icons.refresh_rounded),
                     label: const Text('重试'))
               ])));
     }
     final items = snapshot.data ?? const [];
-    if (items.isEmpty) return Center(child: Text(emptyText));
+    if (items.isEmpty) {
+      // 空态也必须是可滚动列表，否则 RefreshIndicator 拉不动，下拉刷新失效。
+      return ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+                height: MediaQuery.sizeOf(context).height * .6,
+                child: Center(child: Text(emptyText)))
+          ]);
+    }
     return RefreshIndicator(
-        onRefresh: () async => onRetry(),
-        child: ListView(children: items.map(itemBuilder).toList()));
+        onRefresh: () async {
+          if (busy) return;
+          onRetry();
+        },
+        child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: items.map(itemBuilder).toList()));
   }
 }
 

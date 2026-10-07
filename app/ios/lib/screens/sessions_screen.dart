@@ -197,12 +197,27 @@ class WorkspaceScreen extends StatelessWidget {
 }
 
 class _SessionsScreenState extends State<SessionsScreen> {
+  /// 一页的条数，与服务端 `/sessions` 默认上限一致。
+  static const _pageSize = 50;
+
+  /// 触发「加载更多」的距离 buffer：距离列表底部不足这个值才触发。
+  /// 没有它，滚动中途一次轻微的惯性滑动就会误触发下一页（防误触）。
+  static const _loadMoreBuffer = 400.0;
+
   final query = TextEditingController();
+  final scroll = ScrollController();
   List<Session> sessions = [];
   List<Session> pinned = [];
   final Set<String> selectedSources = {};
+  int _total = 0;
   bool loading = true;
+  bool _refreshing = false;
+  bool _loadingMore = false;
+  String? _moreError;
   String? error;
+
+  /// 已取条数追上服务端 total 才算到底；total 未知时不显示「没有更多了」。
+  bool get hasMore => sessions.length < _total;
 
   @override
   void initState() {
@@ -213,31 +228,88 @@ class _SessionsScreenState extends State<SessionsScreen> {
   @override
   void dispose() {
     query.dispose();
+    scroll.dispose();
     super.dispose();
   }
 
+  /// 下拉 / 刷新按钮 / 首次进入共用的整列表刷新。
+  ///
+  /// 返回真实完成的 Future：RefreshIndicator 拿它决定指示器何时收起 ——
+  /// 之前指示器「一闪就没」就是因为把一个立刻完成的空 Future 交给了它。
+  /// 同一时刻只允许一个刷新或加载更多在飞（防抖 + 单飞）。
   Future<void> load() async {
-    if (!mounted) return;
+    if (!mounted || _refreshing || _loadingMore) return;
     setState(() {
-      loading = true;
+      _refreshing = true;
       error = null;
+      // 只有首屏（还没有任何数据）才整页转圈；已有列表时刷新交给
+      // RefreshIndicator 表达，避免把用户正在看的列表整个拆掉。
+      if (sessions.isEmpty) loading = true;
     });
     try {
       final result = await Future.wait([
-        widget.api.sessions(query: query.text),
+        widget.api.sessionsPage(query: query.text, limit: _pageSize),
         widget.api.pinnedSessions(),
       ]);
-      if (mounted) {
-        setState(() {
-          sessions = result[0];
-          pinned = result[1];
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        sessions = (result[0] as SessionPage).sessions;
+        _total = (result[0] as SessionPage).total;
+        pinned = result[1] as List<Session>;
+        _moreError = null;
+      });
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (mounted) {
+        setState(() {
+          loading = false;
+          _refreshing = false;
+        });
+      }
     }
+  }
+
+  /// 加载下一页并追加。失败只把错误写在 footer 上，绝不动已有列表。
+  Future<void> _loadMore() async {
+    if (!mounted || loading || _refreshing || _loadingMore || !hasMore) return;
+    setState(() {
+      _loadingMore = true;
+      _moreError = null;
+    });
+    try {
+      final page = await widget.api.sessionsPage(
+          query: query.text, limit: _pageSize, offset: sessions.length);
+      if (!mounted) return;
+      setState(() {
+        // 追加前按 id 去重：刷新窗口里服务端水位变了，offset 可能与旧页重叠。
+        final known = {for (final session in sessions) session.id};
+        sessions = [
+          ...sessions,
+          ...page.sessions.where((session) => !known.contains(session.id)),
+        ];
+        _total = page.total;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _moreError = e.toString());
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  /// 滚动触底（不足 [_loadMoreBuffer]）时加载下一页。
+  /// [_loadingMore] 单飞 + [hasMore] 兜底，footer 正在加载或已到底时忽略。
+  bool _onScroll(ScrollNotification notification) {
+    if (notification is! ScrollUpdateNotification &&
+        notification is! ScrollEndNotification) {
+      return false;
+    }
+    final metrics = notification.metrics;
+    if (metrics.maxScrollExtent - metrics.pixels > _loadMoreBuffer) {
+      return false;
+    }
+    _loadMore();
+    return false;
   }
 
   Future<void> _delete(Session session) async {
@@ -381,10 +453,49 @@ class _SessionsScreenState extends State<SessionsScreen> {
                 ]),
       );
 
+  /// 列表尾部：加载中 / 加载失败重试 / 到底提示。数据未满一页时返回占位。
+  Widget _listFooter(BuildContext context) {
+    final textStyle = Theme.of(context)
+        .textTheme
+        .bodySmall
+        ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant);
+    if (_moreError != null) {
+      return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 18),
+          child: Column(children: [
+            Text('加载更多失败：$_moreError',
+                textAlign: TextAlign.center, style: textStyle),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+                onPressed: _loadMore,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('重试')),
+          ]));
+    }
+    if (_loadingMore) {
+      return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 18),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 10),
+            Text('加载中…', style: textStyle),
+          ]));
+    }
+    if (!hasMore && sessions.isNotEmpty) {
+      return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 18),
+          child: Center(child: Text('没有更多了', style: textStyle)));
+    }
+    return const SizedBox.shrink();
+  }
+
   @override
   Widget build(BuildContext context) => EthanPage(
         title: '全部对话',
-        subtitle: '${sessions.length} 个会话',
+        subtitle: '${_total > 0 ? _total : sessions.length} 个会话',
         actions: [
           IconButton(
               onPressed: loading ? null : load,
@@ -440,36 +551,55 @@ class _SessionsScreenState extends State<SessionsScreen> {
           Expanded(
               child: loading
                   ? const Center(child: CircularProgressIndicator())
-                  : _sourceFiltered.isEmpty
-                      ? EmptyHint(
-                          icon: Icons.chat_bubble_outline_rounded,
-                          text: selectedSources.isEmpty
-                              ? '暂无会话，去对话页开始第一段交流吧'
-                              : '没有符合当前来源筛选的会话',
-                          actionLabel: selectedSources.isEmpty ? null : '清除筛选',
-                          onAction: selectedSources.isEmpty
-                              ? null
-                              : () => setState(selectedSources.clear),
-                        )
-                      : RefreshIndicator(
-                          onRefresh: load,
-                          child: ListView(children: [
-                            if (_filteredPinned.isNotEmpty) ...[
-                              const SectionLabel('置顶会话'),
-                              ..._filteredPinned.map(_sessionTile),
-                              const Divider(),
-                            ],
-                            if (_sourceFiltered.isNotEmpty)
-                              const SectionLabel('全部会话'),
-                            ..._sourceFiltered
-                                .where((session) =>
-                                    !_filteredPinned
-                                        .any((item) => item.id == session.id) &&
-                                    (selectedSources.isEmpty ||
-                                        selectedSources
-                                            .contains(session.source)))
-                                .map(_sessionTile),
-                          ]))),
+                  : RefreshIndicator(
+                      onRefresh: load,
+                      child: _sourceFiltered.isEmpty
+                          ? ListView(
+                              // 空态也包一层可滚动列表：空列表同样能下拉刷新。
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              children: [
+                                  SizedBox(
+                                      height:
+                                          MediaQuery.sizeOf(context).height *
+                                              .6,
+                                      child: EmptyHint(
+                                        icon: Icons.chat_bubble_outline_rounded,
+                                        text: selectedSources.isEmpty
+                                            ? '暂无会话，去对话页开始第一段交流吧'
+                                            : '没有符合当前来源筛选的会话',
+                                        actionLabel: selectedSources.isEmpty
+                                            ? null
+                                            : '清除筛选',
+                                        onAction: selectedSources.isEmpty
+                                            ? null
+                                            : () =>
+                                                setState(selectedSources.clear),
+                                      ))
+                                ])
+                          : NotificationListener<ScrollNotification>(
+                              onNotification: _onScroll,
+                              child: ListView(
+                                  controller: scroll,
+                                  physics:
+                                      const AlwaysScrollableScrollPhysics(),
+                                  children: [
+                                    if (_filteredPinned.isNotEmpty) ...[
+                                      const SectionLabel('置顶会话'),
+                                      ..._filteredPinned.map(_sessionTile),
+                                      const Divider(),
+                                    ],
+                                    if (_sourceFiltered.isNotEmpty)
+                                      const SectionLabel('全部会话'),
+                                    ..._sourceFiltered
+                                        .where((session) =>
+                                            !_filteredPinned.any((item) =>
+                                                item.id == session.id) &&
+                                            (selectedSources.isEmpty ||
+                                                selectedSources
+                                                    .contains(session.source)))
+                                        .map(_sessionTile),
+                                    _listFooter(context),
+                                  ])))),
         ]),
       );
 
