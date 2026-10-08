@@ -144,7 +144,6 @@ class OpenAICompatProvider(BaseProvider):
         """
         import logging as _log
         _lg = _log.getLogger("ethan.providers.openai_compat")
-        last_exc: Exception | None = None
         for attempt in range(_MAX_CONNECT_RETRIES + 1):
             try:
                 return await self._client.chat.completions.create(**kwargs)  # type: ignore
@@ -155,26 +154,22 @@ class OpenAICompatProvider(BaseProvider):
                         attempt + 1, _MAX_CONNECT_RETRIES, e,
                     )
                     await asyncio.sleep(_CONNECT_RETRY_BACKOFF * (attempt + 1))
-                    last_exc = e
                     continue
-                last_exc = e
-                break
-        _lg.error("[stream_chat] API error: %s", last_exc)
-        _lg.error("[stream_chat] model=%s, messages=%d, tools=%d",
-                  kwargs.get("model"), len(kwargs.get("messages", [])), len(kwargs.get("tools", [])))
-        if kwargs.get("tools"):
-            _lg.error("[stream_chat] tool_names=%s", [t["function"]["name"] for t in kwargs["tools"]])
-        # dump 第一个 tool schema 帮助定位
-        if kwargs.get("tools"):
-            _lg.error("[stream_chat] first_tool_params=%s", json.dumps(kwargs["tools"][0]["function"].get("parameters", {}), ensure_ascii=False)[:500])
-        # dump messages 摘要
-        for i, m in enumerate(kwargs.get("messages", [])):
-            role = m.get("role", "?")
-            content = m.get("content")
-            content_preview = str(content)[:100] if content else "(None)"
-            _lg.error("[stream_chat] msg[%d] role=%s content=%s", i, role, content_preview)
-        assert last_exc is not None
-        raise last_exc
+                _lg.error("[stream_chat] API error: %s", e)
+                _lg.error("[stream_chat] model=%s, messages=%d, tools=%d",
+                          kwargs.get("model"), len(kwargs.get("messages", [])), len(kwargs.get("tools", [])))
+                if kwargs.get("tools"):
+                    _lg.error("[stream_chat] tool_names=%s", [t["function"]["name"] for t in kwargs["tools"]])
+                # dump 第一个 tool schema 帮助定位
+                if kwargs.get("tools"):
+                    _lg.error("[stream_chat] first_tool_params=%s", json.dumps(kwargs["tools"][0]["function"].get("parameters", {}), ensure_ascii=False)[:500])
+                # dump messages 摘要
+                for i, m in enumerate(kwargs.get("messages", [])):
+                    role = m.get("role", "?")
+                    content = m.get("content")
+                    content_preview = str(content)[:100] if content else "(None)"
+                    _lg.error("[stream_chat] msg[%d] role=%s content=%s", i, role, content_preview)
+                raise
 
     @staticmethod
     def _parse_usage(usage) -> dict:
