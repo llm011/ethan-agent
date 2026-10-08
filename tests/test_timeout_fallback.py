@@ -142,6 +142,31 @@ class TestGetTimeoutFallback:
         agent = _make_agent()
         assert agent._get_timeout_fallback(p1) is None
 
+    def test_connect_error_routes_to_fallback(self, monkeypatch, breaker):
+        """连接类错误（含 APIConnectionError / MidstreamBreakError）与超时同路径，
+        未产出内容时换备选模型重试（PR #410）。"""
+        from openai import APIConnectionError
+
+        p1 = _provider("m1")
+        created = _provider("cfg/fallback")
+        monkeypatch.setattr(agent_mod, "get_config", lambda: _Cfg("cfg/fallback"))
+        monkeypatch.setattr(agent_mod, "create_provider", lambda m: created)
+        agent = _make_agent()
+
+        fb = agent._get_timeout_fallback(p1)
+        assert fb is created
+
+        # 分类器契约：连接类错误全部命中
+        assert agent_mod._is_retriable_connect_error(
+            APIConnectionError(request=MagicMock())
+        )
+        from ethan.providers.base import MidstreamBreakError
+
+        assert agent_mod._is_retriable_connect_error(
+            MidstreamBreakError("重试耗尽")
+        )
+        assert not agent_mod._is_retriable_connect_error(ValueError("bad request"))
+
     def test_create_provider_failure_returns_none(self, monkeypatch, breaker):
         p1 = _provider("m1")
 

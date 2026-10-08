@@ -68,7 +68,11 @@ def _friendly_error(e: Exception, agent) -> str:
         local_hint = ""
         provider = getattr(agent, "_provider", None)
         base_url = getattr(provider, "_base_url", "") or ""
-        host = urlparse(base_url).hostname or ""
+        try:
+            host = urlparse(base_url).hostname or ""
+        except ValueError:
+            # 畸形 base_url（如残缺 IPv6）：按非本机处理，不让异常处理器自己崩
+            host = ""
         if host in ("127.0.0.1", "localhost", "0.0.0.0", "::1"):
             local_hint = "（当前走本地网关，多为网关上游临时故障，稍后重试或重启网关）"
         return f"请求上游服务失败（可能中转服务不可达）：{msg[:120]}。建议在设置页切换 model 重试。{local_hint}"

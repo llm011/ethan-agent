@@ -71,11 +71,17 @@ _CONNECT_RETRY_KEYWORDS = MIDSTREAM_BREAK_KEYWORDS + (
 
 
 def _is_transient_connect_error(e: Exception) -> bool:
-    """建连阶段的错误是否值得重试：仅瞬态连接类，鉴权/参数类错误立即抛出。"""
+    """建连阶段的错误是否值得重试：仅瞬态连接类，鉴权/参数类错误立即抛出。
+
+    APITimeoutError 是 APIConnectionError 的子类，必须排除：网关「接受连接后
+    挂着不响应」时要等满 120s 客户端超时才抛，若重试 2 次就是 3×120s≈6 分钟——
+    正是 __init__ 禁用 SDK 重试要避免的最坏情况。超时留给 agent 层备选模型
+    路径兜底（fallback._is_retriable 的 "timed out" 关键词能接住）。
+    """
     try:
-        from openai import APIConnectionError  # lazy: 与 SDK 导入保持同处
+        from openai import APIConnectionError, APITimeoutError  # lazy: 与 SDK 导入保持同处
         if isinstance(e, APIConnectionError):
-            return True
+            return not isinstance(e, APITimeoutError)
     except ImportError:
         pass
     msg = str(e).lower()

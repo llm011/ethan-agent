@@ -62,7 +62,13 @@ def _is_image_error(e: Exception) -> bool:
 
 def _is_retriable_connect_error(e: Exception) -> bool:
     """连接类瞬态错误（建连失败/网关断连），当前 provider 上已无可挽回时
-    值得换备选模型重试。复用 fallback 层的瞬态判断，避免两份列表漂移。"""
+    值得换备选模型重试。复用 fallback 层的瞬态判断，避免两份列表漂移。
+
+    注意：MidstreamBreakError（流中断重试耗尽）也在可重试之列——provider 层
+    重试耗尽后，配置了兜底模型的环境会再换备选模型重发一轮，而非直接让用户
+    手动重发。这是有意为之（与 FallbackProvider 换 provider 行为一致）；
+    仅在无兜底模型时异常才会冒泡、触发「重新发送」文案。
+    """
     from ethan.providers.fallback import _is_retriable
 
     return _is_retriable(e)

@@ -75,6 +75,16 @@ def test_connection_error_is_transient():
     assert _is_transient_connect_error(err) is True
 
 
+def test_api_timeout_error_is_not_transient():
+    """APITimeoutError 是 APIConnectionError 的子类，必须排除：挂着不响应的
+    网关要等满 120s 才抛超时，重试会把最坏情况放大到 3×120s。"""
+    from openai import APITimeoutError
+
+    httpx_req = MagicMock()
+    err = APITimeoutError(request=httpx_req)
+    assert _is_transient_connect_error(err) is False
+
+
 def test_auth_error_is_not_transient():
     from openai import AuthenticationError
 
@@ -123,6 +133,39 @@ def test_retries_exhausted_raises():
         asyncio.run(provider._create_stream_with_retry(kwargs))
     # 初始 + _MAX_CONNECT_RETRIES 次重试
     assert provider._client.chat.completions.create.await_count == 1 + 2
+
+
+def test_real_api_connection_error_retried():
+    """用真实 APIConnectionError（isinstance 路径）验证重试循环。"""
+    from openai import APIConnectionError
+
+    provider = _make_provider()
+    good = _fake_stream_response(["ok"])
+
+    provider._client.chat.completions.create = AsyncMock(
+        side_effect=[APIConnectionError(request=MagicMock()), good]
+    )
+
+    kwargs = {"model": "test-model", "messages": [{"role": "user", "content": "hi"}]}
+    resp = asyncio.run(provider._create_stream_with_retry(kwargs))
+    assert resp is good
+    assert provider._client.chat.completions.create.await_count == 2
+
+
+def test_api_timeout_error_not_retried():
+    """APITimeoutError（网关挂起 120s 才抛）不重试，避免 3×120s 最坏情况。"""
+    from openai import APITimeoutError
+
+    provider = _make_provider()
+
+    provider._client.chat.completions.create = AsyncMock(
+        side_effect=APITimeoutError(request=MagicMock())
+    )
+
+    kwargs = {"model": "test-model", "messages": [{"role": "user", "content": "hi"}]}
+    with pytest.raises(Exception):
+        asyncio.run(provider._create_stream_with_retry(kwargs))
+    assert provider._client.chat.completions.create.await_count == 1
 
 
 def test_non_transient_error_no_retry():
