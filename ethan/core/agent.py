@@ -60,6 +60,14 @@ def _is_image_error(e: Exception) -> bool:
     return any(p in msg for p in _IMAGE_ERROR_PATTERNS)
 
 
+def _is_retriable_connect_error(e: Exception) -> bool:
+    """连接类瞬态错误（建连失败/网关断连），当前 provider 上已无可挽回时
+    值得换备选模型重试。复用 fallback 层的瞬态判断，避免两份列表漂移。"""
+    from ethan.providers.fallback import _is_retriable
+
+    return _is_retriable(e)
+
+
 def _save_msg_images_to_files(msg: Message, session_id: str) -> list[str]:
     """把消息中的图片写入本地文件，返回绝对路径列表。
 
@@ -1319,12 +1327,12 @@ class Agent:
                         if chunk.is_final:
                             final_chunk = chunk
                             self.usage.add(chunk.usage)
-                elif isinstance(e, TimeoutError) and not full_content:
+                elif (isinstance(e, TimeoutError) or _is_retriable_connect_error(e)) and not full_content:
                     _timeout_fb = self._get_timeout_fallback(provider)
                     if _timeout_fb is not None:
                         logger.warning(
-                            "stream_chat() iter=%d 模型响应超时，切换备选模型重试: %s → %s",
-                            i + 1, provider.model, _timeout_fb.model,
+                            "stream_chat() iter=%d 模型响应超时/连接失败，切换备选模型重试: %s → %s: %s",
+                            i + 1, provider.model, _timeout_fb.model, e,
                         )
                         full_content = ""
                         final_chunk = None
