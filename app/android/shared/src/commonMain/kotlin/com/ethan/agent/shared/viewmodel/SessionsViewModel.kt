@@ -54,6 +54,11 @@ data class SessionsUiState(
      * 排除定时/心跳/后台会话，而抽屉恰恰要展示这三类的专属分组 —— 两者必须分开喂。
      */
     val drawerSessions: List<SessionInfo> = emptyList(),
+    /**
+     * 当前有活跃生成 run 的会话 id（`GET /poll` 的 active_sessions）。
+     * 会话卡片据此显示「生成中」指示器（对齐桌面端 Sidebar 的做法）。
+     */
+    val activeSessionIds: Set<String> = emptySet(),
 ) {
     /** 按类别筛选：默认「全部对话」不显示定时/心跳/后台（对齐 web —— 它们有专属入口） */
     private val categoryFiltered: List<SessionInfo>
@@ -106,6 +111,26 @@ class SessionsViewModel(
         }
     }
 
+    /**
+     * 把一轮 `/poll` 的结果写进状态。抽屉、主列表、active 集合三条都从这里走，
+     * 避免各调用点只写自己关心的那块、漏掉其他（历史上 snippet 合并就是这么漏的）。
+     */
+    private fun applyPollResult(sessions: List<SessionInfo>, keepCategoryView: Boolean) {
+        updateState { st ->
+            // /api/poll 是轻量接口，不回 snippet（首条 query 预览）——直接灌回
+            // 会把刚加载好的卡片预览 3 秒后冲成空。按 id 把旧列表的 snippet
+            // 补回去（轮询里新出现的会话本来就没有，置 null 不动）。
+            val prevSnippets = st.sessions.associate { it.id to it.snippet }
+            val merged = sessions.map { s -> s.copy(snippet = s.snippet ?: prevSnippets[s.id]) }
+            st.copy(
+                // 抽屉始终吃未过滤全量列表（它要展示定时/心跳分组）
+                drawerSessions = sessions,
+                // 类别视图是 fetchCategory 按前缀专属拉的，轮询的全量列表不能冲掉它
+                sessions = if (keepCategoryView) st.sessions else merged,
+            )
+        }
+    }
+
     init {
         load()
         startPolling()
@@ -136,8 +161,10 @@ class SessionsViewModel(
             // 现在带 hide_* 过滤参数，读出来会缺定时/心跳，抽屉分组就空了）
             launch {
                 try {
-                    val all = repository.poll()
-                    updateState { it.copy(drawerSessions = all) }
+                    val data = repository.pollWithActive()
+                    updateState {
+                        it.copy(drawerSessions = data.sessions, activeSessionIds = data.activeSessions.toSet())
+                    }
                 } catch (_: Exception) {}
             }
             if (query.isBlank()) {
@@ -176,24 +203,13 @@ class SessionsViewModel(
 
     private suspend fun refreshQuietly() {
         try {
-            val sessions = repository.poll()
+            val data = repository.pollWithActive()
             // 正在查看的会话若服务端还标着未读（/read 丢包，或落消息时没有订阅者），
             // 补一次上报：本地红点已被乐观水位按住，这里是为了让 Web/桌面端也同步消掉
-            unreadTracker.activeNeedsReadReport(sessions)?.let { reportReadToServer(it) }
+            unreadTracker.activeNeedsReadReport(data.sessions)?.let { reportReadToServer(it) }
             if (_state.value.query.isBlank()) {
-                updateState { st ->
-                    // /api/poll 是轻量接口，不回 snippet（首条 query 预览）——直接灌回
-                    // 会把刚加载好的卡片预览 3 秒后冲成空。按 id 把旧列表的 snippet
-                    // 补回去（轮询里新出现的会话本来就没有，置 null 不动）。
-                    val prevSnippets = st.sessions.associate { it.id to it.snippet }
-                    val merged = sessions.map { s -> s.copy(snippet = s.snippet ?: prevSnippets[s.id]) }
-                    st.copy(
-                        // 抽屉始终吃未过滤全量列表（它要展示定时/心跳分组）
-                        drawerSessions = sessions,
-                        // 类别视图是 fetchCategory 按前缀专属拉的，轮询的全量列表不能冲掉它
-                        sessions = if (st.categoryFilter.isEmpty()) merged else st.sessions,
-                    )
-                }
+                applyPollResult(data.sessions, keepCategoryView = _state.value.categoryFilter.isNotEmpty())
+                updateState { it.copy(activeSessionIds = data.activeSessions.toSet()) }
             }
         } catch (_: Exception) {}
     }

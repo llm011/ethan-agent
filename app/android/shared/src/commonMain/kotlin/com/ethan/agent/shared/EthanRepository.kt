@@ -32,6 +32,7 @@ import com.ethan.agent.core.model.ModeEntry
 import com.ethan.agent.core.model.ModelEntry
 import com.ethan.agent.core.model.OnboardingCompleteRequest
 import com.ethan.agent.core.model.OnboardingStatus
+import com.ethan.agent.core.model.PollData
 import com.ethan.agent.core.model.Procedure
 import com.ethan.agent.core.model.ProcedureUpdateRequest
 import com.ethan.agent.core.model.ProviderConfig
@@ -209,6 +210,16 @@ class EthanRepository(
 
     suspend fun poll(): List<SessionInfo> {
         return api.poll().sessions
+    }
+
+    /**
+     * 轮询并带上「哪些会话正在生成」（`/poll` 的 active_sessions）。
+     *
+     * 会话列表的「生成中」指示器靠它驱动；旧实现只取 sessions、把 active 集合丢掉，
+     * 列表上就看不出哪个对话还在跑。
+     */
+    suspend fun pollWithActive(): PollData {
+        return api.poll()
     }
 
     // ---------- Stale-while-revalidate cached Flows ----------
