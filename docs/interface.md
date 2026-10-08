@@ -516,6 +516,28 @@ iOS（Flutter，`app/ios`）目前**没有**会话列表红点，只有聊天页
 
 ### 会话页：生成中反馈与右上角动作
 
+**切入「正在生成中」的会话必须立即呈现进行中状态并接流**（Android `ChatViewModel.loadInitial`
+的 `active_run` 分支）：
+
+- 服务端 `GET /sessions/{id}` 回 `active_run`（producer 未结束），`GET /poll` 回
+  `active_sessions`（活跃会话 id 列表）。Android 的 `SessionDetail.activeRun` /
+  `PollData.activeSessions` / `Message.status` 三个字段解析缺一不可——旧实现根本没解析
+  这些字段，切进生成中的会话时界面静得像什么都没发生（无 loading、无过程输出、
+  看不出还在跑），这是「active_run 状态展示」任务里漏掉的最后一块。
+- `loadInitial` 拿到**网络刷新**的详情后若 `active_run=true`，立即
+  `resumeStreamIfNeeded(force = false)`：`resumeStream` 自带幂等闸门（isStreaming/isResuming），
+  重复触发无害。**只在网络那份触发，缓存快照不触发**——缓存里的 active_run 是上次退出
+  页面时的旧值，接上去多半接到一条 204 空流。旧后端缺字段 → false（按无活跃 run 兜底）。
+- 接流走的是既有的 `GET /chat/{id}/stream`（**从头回放 + 实时推送**）：过程输出（工具步骤、
+  正文增量）由 `collectSseStream` 的回放甄别（`appendContent` 取较长者）原样复用，
+  不需要为「切进生成中的会话」另写一套解析。历史快照里 `status=generating` 的半截
+  assistant 消息在 UI 上保留 `isStreaming`（打字点动画），流接上后由既有收敛逻辑覆写。
+- 会话列表的「生成中」指示器由 `/poll` 的 `active_sessions` 驱动（Android `SessionsViewModel`
+  的 `activeSessionIds` + `SessionCard` 转圈，对齐桌面端 Sidebar 的做法），run 结束后
+  下一轮轮询自动消失，不需要前端做额外的收敛。
+
+三端（Web `message-bubble.tsx` / Android `TypingDots` / iOS `TypingDots`）用同一套语义：
+
 三端（Web `message-bubble.tsx` / Android `TypingDots` / iOS `TypingDots`）用同一套语义：
 **生成中用三个错峰呼吸的点**，而不是转圈。转圈读作「这个控件在忙 / 加载失败」，
 三点才读作「对方正在打字」。Android 在气泡角色名行尾 + 「思考中…」前各放一处，

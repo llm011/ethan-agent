@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -299,6 +300,7 @@ fun SessionsScreen(
                             SessionCard(
                                 session = session,
                                 isRegening = session.id in state.regeningIds,
+                                isActive = session.id in state.activeSessionIds,
                                 onClick = { onSessionClick(session.id) },
                                 onRename = { onRename(session) },
                                 onDelete = { onDelete(session.id) },
@@ -323,6 +325,7 @@ fun SessionsScreen(
                         SessionCard(
                             session = session,
                             isRegening = session.id in state.regeningIds,
+                            isActive = session.id in state.activeSessionIds,
                             onClick = { onSessionClick(session.id) },
                             onRename = { onRename(session) },
                             onDelete = { onDelete(session.id) },
@@ -352,6 +355,7 @@ private fun GroupHeader(title: String) {
 private fun SessionCard(
     session: SessionInfo,
     isRegening: Boolean,
+    isActive: Boolean = false,
     onClick: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -386,6 +390,17 @@ private fun SessionCard(
                         modifier = Modifier.size(14.dp),
                     )
                     androidx.compose.foundation.layout.Spacer(Modifier.size(4.dp))
+                }
+                // 「正在生成」指示器（对齐桌面端 Sidebar 的 Loader2 转圈）：
+                // 服务端 /poll 的 active_sessions 驱动，轮询结束后自动消失。
+                // 与 isRegening（标题重生成中）是两回事，但视觉上用同一种转圈表达「在忙」。
+                if (isActive) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(12.dp),
+                        strokeWidth = 1.5.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
                 }
                 Text(
                     if (isRegening) "生成中..." else session.title,
