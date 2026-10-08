@@ -180,6 +180,25 @@ class TestFriendlyErrorClassification:
         msg = _friendly_error(RuntimeError("Connection error."), None)
         assert "中转服务不可达" in msg
 
+    def test_local_gateway_connection_error_gets_gateway_hint(self):
+        """provider base_url 指向本机时，追加本地网关排查提示。"""
+        from ethan.interface.routers.helpers import _friendly_error
+
+        agent = MagicMock()
+        agent._provider._base_url = "http://127.0.0.1:8787/v1"
+        msg = _friendly_error(RuntimeError("Connection error."), agent)
+        assert "中转服务不可达" in msg
+        assert "本地网关" in msg
+
+    def test_remote_base_url_no_gateway_hint(self):
+        """远程 base_url 不追加本地网关提示。"""
+        from ethan.interface.routers.helpers import _friendly_error
+
+        agent = MagicMock()
+        agent._provider._base_url = "https://api.example.com/v1"
+        msg = _friendly_error(RuntimeError("Connection error."), agent)
+        assert "本地网关" not in msg
+
     def test_broken_pipe_gets_continue_hint(self):
         """BrokenPipeError（"[Errno 32] Broken pipe"）含共享关键词 broken pipe →
         不再落到裸错误分支。"""

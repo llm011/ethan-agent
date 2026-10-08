@@ -55,6 +55,37 @@ __all__ = [
 
 _CHUNK_TIMEOUT = 120  # 单个 chunk 超时（秒）
 _MAX_STREAM_BREAK_RETRIES = 2
+# 建连/发请求阶段（create() 调用）对瞬态连接类错误的最大重试次数。
+# SDK 内部重试已禁用（max_retries=0，见 __init__ 注释），重试上移到应用层：
+# 可观测（有日志）、有界（最坏 ~1.6s 退避）、只对连接类错误生效。
+_MAX_CONNECT_RETRIES = 2
+_CONNECT_RETRY_BACKOFF = 0.8  # 秒，按 attempt 线性退避
+
+# 建连阶段可重试的错误消息关键词。MIDSTREAM_BREAK_KEYWORDS 覆盖流读取阶段的
+# 断连特征（remoteprotocolerror / peer closed 等）；这里额外补上建连阶段常见的
+# "server disconnected"（网关接受连接后未回响应即断开，openai SDK 会包装成
+# APIConnectionError("Connection error.")，其 __cause__ 是 RemoteProtocolError）。
+_CONNECT_RETRY_KEYWORDS = MIDSTREAM_BREAK_KEYWORDS + (
+    "server disconnected", "connection error", "fetch failed",
+)
+
+
+def _is_transient_connect_error(e: Exception) -> bool:
+    """建连阶段的错误是否值得重试：仅瞬态连接类，鉴权/参数类错误立即抛出。
+
+    APITimeoutError 是 APIConnectionError 的子类，必须排除：网关「接受连接后
+    挂着不响应」时要等满 120s 客户端超时才抛，若重试 2 次就是 3×120s≈6 分钟——
+    正是 __init__ 禁用 SDK 重试要避免的最坏情况。超时留给 agent 层备选模型
+    路径兜底（fallback._is_retriable 的 "timed out" 关键词能接住）。
+    """
+    try:
+        from openai import APIConnectionError, APITimeoutError  # lazy: 与 SDK 导入保持同处
+        if isinstance(e, APIConnectionError):
+            return not isinstance(e, APITimeoutError)
+    except ImportError:
+        pass
+    msg = str(e).lower()
+    return any(k in msg for k in _CONNECT_RETRY_KEYWORDS)
 
 
 class OpenAICompatProvider(BaseProvider):
@@ -109,6 +140,46 @@ class OpenAICompatProvider(BaseProvider):
 
     def _parse_choice(self, choice, usage=None) -> Message:
         return _responses.parse_choice(choice, usage)
+
+    async def _create_with_retry(self, kwargs: dict, *, dump_request_on_fail: bool = False):
+        """create() 建连 + 有界重试：仅对瞬态连接类错误重试，其余立即抛出。
+
+        网关/中转上游抖动时常见「接受连接后不回响应直接断开」（SDK 报
+        APIConnectionError("Connection error.")），此时退避后重建一次往往就能过。
+        dump_request_on_fail 时最终失败会打请求摘要帮助排查（流式路径既有行为）。
+        """
+        import logging as _log
+        _lg = _log.getLogger("ethan.providers.openai_compat")
+        for attempt in range(_MAX_CONNECT_RETRIES + 1):
+            try:
+                return await self._client.chat.completions.create(**kwargs)  # type: ignore
+            except Exception as e:
+                if attempt < _MAX_CONNECT_RETRIES and _is_transient_connect_error(e):
+                    _lg.warning(
+                        "[stream_chat] connect error with no output, retry %d/%d: %s",
+                        attempt + 1, _MAX_CONNECT_RETRIES, e,
+                    )
+                    await asyncio.sleep(_CONNECT_RETRY_BACKOFF * (attempt + 1))
+                    continue
+                if dump_request_on_fail:
+                    _lg.error("[stream_chat] API error: %s", e)
+                    _lg.error("[stream_chat] model=%s, messages=%d, tools=%d",
+                              kwargs.get("model"), len(kwargs.get("messages", [])), len(kwargs.get("tools", [])))
+                    if kwargs.get("tools"):
+                        _lg.error("[stream_chat] tool_names=%s", [t["function"]["name"] for t in kwargs["tools"]])
+                    # dump 第一个 tool schema 帮助定位
+                    if kwargs.get("tools"):
+                        _lg.error("[stream_chat] first_tool_params=%s", json.dumps(kwargs["tools"][0]["function"].get("parameters", {}), ensure_ascii=False)[:500])
+                    # dump messages 摘要
+                    for i, m in enumerate(kwargs.get("messages", [])):
+                        role = m.get("role", "?")
+                        content = m.get("content")
+                        content_preview = str(content)[:100] if content else "(None)"
+                        _lg.error("[stream_chat] msg[%d] role=%s content=%s", i, role, content_preview)
+                raise
+
+    async def _create_stream_with_retry(self, kwargs: dict):
+        return await self._create_with_retry(kwargs, dump_request_on_fail=True)
 
     @staticmethod
     def _parse_usage(usage) -> dict:
@@ -217,7 +288,9 @@ class OpenAICompatProvider(BaseProvider):
             state = "disabled" if disable_thinking else "enabled"
             kwargs["extra_body"] = {"thinking": {"type": state}}
 
-        response = await self._client.chat.completions.create(**kwargs)
+        # 建连重试与非流式共用：schedule/标题压缩等后台任务走本路径，上游抖动时
+        # 此前是直接失败（日志表现为 "Schedule fire error: Connection error"）。
+        response = await self._create_with_retry(kwargs)
         if not response.choices:
             raise RuntimeError("模型返回空 choices（可能触发内容过滤、配额用尽或服务异常）")
         return self._parse_choice(response.choices[0], response.usage)
@@ -250,27 +323,7 @@ class OpenAICompatProvider(BaseProvider):
         stream_usage = None
         content_buf = ""  # 缓冲区：检测 DSML 标记
 
-        try:
-            resp_iter = await self._client.chat.completions.create(**kwargs)  # type: ignore
-        except Exception as e:
-            # 打印请求摘要帮助排查
-            import logging as _log
-            _lg = _log.getLogger("ethan.providers.openai_compat")
-            _lg.error("[stream_chat] API error: %s", e)
-            _lg.error("[stream_chat] model=%s, messages=%d, tools=%d",
-                      kwargs.get("model"), len(kwargs.get("messages", [])), len(kwargs.get("tools", [])))
-            if kwargs.get("tools"):
-                _lg.error("[stream_chat] tool_names=%s", [t["function"]["name"] for t in kwargs["tools"]])
-            # dump 第一个 tool schema 帮助定位
-            if kwargs.get("tools"):
-                _lg.error("[stream_chat] first_tool_params=%s", json.dumps(kwargs["tools"][0]["function"].get("parameters", {}), ensure_ascii=False)[:500])
-            # dump messages 摘要
-            for i, m in enumerate(kwargs.get("messages", [])):
-                role = m.get("role", "?")
-                content = m.get("content")
-                content_preview = str(content)[:100] if content else "(None)"
-                _lg.error("[stream_chat] msg[%d] role=%s content=%s", i, role, content_preview)
-            raise
+        resp_iter = await self._create_stream_with_retry(kwargs)
 
         aiter = resp_iter.__aiter__()
         _break_retries = 0  # 中途断连（未产出内容时）已重试次数
@@ -333,7 +386,7 @@ class OpenAICompatProvider(BaseProvider):
                     _break_retries, _MAX_STREAM_BREAK_RETRIES, e
                 )
                 await asyncio.sleep(0.6 * _break_retries)
-                resp_iter = await self._client.chat.completions.create(**kwargs)  # type: ignore
+                resp_iter = await self._create_stream_with_retry(kwargs)
                 aiter = resp_iter.__aiter__()
                 continue
             delta = chunk.choices[0].delta if chunk.choices else None

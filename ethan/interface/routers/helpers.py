@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 from typing import AsyncGenerator
+from urllib.parse import urlparse
 
 from ethan.core.context_limit import is_input_length_error
 from ethan.providers.base import MIDSTREAM_BREAK_KEYWORDS, Message, MidstreamBreakError
@@ -62,7 +63,19 @@ def _friendly_error(e: Exception, agent) -> str:
         return "上游连接在生成中途断开（多见于中转服务不稳或网络抖动）。已生成内容已保存，可直接发「继续」补全，或在设置页切换 model 重试。"
     # 网络层 fetch failed（多见于第三方中转服务挂了）——建立连接就失败，无任何内容产出
     if "fetch failed" in lower or "connection" in lower or "timeout" in lower:
-        return f"请求上游服务失败（可能中转服务不可达）：{msg[:120]}。建议在设置页切换 model 重试。"
+        # base_url 指向本机（本地网关如 buddy-proxy）时，故障多在网关的上游侧，
+        # 切换 model 不一定有用，给可操作的排查提示。
+        local_hint = ""
+        provider = getattr(agent, "_provider", None)
+        base_url = getattr(provider, "_base_url", "") or ""
+        try:
+            host = urlparse(base_url).hostname or ""
+        except ValueError:
+            # 畸形 base_url（如残缺 IPv6）：按非本机处理，不让异常处理器自己崩
+            host = ""
+        if host in ("127.0.0.1", "localhost", "0.0.0.0", "::1"):
+            local_hint = "（当前走本地网关，多为网关上游临时故障，稍后重试或重启网关）"
+        return f"请求上游服务失败（可能中转服务不可达）：{msg[:120]}。建议在设置页切换 model 重试。{local_hint}"
     # SQLite database locked — 瞬态并发冲突，任务本身已完成，不应暴露给用户
     if "database is locked" in lower:
         return ""
