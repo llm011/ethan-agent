@@ -159,3 +159,38 @@ def test_stream_chat_recovers_from_connect_error():
 
     assert asyncio.run(_run()) == "你好！"
     assert provider._client.chat.completions.create.await_count == 2
+
+
+# ---------------------------------------------------------------------------
+# 非流式 chat() 建连重试（schedule/标题压缩等后台任务路径）
+# ---------------------------------------------------------------------------
+
+def test_non_stream_chat_recovers_from_connect_error():
+    provider = _make_provider()
+    good = MagicMock()
+    good.choices = [MagicMock()]
+    # parse_choice 会读 message.content / message.tool_calls 做解析，须给真值
+    good.choices[0].message.content = "ok"
+    good.choices[0].message.tool_calls = None
+    good.choices[0].finish_reason = "stop"
+    good.usage = None
+
+    provider._client.chat.completions.create = AsyncMock(
+        side_effect=[ConnectionError("Connection error."), good]
+    )
+
+    resp = asyncio.run(provider.chat([Message(role="user", content="hi")]))
+    assert resp.content == "ok"
+    assert provider._client.chat.completions.create.await_count == 2
+
+
+def test_non_stream_chat_no_retry_on_auth_error():
+    provider = _make_provider()
+
+    provider._client.chat.completions.create = AsyncMock(
+        side_effect=RuntimeError("Invalid API key provided")
+    )
+
+    with pytest.raises(RuntimeError, match="Invalid API key"):
+        asyncio.run(provider.chat([Message(role="user", content="hi")]))
+    assert provider._client.chat.completions.create.await_count == 1

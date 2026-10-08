@@ -261,7 +261,7 @@ providers:
 - tool result 的 role 就是 `"tool"`，不需要包在 user 消息里
 - reasoning 模型（如 deepseek-reasoner）把思考放在 `delta.reasoning_content`（部分中转放在 `model_extra` 里），Provider 会读出并收进 `StreamChunk.reasoning`，与正文 `content` 分流
 - 流式中途断连（`peer closed connection` / `incomplete chunked read` 等，多见于中转不稳）：已产出内容时以 `truncated` 收尾、由 Agent 层自动续接；未产出内容时退避重试最多 2 次，仍失败抛 `MidstreamBreakError`（用户提示为"重试失败、重新发送"，而非"发「继续」"）。断连关键词（`MIDSTREAM_BREAK_KEYWORDS`）由 provider 层与 interface 层共用，定义在 `ethan/providers/base.py`
-- 建连阶段（`create()` 调用，SDK 内部重试已禁用 `max_retries=0`）对瞬态连接类错误（`APIConnectionError` / `server disconnected` 等）有界重试最多 2 次（线性退避 0.8s/1.6s），鉴权、参数类错误立即抛出。Agent 层在未产出内容时还会把连接类错误交给备选模型兜底（与超时同路径）。
+- 建连阶段（`create()` 调用，SDK 内部重试已禁用 `max_retries=0`）对瞬态连接类错误（`APIConnectionError` / `server disconnected` 等）有界重试最多 2 次（线性退避 0.8s/1.6s），鉴权、参数类错误立即抛出；流式与非流式 `chat()`（schedule/标题压缩等后台任务路径）共用。Agent 层在未产出内容时还会把连接类错误交给备选模型兜底（与超时同路径）。
 
 ### 文本型工具调用（网关把 tool call 序列化成了正文）
 

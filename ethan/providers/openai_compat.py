@@ -135,12 +135,12 @@ class OpenAICompatProvider(BaseProvider):
     def _parse_choice(self, choice, usage=None) -> Message:
         return _responses.parse_choice(choice, usage)
 
-    async def _create_stream_with_retry(self, kwargs: dict):
+    async def _create_with_retry(self, kwargs: dict, *, dump_request_on_fail: bool = False):
         """create() 建连 + 有界重试：仅对瞬态连接类错误重试，其余立即抛出。
 
         网关/中转上游抖动时常见「接受连接后不回响应直接断开」（SDK 报
         APIConnectionError("Connection error.")），此时退避后重建一次往往就能过。
-        最终失败时 dump 请求摘要帮助排查（与既有行为一致）。
+        dump_request_on_fail 时最终失败会打请求摘要帮助排查（流式路径既有行为）。
         """
         import logging as _log
         _lg = _log.getLogger("ethan.providers.openai_compat")
@@ -155,21 +155,25 @@ class OpenAICompatProvider(BaseProvider):
                     )
                     await asyncio.sleep(_CONNECT_RETRY_BACKOFF * (attempt + 1))
                     continue
-                _lg.error("[stream_chat] API error: %s", e)
-                _lg.error("[stream_chat] model=%s, messages=%d, tools=%d",
-                          kwargs.get("model"), len(kwargs.get("messages", [])), len(kwargs.get("tools", [])))
-                if kwargs.get("tools"):
-                    _lg.error("[stream_chat] tool_names=%s", [t["function"]["name"] for t in kwargs["tools"]])
-                # dump 第一个 tool schema 帮助定位
-                if kwargs.get("tools"):
-                    _lg.error("[stream_chat] first_tool_params=%s", json.dumps(kwargs["tools"][0]["function"].get("parameters", {}), ensure_ascii=False)[:500])
-                # dump messages 摘要
-                for i, m in enumerate(kwargs.get("messages", [])):
-                    role = m.get("role", "?")
-                    content = m.get("content")
-                    content_preview = str(content)[:100] if content else "(None)"
-                    _lg.error("[stream_chat] msg[%d] role=%s content=%s", i, role, content_preview)
+                if dump_request_on_fail:
+                    _lg.error("[stream_chat] API error: %s", e)
+                    _lg.error("[stream_chat] model=%s, messages=%d, tools=%d",
+                              kwargs.get("model"), len(kwargs.get("messages", [])), len(kwargs.get("tools", [])))
+                    if kwargs.get("tools"):
+                        _lg.error("[stream_chat] tool_names=%s", [t["function"]["name"] for t in kwargs["tools"]])
+                    # dump 第一个 tool schema 帮助定位
+                    if kwargs.get("tools"):
+                        _lg.error("[stream_chat] first_tool_params=%s", json.dumps(kwargs["tools"][0]["function"].get("parameters", {}), ensure_ascii=False)[:500])
+                    # dump messages 摘要
+                    for i, m in enumerate(kwargs.get("messages", [])):
+                        role = m.get("role", "?")
+                        content = m.get("content")
+                        content_preview = str(content)[:100] if content else "(None)"
+                        _lg.error("[stream_chat] msg[%d] role=%s content=%s", i, role, content_preview)
                 raise
+
+    async def _create_stream_with_retry(self, kwargs: dict):
+        return await self._create_with_retry(kwargs, dump_request_on_fail=True)
 
     @staticmethod
     def _parse_usage(usage) -> dict:
@@ -278,7 +282,9 @@ class OpenAICompatProvider(BaseProvider):
             state = "disabled" if disable_thinking else "enabled"
             kwargs["extra_body"] = {"thinking": {"type": state}}
 
-        response = await self._client.chat.completions.create(**kwargs)
+        # 建连重试与非流式共用：schedule/标题压缩等后台任务走本路径，上游抖动时
+        # 此前是直接失败（日志表现为 "Schedule fire error: Connection error"）。
+        response = await self._create_with_retry(kwargs)
         if not response.choices:
             raise RuntimeError("模型返回空 choices（可能触发内容过滤、配额用尽或服务异常）")
         return self._parse_choice(response.choices[0], response.usage)
