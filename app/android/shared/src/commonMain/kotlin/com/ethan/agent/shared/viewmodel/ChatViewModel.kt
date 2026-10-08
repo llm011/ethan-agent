@@ -596,9 +596,10 @@ class ChatViewModel(
             usage = msg.usage,
             quote = msg.quote,
             createdAt = msg.createdAt,
-            // 服务端标着 generating 的 assistant 消息（历史快照里的半截正文）在界面上
-            // 仍以「正在生成」的气泡呈现（打字点动画），生成结束后由流式收敛逻辑覆写。
-            isStreaming = msg.role == "assistant" && msg.status == "generating",
+            // 服务端标着 running 的 assistant 消息（进度占位行，带半截正文/工具步骤）在
+            // 界面上仍以「正在生成」的气泡呈现（打字点动画），流接上后由既有收敛逻辑覆写。
+            // 词汇表与服务端一致：running | completed | interrupted | stopped。
+            isStreaming = msg.role == "assistant" && msg.status == "running",
             images = msg.images?.mapNotNull { img ->
                 img.url?.let { UiMessageImage(displayUrl = "${serverUrl.trimEnd('/')}/api/${it}") }
             } ?: emptyList(),

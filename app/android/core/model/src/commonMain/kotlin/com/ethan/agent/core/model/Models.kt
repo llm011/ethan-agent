@@ -189,9 +189,11 @@ data class Message(
     val images: List<MessageImage>? = null,
     val cards: List<FileCard>? = null,
     /**
-     * 服务端消息状态：`completed`（默认）/ `generating` / `error` 等。
-     * 「切进生成中的会话」场景下，最后一条 assistant 消息可能是 generating —— 历史快照
-     * 里它带着半截正文，界面要把它当成「还在写」的气泡而不是已完成的消息。
+     * 服务端消息状态：`completed`（默认）/ `running`（生成中的进度占位行）/
+     * `interrupted` / `stopped` —— 与服务端 `Message.status` 的词汇表一致
+     * （`ethan/providers/base.py`：running | completed | interrupted | stopped）。
+     * 「切进生成中的会话」场景下，最后一条 assistant 消息可能是 running —— 历史快照
+     * 里它带着半截正文/工具步骤，界面要把它当成「还在写」的气泡而不是已完成的消息。
      */
     val status: String = "completed",
 )

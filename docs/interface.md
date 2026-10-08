@@ -530,13 +530,12 @@ iOS（Flutter，`app/ios`）目前**没有**会话列表红点，只有聊天页
   页面时的旧值，接上去多半接到一条 204 空流。旧后端缺字段 → false（按无活跃 run 兜底）。
 - 接流走的是既有的 `GET /chat/{id}/stream`（**从头回放 + 实时推送**）：过程输出（工具步骤、
   正文增量）由 `collectSseStream` 的回放甄别（`appendContent` 取较长者）原样复用，
-  不需要为「切进生成中的会话」另写一套解析。历史快照里 `status=generating` 的半截
-  assistant 消息在 UI 上保留 `isStreaming`（打字点动画），流接上后由既有收敛逻辑覆写。
+  不需要为「切进生成中的会话」另写一套解析。历史快照里 `status=running`（进度占位行）
+  的半截 assistant 消息在 UI 上保留 `isStreaming`（打字点动画），流接上后由既有收敛逻辑
+  覆写。状态词汇表与服务端一致：`running | completed | interrupted | stopped`。
 - 会话列表的「生成中」指示器由 `/poll` 的 `active_sessions` 驱动（Android `SessionsViewModel`
   的 `activeSessionIds` + `SessionCard` 转圈，对齐桌面端 Sidebar 的做法），run 结束后
   下一轮轮询自动消失，不需要前端做额外的收敛。
-
-三端（Web `message-bubble.tsx` / Android `TypingDots` / iOS `TypingDots`）用同一套语义：
 
 三端（Web `message-bubble.tsx` / Android `TypingDots` / iOS `TypingDots`）用同一套语义：
 **生成中用三个错峰呼吸的点**，而不是转圈。转圈读作「这个控件在忙 / 加载失败」，

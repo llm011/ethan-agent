@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
  * - `SessionDetail.active_run`：切进正在生成的会话时，前端据此立即呈现进行中状态并接流。
  *   **旧后端不返回该字段 → false**（按「没有活跃 run」兜底），不能因为字段缺失抛异常。
  * - `PollData.active_sessions`：会话列表「生成中」指示器的数据源。旧后端缺失 → 空集合。
- * - `Message.status`：历史快照里 generating 的 assistant 消息要渲染成「还在写」的气泡。
+ * - `Message.status`：历史快照里 running（生成中进度行）的 assistant 消息要渲染成「还在写」的气泡。
  */
 class ActiveRunJsonTest {
 
@@ -64,11 +64,12 @@ class ActiveRunJsonTest {
     }
 
     @Test
-    fun messageParsesGeneratingStatus() {
+    fun messageParsesRunningStatus() {
+        // 服务端词汇表：running | completed | interrupted | stopped（无 generating）
         val m = json.decodeFromString(
             Message.serializer(),
-            """{"role":"assistant","content":"partial","status":"generating"}""",
+            """{"role":"assistant","content":"partial","status":"running"}""",
         )
-        assertEquals("generating", m.status)
+        assertEquals("running", m.status)
     }
 }
