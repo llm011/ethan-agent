@@ -121,6 +121,53 @@ def test_plain_runtime_error_is_not_transient():
     assert _is_transient_connect_error(RuntimeError("something exploded")) is False
 
 
+@pytest.mark.parametrize("code", [500, 501, 502, 503, 504, 599])
+def test_http_5xx_is_transient(code):
+    """建连阶段收到 5xx（含裸 500，截图里那个 badcase）要重试，不能直接冒泡
+    中断会话。此前只把连接类异常判为瞬态，网关回 500 时会当场失败。"""
+    from openai import APIStatusError
+
+    resp = MagicMock()
+    resp.status_code = code
+    err = APIStatusError(f"Error code: {code}", response=resp, body=None)
+    assert _is_transient_connect_error(err) is True
+
+
+def test_http_500_internal_server_error_is_transient():
+    from openai import InternalServerError
+
+    resp = MagicMock()
+    resp.status_code = 500
+    err = InternalServerError("Error code: 500", response=resp, body=None)
+    assert _is_transient_connect_error(err) is True
+
+
+@pytest.mark.parametrize("code", [400, 401, 403, 404, 413, 422])
+def test_http_4xx_except_429_not_transient(code):
+    """4xx（鉴权/参数/上下文超限）重试没有意义，必须立即抛出——
+    400 另有裁剪历史/剥图的专门兜底路径。"""
+    from openai import APIStatusError
+
+    resp = MagicMock()
+    resp.status_code = code
+    err = APIStatusError(f"Error code: {code}", response=resp, body=None)
+    assert _is_transient_connect_error(err) is False
+
+
+def test_http_429_is_transient():
+    from openai import APIStatusError
+
+    resp = MagicMock()
+    resp.status_code = 429
+    err = APIStatusError("rate limited", response=resp, body=None)
+    assert _is_transient_connect_error(err) is True
+
+
+def test_500_text_keyword_is_transient():
+    # 网关把 5xx 压成纯文本、拿不到 status_code 时的兜底识别
+    assert _is_transient_connect_error(RuntimeError("500 Internal Server Error")) is True
+
+
 # ---------------------------------------------------------------------------
 # _create_stream_with_retry
 # ---------------------------------------------------------------------------

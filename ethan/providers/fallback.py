@@ -2,9 +2,13 @@
 
 Retry classification:
   - Network errors (connect, timeout, remote protocol) → retriable, try next provider
-  - HTTP 502/503/504 from upstream → retriable
+  - HTTP 429 / all 5xx from upstream → retriable
   - Auth errors, bad request (4xx except 429) → non-retriable, raise immediately
-  - Rate-limit (429) → retriable (different provider may have quota)
+
+5xx 一律重试，而不是只列 502/503/504：中转网关把上游故障统一压成 500
+（截图里的 badcase 就是 500），只认那三个常见码会让主 provider 的首次 500
+直接冒泡终结整个会话——用户看到的就是"模型调用失败即中断"。5xx 语义上都是
+服务端瞬态故障，换 provider / 退避重试都值得一试。
 
 For stream_chat, fallback only kicks in if the error occurs before the first
 chunk has been yielded.  Mid-stream failures are re-raised because the caller
@@ -13,6 +17,7 @@ has already seen partial output.
 from __future__ import annotations
 
 import logging
+import re
 from typing import AsyncIterator
 
 from ethan.providers.base import (
@@ -38,7 +43,10 @@ def _is_retriable(e: Exception) -> bool:
         if isinstance(e, (httpx.ConnectError, httpx.TimeoutException,
                           httpx.RemoteProtocolError, httpx.ReadError)):
             return True
-        if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (429, 502, 503, 504):
+        # 429 之外的服务端错误一律重试（5xx）。4xx 里只有 429 是瞬态。
+        if isinstance(e, httpx.HTTPStatusError) and (
+            e.response.status_code == 429 or e.response.status_code >= 500
+        ):
             return True
     except ImportError:
         pass
@@ -47,7 +55,7 @@ def _is_retriable(e: Exception) -> bool:
         from openai import APIConnectionError, APIStatusError
         if isinstance(e, APIConnectionError):
             return True
-        if isinstance(e, APIStatusError) and e.status_code in (429, 502, 503, 504):
+        if isinstance(e, APIStatusError) and (e.status_code == 429 or e.status_code >= 500):
             return True
     except ImportError:
         pass
@@ -56,18 +64,33 @@ def _is_retriable(e: Exception) -> bool:
         import anthropic
         if isinstance(e, anthropic.APIConnectionError):
             return True
-        if isinstance(e, anthropic.APIStatusError) and e.status_code in (429, 502, 503, 504):
+        if isinstance(e, anthropic.APIStatusError) and (
+            e.status_code == 429 or e.status_code >= 500
+        ):
             return True
     except ImportError:
         pass
 
     # Keyword fallback: must be a known transient pattern, not arbitrary business errors.
     # Intentionally narrow — "connection" alone matches too many non-network strings.
+    #
+    # 纯文本 5xx 判定要排除「本身是 4xx、正文里引用/转述了上游 5xx」的情形：
+    # SDK 的 4xx 文案形如 "Error code: 400 - ..."，此处已拿不到 status_code
+    # （拿得到的话上面 isinstance(APIStatusError) 分支早就 return 了），只能靠
+    # 前缀自证不是 4xx。漏判的代价只是少切一次上游；误判则会在 FallbackProvider
+    # 里 record_failure 连累健康 provider 被熔断，且挡掉 400 该走的裁剪/剥图兜底。
     msg = str(e).lower()
+    if re.search(r"error code:\s*4\d\d", msg):
+        return False
     return any(k in msg for k in (
         "connection error", "connectionerror", "connection reset",
         "timeout", "timed out",
         "fetch failed",
+        # 网关把上游 5xx 压成文本错误时（无 status_code 可用）兜底识别：
+        # "500 internal server error" / "502 bad gateway" …
+        # 只带状态码前缀的形态，不用裸 "internal server error"——子串匹配不看
+        # 状态码，裸词会命中任意正文里的这六个字。
+        "500 internal server error",
         "502 bad gateway", "503 service", "504 gateway",
         "remote end closed", "unexpected eof",
     ))

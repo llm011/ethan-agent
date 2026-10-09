@@ -261,8 +261,11 @@ providers:
 - tool result 的 role 就是 `"tool"`，不需要包在 user 消息里
 - reasoning 模型（如 deepseek-reasoner）把思考放在 `delta.reasoning_content`（部分中转放在 `model_extra` 里），Provider 会读出并收进 `StreamChunk.reasoning`，与正文 `content` 分流
 - 流式中途断连（`peer closed connection` / `incomplete chunked read` 等，多见于中转不稳）：已产出内容时以 `truncated` 收尾、由 Agent 层自动续接；未产出内容时退避重试最多 2 次，仍失败抛 `MidstreamBreakError`（用户提示为"重试失败、重新发送"，而非"发「继续」"）。断连关键词（`MIDSTREAM_BREAK_KEYWORDS`）由 provider 层与 interface 层共用，定义在 `ethan/providers/base.py`
-- 建连阶段（`create()` 调用，SDK 内部重试已禁用 `max_retries=0`）对瞬态连接类错误（`APIConnectionError` / `server disconnected` 等）有界重试最多 2 次（线性退避 0.8s/1.6s），鉴权、参数类错误立即抛出；流式与非流式 `chat()`（schedule/标题压缩等后台任务路径）共用。Agent 层在未产出内容时还会把连接类错误交给备选模型兜底（与超时同路径）。
+- 建连阶段（`create()` 调用，SDK 内部重试已禁用 `max_retries=0`）对瞬态连接类错误（`APIConnectionError` / `server disconnected` 等）**以及所有 5xx（含裸 500）**有界重试最多 2 次（线性退避 0.8s/1.6s），4xx（鉴权/参数/上下文超限，429 除外）立即抛出；流式与非流式 `chat()`（schedule/标题压缩等后台任务路径）共用。Agent 层在未产出内容时还会把连接类错误交付备选模型兜底（与超时同路径）。
+  > **5xx 一律重试**（`_is_transient_connect_error` / `fallback._is_retriable` 同为 `status_code == 429 or >= 500`）：中转网关常把上游故障统一压成 500，早先只白名单 502/503/504，导致首次 500 直接冒泡中断整个会话（表现为「模型调用失败即中断」）。5xx 语义上都是服务端瞬态故障，换 provider / 退避重试都值得一试。
+  > **文本兜底只认带状态码前缀的形态**（`"500 internal server error"` / `"502 bad gateway"` …），且带 `"error code: 4xx"` 前缀的文案直接判不可重试：关键词是子串匹配、不看状态码，裸 `"internal server error"` 会命中 400 正文里转述上游 5xx 的情况——误判会让 `FallbackProvider` 对健康 provider `record_failure`（3 次即熔断 OPEN），还挡掉 400 该走的裁剪/剥图兜底路径。
 - 首请求超时（`APITimeoutError`，建连成功但上游 120s 未吐首字节）单独重试最多 1 次（最坏 2×120s≈4 分钟，不与连接类错误的 2 次叠加）。上游偶发抖动时同配置相邻请求时好时坏，重发一次往往就能救回整轮（线上手机端「发送后转圈 2 分钟最终失败」即此形态）。Agent 层兜底链：有备选模型（`fallback_model` / FallbackProvider 链）→ 切换备选；无备选 → 同模型重发 1 次；仍失败才判中断。错误文案归入「上游模型响应超时，已自动重试仍未成功」，不再透传英文原文（`Request timed out.`）。
+- **备选模型（fallback）的判定同源**：`fallback_providers` / `defaults.fallback_model` 组成的 `FallbackProvider` 在首个 chunk 产出前遇到可重试错误（连接类、429、5xx）会依次切下一个 provider，并配合 `circuit_breaker.py` 做 5min→10min→20min→40min→60min 的指数退避熔断；一旦已产出内容则不再切换（避免重复内容），交由上游的 `truncated` 续接路径处理。
 
 ### 文本型工具调用（网关把 tool call 序列化成了正文）
 
