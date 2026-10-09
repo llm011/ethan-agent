@@ -74,21 +74,36 @@ _TIMEOUT_RETRY_BACKOFF = 1.0  # 秒
 # APIConnectionError("Connection error.")，其 __cause__ 是 RemoteProtocolError）。
 _CONNECT_RETRY_KEYWORDS = MIDSTREAM_BREAK_KEYWORDS + (
     "server disconnected", "connection error", "fetch failed",
+    # 网关把上游 5xx 压成纯文本错误（拿不到 status_code）时兜底识别
+    "500 internal server error", "internal server error",
 )
 
 
 def _is_transient_connect_error(e: Exception) -> bool:
-    """建连阶段的错误是否值得重试：仅瞬态连接类，鉴权/参数类错误立即抛出。
+    """建连阶段的错误是否值得重试：瞬态连接类 + 服务端 5xx，鉴权/参数类立即抛出。
 
     APITimeoutError 是 APIConnectionError 的子类，必须排除出本判断（走下方
     专属的超时重试路径，次数更少）：网关「接受连接后挂着不响应」时要等满
-    120s 客户端超时才抛，若与连接类错误同享 2 次重试就是 3×120s≈6 分钟——
-    正是 __init__ 禁用 SDK 重试要避免的最坏情况。
+    120s 客户端超时才抛，若重试 2 次就是 3×120s≈6 分钟——正是 __init__ 禁用
+    SDK 重试要避免的最坏情况。超时留给 _is_first_request_timeout 单独重试
+    1 次，再由 agent 层备选模型路径兜底。
+
+    HTTP 5xx（含截图里的 500）同属服务端瞬态故障：网关接受请求后回 500 时，
+    若判为不可重试，错误会直接冒泡中断整个会话（用户看到「模型调用失败即中断」）。
+    429/502/503/504 之外的 5xx 同样重试；4xx（鉴权/参数/上下文超限）仍立即抛出，
+    那些重试没有意义，且 400 有专门的裁剪/剥图兜底路径。
     """
     try:
-        from openai import APIConnectionError, APITimeoutError  # lazy: 与 SDK 导入保持同处
+        from openai import (  # lazy: 与 SDK 导入保持同处
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+        )
         if isinstance(e, APIConnectionError):
             return not isinstance(e, APITimeoutError)
+        # 429（限流）与所有 5xx 视为瞬态；其余 4xx 立即抛出。
+        if isinstance(e, APIStatusError):
+            return e.status_code == 429 or e.status_code >= 500
     except ImportError:
         pass
     msg = str(e).lower()
