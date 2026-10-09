@@ -17,6 +17,7 @@ has already seen partial output.
 from __future__ import annotations
 
 import logging
+import re
 from typing import AsyncIterator
 
 from ethan.providers.base import (
@@ -72,14 +73,24 @@ def _is_retriable(e: Exception) -> bool:
 
     # Keyword fallback: must be a known transient pattern, not arbitrary business errors.
     # Intentionally narrow — "connection" alone matches too many non-network strings.
+    #
+    # 纯文本 5xx 判定要排除「本身是 4xx、正文里引用/转述了上游 5xx」的情形：
+    # SDK 的 4xx 文案形如 "Error code: 400 - ..."，此处已拿不到 status_code
+    # （拿得到的话上面 isinstance(APIStatusError) 分支早就 return 了），只能靠
+    # 前缀自证不是 4xx。漏判的代价只是少切一次上游；误判则会在 FallbackProvider
+    # 里 record_failure 连累健康 provider 被熔断，且挡掉 400 该走的裁剪/剥图兜底。
     msg = str(e).lower()
+    if re.search(r"error code:\s*4\d\d", msg):
+        return False
     return any(k in msg for k in (
         "connection error", "connectionerror", "connection reset",
         "timeout", "timed out",
         "fetch failed",
         # 网关把上游 5xx 压成文本错误时（无 status_code 可用）兜底识别：
         # "500 internal server error" / "502 bad gateway" …
-        "500 internal server error", "internal server error",
+        # 只带状态码前缀的形态，不用裸 "internal server error"——子串匹配不看
+        # 状态码，裸词会命中任意正文里的这六个字。
+        "500 internal server error",
         "502 bad gateway", "503 service", "504 gateway",
         "remote end closed", "unexpected eof",
     ))

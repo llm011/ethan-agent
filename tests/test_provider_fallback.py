@@ -197,7 +197,37 @@ class TestIsRetriable:
     def test_500_text_keyword_retriable(self):
         # 网关把 5xx 压成纯文本、拿不到 status_code 时的兜底识别
         assert _is_retriable(RuntimeError("500 Internal Server Error from upstream"))
-        assert _is_retriable(RuntimeError("Internal server error"))
+        assert _is_retriable(RuntimeError("Error: 500 internal server error"))
+
+    def test_bare_internal_server_error_text_not_retriable(self):
+        """裸 "internal server error" 不再算可重试：这里是子串匹配、不看状态码。
+
+        裸词会命中「400 ... upstream returned 500 internal server error」这类
+        4xx 正文，误判后 FallbackProvider 会 record_failure 连累健康 provider
+        熔断（3 次即 OPEN），同时挡掉 400 该走的裁剪/剥图兜底路径。
+        """
+        assert not _is_retriable(RuntimeError("Internal server error"))
+
+    def test_4xx_text_with_transient_words_not_retriable(self):
+        """4xx 文案里带瞬态词（含引用上游 5xx）不算可重试。
+
+        拿得到 status_code 时上面的 APIStatusError 分支已直接判定；走文案兜底的
+        场景已无 status_code，只能靠 "Error code: 4xx" 前缀自证不是 4xx。
+        """
+        assert not _is_retriable(
+            RuntimeError("400 invalid_request_error: tool call failed; internal server error in arguments")
+        )
+        assert not _is_retriable(
+            RuntimeError("Error code: 400 - upstream returned 500 Internal Server Error")
+        )
+        assert not _is_retriable(RuntimeError("Error code: 401 - Unauthorized: connection error"))
+        assert not _is_retriable(RuntimeError("Error code: 429 - rate limited"))
+        # 真实 400 状态对象仍可重试判定不受影响
+        import httpx
+        import openai
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(429, request=req, json={})
+        assert _is_retriable(openai.APIStatusError("rate limited", response=resp, body=None))
 
 
 # ---------------------------------------------------------------------------

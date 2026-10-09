@@ -74,8 +74,10 @@ _TIMEOUT_RETRY_BACKOFF = 1.0  # 秒
 # APIConnectionError("Connection error.")，其 __cause__ 是 RemoteProtocolError）。
 _CONNECT_RETRY_KEYWORDS = MIDSTREAM_BREAK_KEYWORDS + (
     "server disconnected", "connection error", "fetch failed",
-    # 网关把上游 5xx 压成纯文本错误（拿不到 status_code）时兜底识别
-    "500 internal server error", "internal server error",
+    # 网关把上游 5xx 压成纯文本错误（拿不到 status_code）时兜底识别。
+    # 只带状态码前缀，不用裸 "internal server error"——子串匹配不看状态码，
+    # 裸词会把 400 正文里引用的上游文案也判成可重试（详见 fallback._is_retriable）。
+    "500 internal server error",
 )
 
 
