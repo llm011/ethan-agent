@@ -1,0 +1,71 @@
+# Ethan Agent — 部署用 docker-compose（CI 单容器镜像）
+#
+# 镜像由 GitHub Actions 构建发布（ghcr.io/llm011/ethan-agent），
+# 内含 API + Web UI（同端口 8900）与 SearXNG 搜索实例。
+#
+# 用法：
+#   cp .env.example .env   # 填入 API Key 等配置
+#   docker compose pull
+#   docker compose up -d
+#   docker compose logs -f ethan        # 首行有 Web UI token
+#
+# 更新：docker compose pull && docker compose up -d
+
+services:
+  ethan:
+    image: ghcr.io/llm011/ethan-agent:latest
+    container_name: ethan-agent
+    restart: unless-stopped
+    ports:
+      - "${ETHAN_PORT:-8900}:8900"
+    volumes:
+      # 挂载宿主机 ~/.ethan 目录（直接持久化到本机，方便查看/备份/迁移）
+      - ~/.ethan:/root/.ethan
+      # 共享宿主机密钥（只读）
+      # lark-cli 目录如需持久化，可再加：- ./.lark-cli:/root/.lark-cli
+      # gh CLI 配置（只读，可选）。token 认证见下方 GH_TOKEN。
+      - ~/.config:/root/.config
+      - /Volumes/SSDExt/documents/obsidian/knowledge:/root/obsidian/knowledge
+    # 清理 lark-cli event bus daemon 可能残留的 stale socket/pid/lock 文件
+    # （容器被 SIGKILL 时 daemon 来不及清理，导致重启后 exit=5 崩溃循环）。
+    # 用 bash 大括号扩展 + glob 删除，避免 docker compose 折叠标量把
+    # find 的 \( ... \) 反斜杠吞掉导致 bash syntax error。
+    command: >
+      bash -c "
+        rm -f /root/.lark-cli/events/*/bus.{sock,pid,alive.lock,fork.lock} 2>/dev/null;
+        ethan setup &&
+        echo '' &&
+        TOKEN=$$(awk '/auth_token:/{print $$2}' /root/.ethan/config.yaml 2>/dev/null); echo '🔑 Web UI Token:' $${TOKEN:-(未设置)} &&
+        echo '' &&
+        exec ethan serve --port 8900
+      "
+    environment:
+      # gh CLI token（可选；让容器内 gh 可用。export GH_TOKEN=$(gh auth token)）
+      - GH_TOKEN=${GH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-}
+      - AGENT_LITE_MODEL=${AGENT_LITE_MODEL:-}
+      - ETHAN_AUTH_TOKEN=${ETHAN_AUTH_TOKEN:-}
+      - ETHAN_PROXY=${ETHAN_PROXY:-}
+      - SEARXNG_BASE_URL=http://searxng:8080
+    depends_on:
+      searxng:
+        condition: service_healthy
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: ethan-searxng
+    restart: unless-stopped
+    ports:
+      - "${SEARXNG_PORT:-8888}:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
