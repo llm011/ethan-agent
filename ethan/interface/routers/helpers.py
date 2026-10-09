@@ -53,6 +53,17 @@ def _friendly_error(e: Exception, agent) -> str:
     # 失败。此时说"已生成内容已保存"是不实文案，用户发「继续」也接不上任何内容。
     if isinstance(e, MidstreamBreakError):
         return "上游连接中断且自动重试失败，本次未产出任何内容。可直接重新发送，或在设置页切换 model 重试。"
+    # 首请求/流式超时（openai "Request timed out." / 流式 chunk 120s 超时）。
+    # 必须放在通用 timeout 分支之前：openai 的文案是 "Request timed out."，
+    # 不含 "timeout" 子串，漏进后面会原样把英文报错透给用户（线上事故
+    # s_20261009_1653_abce 手机端只看到 "Request timed out."，无任何指引）。
+    # 两类超时 now 都有自动重试兜底（provider 层 1 次 + agent 层同模型/备选
+    # 模型重试），走到这里说明全部失败，如实告知并给可操作建议。
+    if "timed out" in lower or "timeout" in lower or "超过 120 秒" in msg:
+        return (
+            "上游模型响应超时（多为临时拥堵或网络抖动），已自动重试仍未成功。"
+            "请稍后重新发送，或持续出现时在设置页切换 model。"
+        )
     # 流式输出中途断连（上游/中转在生成过程中关闭了连接，含 TLS 记录层中断）。
     # 必须放在通用 connection 判断之前：这类错误消息里通常也含 "connection"
     # （如 "peer closed connection without sending complete message body"），

@@ -76,13 +76,31 @@ def test_connection_error_is_transient():
 
 
 def test_api_timeout_error_is_not_transient():
-    """APITimeoutError 是 APIConnectionError 的子类，必须排除：挂着不响应的
-    网关要等满 120s 才抛超时，重试会把最坏情况放大到 3×120s。"""
+    """APITimeoutError 是 APIConnectionError 的子类，必须排除出连接类重试：
+    挂着不响应的网关要等满 120s 才抛超时，与连接类同享 2 次重试会把最坏情况
+    放大到 3×120s。超时走专属路径（_is_first_request_timeout，最多 1 次）。"""
     from openai import APITimeoutError
 
     httpx_req = MagicMock()
     err = APITimeoutError(request=httpx_req)
     assert _is_transient_connect_error(err) is False
+
+
+def test_timeout_message_is_not_transient():
+    """文案层面的超时（"Request timed out."）也不进连接类重试。"""
+    assert _is_transient_connect_error(RuntimeError("Request timed out.")) is False
+
+
+def test_first_request_timeout_detection():
+    """_is_first_request_timeout：SDK 类型 + 文案两条路径都要接住。"""
+    from openai import APITimeoutError
+
+    from ethan.providers.openai_compat import _is_first_request_timeout
+
+    assert _is_first_request_timeout(APITimeoutError(request=MagicMock())) is True
+    assert _is_first_request_timeout(RuntimeError("Request timed out.")) is True
+    assert _is_first_request_timeout(RuntimeError("Connection error.")) is False
+    assert _is_first_request_timeout(RuntimeError("Invalid API key")) is False
 
 
 def test_auth_error_is_not_transient():
@@ -152,8 +170,30 @@ def test_real_api_connection_error_retried():
     assert provider._client.chat.completions.create.await_count == 2
 
 
-def test_api_timeout_error_not_retried():
-    """APITimeoutError（网关挂起 120s 才抛）不重试，避免 3×120s 最坏情况。"""
+def test_api_timeout_error_retried_once():
+    """首请求超时（APITimeoutError）重试 1 次后仍失败才抛。
+
+    线上事故（s_202609… 手机端发送后 loading 2 分钟整轮失败）：上游偶发
+    120s 内不吐首字节，同配置相邻请求时好时坏。此前不重试直接冒泡，
+    现在重试 1 次（最坏 2×120s≈4 分钟，不会像连接类错误那样放大到 3×120s）。
+    """
+    from openai import APITimeoutError
+
+    provider = _make_provider()
+    good = _fake_stream_response(["ok"])
+
+    provider._client.chat.completions.create = AsyncMock(
+        side_effect=[APITimeoutError(request=MagicMock()), good]
+    )
+
+    kwargs = {"model": "test-model", "messages": [{"role": "user", "content": "hi"}]}
+    resp = asyncio.run(provider._create_stream_with_retry(kwargs))
+    assert resp is good
+    assert provider._client.chat.completions.create.await_count == 2
+
+
+def test_api_timeout_error_exhausts_retry():
+    """首请求超时重试 1 次后仍超时：抛出（不再重试，交给 agent 层兜底）。"""
     from openai import APITimeoutError
 
     provider = _make_provider()
@@ -165,7 +205,8 @@ def test_api_timeout_error_not_retried():
     kwargs = {"model": "test-model", "messages": [{"role": "user", "content": "hi"}]}
     with pytest.raises(Exception):
         asyncio.run(provider._create_stream_with_retry(kwargs))
-    assert provider._client.chat.completions.create.await_count == 1
+    # 初始 + _MAX_TIMEOUT_RETRIES（1）次
+    assert provider._client.chat.completions.create.await_count == 2
 
 
 def test_non_transient_error_no_retry():

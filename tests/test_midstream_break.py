@@ -216,3 +216,31 @@ class TestFriendlyErrorClassification:
         )
         assert "未产出任何内容" in msg
         assert "已生成内容已保存" not in msg
+
+    def test_request_timed_out_gets_timeout_hint(self):
+        """openai 首请求超时（"Request timed out."，不含 "timeout" 子串）不能
+        原样透传英文报错——线上事故 s_20261009_1653_abce 手机端只看到这一句。
+        """
+        from ethan.interface.routers.helpers import _friendly_error
+
+        msg = _friendly_error(RuntimeError("Request timed out."), None)
+        assert "超时" in msg
+        assert "重新发送" in msg
+        assert msg != "Request timed out."
+
+    def test_stream_chunk_timeout_gets_timeout_hint(self):
+        """流式 chunk 120s 超时（openai_compat TimeoutError）走同一条友好文案。"""
+        from ethan.interface.routers.helpers import _friendly_error
+
+        msg = _friendly_error(
+            TimeoutError("模型响应超时：超过 120 秒未收到新数据，可能是 API 挂起。"), None
+        )
+        assert "超时" in msg
+        assert "重新发送" in msg
+
+    def test_generic_timeout_keyword_gets_timeout_hint(self):
+        """其他含 "timeout" 的网络层报错同样归入超时文案（不再是裸英文）。"""
+        from ethan.interface.routers.helpers import _friendly_error
+
+        msg = _friendly_error(RuntimeError("Read timeout while waiting for upstream"), None)
+        assert "超时" in msg
