@@ -42,4 +42,5 @@ jobs:
           tests/test_server_bind_conflict.py
           tests/test_session_unread.py
           tests/test_session_unread_api.py
+          tests/test_acp_server.py
           -q

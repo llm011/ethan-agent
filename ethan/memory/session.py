@@ -41,7 +41,7 @@ class Session:
     updated_at: float
     messages: list[Message] = field(default_factory=list)
     snippet: str | None = None
-    source: str = "web"  # web | repl | lark | cli | desktop | custom
+    source: str = "web"  # web | repl | lark | cli | desktop | acp | custom
     mode: str = ""  # "" = 工作助手; 规范英文 key，如 "legal"/"companion"（见 core/modes.py）
     pinned_at: float = 0.0  # >0 表示已置顶，值为置顶时间戳
     last_read_at: float = 0.0  # 未读水位：updated_at > last_read_at 即有未读（侧边栏红点）
