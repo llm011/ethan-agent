@@ -60,6 +60,13 @@ _MAX_STREAM_BREAK_RETRIES = 2
 # 可观测（有日志）、有界（最坏 ~1.6s 退避）、只对连接类错误生效。
 _MAX_CONNECT_RETRIES = 2
 _CONNECT_RETRY_BACKOFF = 0.8  # 秒，按 attempt 线性退避
+# 首请求超时（APITimeoutError）的最大重试次数。与连接类错误的 2 次区分：
+# 超时单次要等满 120s 客户端超时，重试多了就是分钟级挂起——但只重试 1 次
+# 最坏 2×120s≈4 分钟，能接住「上游偶发 120s 内不吐首字节」的瞬态抖动
+# （线上同配置相邻请求时好时坏，日志里反复出现孤立超时）。此前的行为是
+# 直接冒泡整轮失败，手机端表现为转圈 2 分钟后「任务已中断」，体验极差。
+_MAX_TIMEOUT_RETRIES = 1
+_TIMEOUT_RETRY_BACKOFF = 1.0  # 秒
 
 # 建连阶段可重试的错误消息关键词。MIDSTREAM_BREAK_KEYWORDS 覆盖流读取阶段的
 # 断连特征（remoteprotocolerror / peer closed 等）；这里额外补上建连阶段常见的
@@ -73,10 +80,10 @@ _CONNECT_RETRY_KEYWORDS = MIDSTREAM_BREAK_KEYWORDS + (
 def _is_transient_connect_error(e: Exception) -> bool:
     """建连阶段的错误是否值得重试：仅瞬态连接类，鉴权/参数类错误立即抛出。
 
-    APITimeoutError 是 APIConnectionError 的子类，必须排除：网关「接受连接后
-    挂着不响应」时要等满 120s 客户端超时才抛，若重试 2 次就是 3×120s≈6 分钟——
-    正是 __init__ 禁用 SDK 重试要避免的最坏情况。超时留给 agent 层备选模型
-    路径兜底（fallback._is_retriable 的 "timed out" 关键词能接住）。
+    APITimeoutError 是 APIConnectionError 的子类，必须排除出本判断（走下方
+    专属的超时重试路径，次数更少）：网关「接受连接后挂着不响应」时要等满
+    120s 客户端超时才抛，若与连接类错误同享 2 次重试就是 3×120s≈6 分钟——
+    正是 __init__ 禁用 SDK 重试要避免的最坏情况。
     """
     try:
         from openai import APIConnectionError, APITimeoutError  # lazy: 与 SDK 导入保持同处
@@ -85,7 +92,26 @@ def _is_transient_connect_error(e: Exception) -> bool:
     except ImportError:
         pass
     msg = str(e).lower()
+    if "timed out" in msg or "timeout" in msg:
+        # 文案层面的超时（如 anthropic 风格网关包出来的）同样走专属路径，不重试
+        return False
     return any(k in msg for k in _CONNECT_RETRY_KEYWORDS)
+
+
+def _is_first_request_timeout(e: Exception) -> bool:
+    """首请求超时（建连成功、上游 120s 未吐首字节）：值得重试 1 次。
+
+    openai.APITimeoutError（httpx.ReadTimeout 包装）不继承内置 TimeoutError，
+    isinstance 判断必须用 SDK 类型；文案判断兜住其他 SDK/网关包装的同语义错误。
+    """
+    try:
+        from openai import APITimeoutError  # lazy: 与 SDK 导入保持同处
+        if isinstance(e, APITimeoutError):
+            return True
+    except ImportError:
+        pass
+    msg = str(e).lower()
+    return "timed out" in msg or ("request timed out" in msg)
 
 
 class OpenAICompatProvider(BaseProvider):
@@ -146,20 +172,35 @@ class OpenAICompatProvider(BaseProvider):
 
         网关/中转上游抖动时常见「接受连接后不回响应直接断开」（SDK 报
         APIConnectionError("Connection error.")），此时退避后重建一次往往就能过。
+        首请求超时（APITimeoutError）单列：最多重试 1 次（见 _MAX_TIMEOUT_RETRIES）。
         dump_request_on_fail 时最终失败会打请求摘要帮助排查（流式路径既有行为）。
         """
         import logging as _log
         _lg = _log.getLogger("ethan.providers.openai_compat")
-        for attempt in range(_MAX_CONNECT_RETRIES + 1):
+        connect_retries = 0
+        timeout_retries = 0
+        while True:
             try:
                 return await self._client.chat.completions.create(**kwargs)  # type: ignore
             except Exception as e:
-                if attempt < _MAX_CONNECT_RETRIES and _is_transient_connect_error(e):
+                if _is_first_request_timeout(e):
+                    # 首请求超时：上游偶发抖动（同配置相邻请求时好时坏），重试 1 次
+                    # 就能救回整轮；仍超时才冒泡（交给 agent 层备选模型兜底）。
+                    if timeout_retries < _MAX_TIMEOUT_RETRIES:
+                        timeout_retries += 1
+                        _lg.warning(
+                            "[stream_chat] first-request timeout, retry %d/%d: %s",
+                            timeout_retries, _MAX_TIMEOUT_RETRIES, e,
+                        )
+                        await asyncio.sleep(_TIMEOUT_RETRY_BACKOFF)
+                        continue
+                elif connect_retries < _MAX_CONNECT_RETRIES and _is_transient_connect_error(e):
+                    connect_retries += 1
                     _lg.warning(
                         "[stream_chat] connect error with no output, retry %d/%d: %s",
-                        attempt + 1, _MAX_CONNECT_RETRIES, e,
+                        connect_retries, _MAX_CONNECT_RETRIES, e,
                     )
-                    await asyncio.sleep(_CONNECT_RETRY_BACKOFF * (attempt + 1))
+                    await asyncio.sleep(_CONNECT_RETRY_BACKOFF * connect_retries)
                     continue
                 if dump_request_on_fail:
                     _lg.error("[stream_chat] API error: %s", e)

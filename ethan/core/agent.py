@@ -1187,6 +1187,9 @@ class Agent:
         MAX_INJECT_EXTRA_ROUNDS = 5  # 最多追加 5 轮处理连续补充信息
         _ssl_continue_used = False  # SSL 断连自动续接（仅允许一次）
         _length_trimmed = False  # 输入超限 400 兜底：裁剪历史重试（只允许一次，避免循环）
+        # 超时/连接失败且无备选模型时的同模型重试（仅允许一次）：provider 层重试 +
+        # agent 层重发是仅有的两层兜底，叠加起来也要有界，避免分钟级挂起。
+        _same_model_retried = False
 
         for i in range(max_iters + MAX_INJECT_EXTRA_ROUNDS):
             # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
@@ -1343,6 +1346,30 @@ class Agent:
                         full_content = ""
                         final_chunk = None
                         async for chunk in _timeout_fb.stream_chat(working, tools=tools, system=sys):
+                            if chunk.reasoning:
+                                yield ThinkingEvent(delta=chunk.reasoning)
+                            if chunk.content:
+                                full_content += chunk.content
+                                yield chunk.content
+                            if chunk.is_final:
+                                final_chunk = chunk
+                                self.usage.add(chunk.usage)
+                    elif not _same_model_retried:
+                        # 无备选模型（未配 fallback_model / 链上无下一个）：换模型这条路
+                        # 走不通，但这类错误多为瞬态（同配置相邻请求时好时坏），同模型
+                        # 重发一次往往就能过——比直接判死、让用户手动重发体验好得多。
+                        # provider 层的超时重试（_MAX_TIMEOUT_RETRIES=1）已消耗在首次
+                        # create() 上，这里是 agent 层的第二次也是最后一次机会；只限
+                        # 一次（_same_model_retried），避免 provider×agent 双层重试叠加
+                        # 成分钟级挂起。
+                        _same_model_retried = True
+                        logger.warning(
+                            "stream_chat() iter=%d 模型响应超时/连接失败且无备选模型，同模型重试一次: %s: %s",
+                            i + 1, provider.model, e,
+                        )
+                        full_content = ""
+                        final_chunk = None
+                        async for chunk in provider.stream_chat(working, tools=tools, system=sys):
                             if chunk.reasoning:
                                 yield ThinkingEvent(delta=chunk.reasoning)
                             if chunk.content:

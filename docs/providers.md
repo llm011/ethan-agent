@@ -262,6 +262,7 @@ providers:
 - reasoning 模型（如 deepseek-reasoner）把思考放在 `delta.reasoning_content`（部分中转放在 `model_extra` 里），Provider 会读出并收进 `StreamChunk.reasoning`，与正文 `content` 分流
 - 流式中途断连（`peer closed connection` / `incomplete chunked read` 等，多见于中转不稳）：已产出内容时以 `truncated` 收尾、由 Agent 层自动续接；未产出内容时退避重试最多 2 次，仍失败抛 `MidstreamBreakError`（用户提示为"重试失败、重新发送"，而非"发「继续」"）。断连关键词（`MIDSTREAM_BREAK_KEYWORDS`）由 provider 层与 interface 层共用，定义在 `ethan/providers/base.py`
 - 建连阶段（`create()` 调用，SDK 内部重试已禁用 `max_retries=0`）对瞬态连接类错误（`APIConnectionError` / `server disconnected` 等）有界重试最多 2 次（线性退避 0.8s/1.6s），鉴权、参数类错误立即抛出；流式与非流式 `chat()`（schedule/标题压缩等后台任务路径）共用。Agent 层在未产出内容时还会把连接类错误交给备选模型兜底（与超时同路径）。
+- 首请求超时（`APITimeoutError`，建连成功但上游 120s 未吐首字节）单独重试最多 1 次（最坏 2×120s≈4 分钟，不与连接类错误的 2 次叠加）。上游偶发抖动时同配置相邻请求时好时坏，重发一次往往就能救回整轮（线上手机端「发送后转圈 2 分钟最终失败」即此形态）。Agent 层兜底链：有备选模型（`fallback_model` / FallbackProvider 链）→ 切换备选；无备选 → 同模型重发 1 次；仍失败才判中断。错误文案归入「上游模型响应超时，已自动重试仍未成功」，不再透传英文原文（`Request timed out.`）。
 
 ### 文本型工具调用（网关把 tool call 序列化成了正文）
 
@@ -357,7 +358,7 @@ defaults:
 
 - `fallback_model` 填**模型 id**（需在 `models` 列表注册），也支持 `provider/model` 格式（如 `anthropic/claude-sonnet-4-6`）。
 - 若同时配置了模型级 `fallback_providers`（在 `models` 条目的旧写法），`fallback_model` 会追加在它之后作为最终兜底。
-- 留空 = 不做兜底。
+- 留空 = 不做兜底。**此时模型超时/连接失败仍会同模型自动重试 1 次**（provider 层 + agent 层各一次），不会直接判中断；但配置 `fallback_model` 能在重试仍失败时换一个上游再试，抗抖动能力更强。
 - 也可通过环境变量 `AGENT_FALLBACK_MODEL` 设置。
 
 注意：`fallback_model` 与 `lite_model` 是两个独立维度——`lite_model` 是后台便宜任务（记忆压缩/标题生成等）专用模型，`fallback_model` 是主对话模型的故障兜底。
