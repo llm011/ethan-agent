@@ -67,8 +67,11 @@ class RipgrepTool(BaseTool):
         cmd.append(path)
 
         try:
+            from ethan.core.context import get_working_dir
+
+            cwd = get_working_dir() or None
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=cwd
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
             output = stdout.decode(errors="replace").strip()
@@ -127,8 +130,11 @@ class FdTool(BaseTool):
         cmd.append(path)
 
         try:
+            from ethan.core.context import get_working_dir
+
+            cwd = get_working_dir() or None
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=cwd
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
             output = stdout.decode(errors="replace").strip()

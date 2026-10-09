@@ -65,6 +65,19 @@ def _register_subcommands():
     app.add_typer(setup_cmd.app, name="setup")
     app.add_typer(trust_cmd.app, name="trust")
 
+    # `ethan acp`：ACP (Agent Client Protocol) stdio server（单文件命令，非 typer 子组）
+    @app.command("acp")
+    def acp() -> None:
+        """Run the ACP (Agent Client Protocol) stdio server.
+
+        Lets ACP clients (e.g. the Multica daemon) launch Ethan directly as a
+        runtime via JSON-RPC over stdio. Protocol v1; stdout carries only
+        JSON-RPC frames — all logs go to stderr.
+        """
+        from ethan.acp_server.server import serve
+
+        serve()
+
 
 serve_app = typer.Typer(help="管理 API 服务")
 app.add_typer(serve_app, name="serve")

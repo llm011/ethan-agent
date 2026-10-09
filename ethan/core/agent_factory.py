@@ -198,7 +198,10 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
 
     # full / lark：全量
     registry.register(DecideTool())
-    registry.register(AskUserTool())
+    # ask_user：依赖 SSE + POST 消费端（AskUserProvider），仅 web/repl 注册。
+    # acp/lark 等无消费端的渠道不给模型这个工具（否则只会 20s 超时走默认且用户无感知）。
+    if channel in ("web", "repl"):
+        registry.register(AskUserTool())
     registry.register(RipgrepTool())
     registry.register(FdTool())
     registry.register(ScheduleCreateTool(user_id=user_id))

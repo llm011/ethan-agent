@@ -569,6 +569,7 @@ ethan -r last                      Resume last session
 ethan serve                        Start HTTP API server (foreground)
 ethan serve stop                   Stop background serve process
 ethan serve restart                Restart background serve process
+ethan acp                          ACP stdio server (JSON-RPC; for Multica etc.)
 
 ethan model list|add|remove|default
 ethan provider list|set
@@ -577,6 +578,10 @@ ethan skill list|show|add|create
 ethan schedule list|remove|pause|resume
 ethan trust add|list|remove       Trusted dirs (skip write-consent prompts)
 ```
+
+### ACP / Multica integration
+
+`ethan acp` speaks [ACP](https://agentclientprotocol.com) v1 (JSON-RPC over stdio), so ACP clients can launch Ethan directly as a runtime — e.g. register a Multica custom runtime profile with `--protocol-family kimi --command-name ethan`. Tool consents are answered via the ACP `request_permission` flow (headless daemons auto-answer session-scoped allow first). See [docs/acp-server.md](docs/acp-server.md).
 
 ---
 
@@ -794,6 +799,7 @@ Key docs:
 - [Agent Loop](docs/agent-loop.md) — dual-track routing, memory injection
 - [Architecture Overview](docs/architecture.md) — system components, data flow
 - [Heartbeat](docs/heartbeat.md) — background maintenance, midnight loop
+- [ACP Server](docs/acp-server.md) — launch Ethan as an ACP runtime (Multica etc.)
 
 All source markdown lives in [`docs/`](./docs/); changes to `main` auto-deploy via GitHub Actions.
 

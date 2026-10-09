@@ -548,6 +548,7 @@ ethan -r last                      恢复上次会话
 ethan serve                        启动 HTTP API 服务（前台运行）
 ethan serve stop                   停止后台运行的 serve 进程
 ethan serve restart                重启后台 serve 进程
+ethan acp                          ACP stdio 服务（JSON-RPC；供 Multica 等拉起）
 
 ethan model list|add|remove|default
 ethan provider list|set
@@ -556,6 +557,10 @@ ethan skill list|show|add|create
 ethan schedule list|remove|pause|resume
 ethan trust add|list|remove       信任目录白名单（写入免授权提示）
 ```
+
+### ACP / Multica 接入
+
+`ethan acp` 实现 [ACP](https://agentclientprotocol.com) v1（stdio 上的 JSON-RPC），ACP 客户端可以把 Ethan 作为 runtime 直接拉起——例如给 Multica 注册 custom runtime profile：`--protocol-family kimi --command-name ethan`。工具授权走 ACP `request_permission` 流程（无头 daemon 自动按「本会话允许 → 允许一次 → 拒绝」应答）。详见 [docs/acp-server.md](docs/acp-server.md)。
 
 ---
 
@@ -840,6 +845,7 @@ DevTools Network 里 GET /sessions/{id} 的响应体应是几百 KB 量级（不
 - [Agent Loop](docs/agent-loop.md) — 双轨路由、记忆注入
 - [架构总览](docs/architecture.md) — 系统组件、数据流
 - [心跳机制](docs/heartbeat.md) — 后台维护、午夜循环
+- [ACP Server](docs/acp-server.md) — 把 Ethan 作为 ACP runtime 拉起（Multica 等）
 
 所有文档源文件在 [`docs/`](./docs/) 目录，push 到 main 后自动部署。
 

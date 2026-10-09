@@ -7,6 +7,23 @@ from ethan.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_path(path: str) -> Path:
+    """解析文件工具路径：绝对路径保持不变，相对路径优先基于请求工作目录。
+
+    ACP 的 session cwd 通过 ContextVar 注入；Web/REPL 等既有渠道没有设置它，
+    继续沿用 Path.resolve() 基于进程 cwd 的旧语义。
+    """
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        from ethan.core.context import get_working_dir
+
+        working_dir = get_working_dir()
+        if working_dir:
+            p = Path(working_dir).expanduser() / p
+    return p.resolve()
+
+
 # 图片扩展名 → MIME 映射（按扩展名快速识别）
 _IMAGE_MIME = {
     ".png": "image/png",
@@ -82,7 +99,7 @@ def _is_inside_secrets(path: str) -> bool:
     try:
         from ethan.core.config import CONFIG_DIR
         secrets_dir = (CONFIG_DIR / ".secrets").resolve()
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         return secrets_dir in p.parents or p == secrets_dir
     except Exception:
         return ".secrets" in Path(path).parts
@@ -114,7 +131,7 @@ def _is_safe_path(path: str) -> bool:
         return False
     try:
         import tempfile
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         safe_roots = [Path("/tmp").resolve(), Path(tempfile.gettempdir()).resolve()]
         safe_roots.extend(_trusted_roots())
         return any(root == p or root in p.parents for root in safe_roots)
@@ -125,7 +142,7 @@ def _is_safe_path(path: str) -> bool:
 def _dir_scope(path: str) -> str:
     """授权记忆作用域 = 文件所在目录的绝对路径（授权该目录后，子目录/同目录文件免问）。"""
     try:
-        return str(Path(path).expanduser().resolve().parent)
+        return str(_resolve_path(path).parent)
     except Exception:
         return path
 
@@ -165,12 +182,12 @@ class FileReadTool(BaseTool):
     def consent_scope(self, path: str = "", **kwargs) -> str:
         # 密钥文件按单文件授权（每个 secret 单独问一次），不做目录级放行
         try:
-            return str(Path(path).expanduser().resolve())
+            return str(_resolve_path(path))
         except Exception:
             return path or self.name
 
     async def run(self, path: str, max_lines: int = 0, offset: int = 0) -> str | ToolResult:
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         if _is_inside_secrets(str(p)):
             return (
                 "Error: 禁止读取 .secrets 目录下的文件。"
@@ -327,7 +344,7 @@ class FileWriteTool(BaseTool):
         return _dir_scope(str(path))
 
     async def run(self, path: str, content: str, append: bool = False) -> str:
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         if _is_inside_secrets(str(p)):
             return (
                 "Error: 禁止写入 .secrets 目录下的文件。"
@@ -419,7 +436,7 @@ class FileEditTool(BaseTool):
         text: str | None = None,
         position: str = "after",
     ) -> str:
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         if _is_inside_secrets(str(p)):
             return "Error: 禁止编辑 .secrets 目录下的文件。密钥只能通过 set_secret 工具管理。"
         if not p.exists():
@@ -540,7 +557,7 @@ class FileListTool(BaseTool):
     }
 
     async def run(self, path: str = ".") -> str:
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         if _is_inside_secrets(str(p)):
             return (
                 "Error: 禁止列出 .secrets 目录。"
