@@ -14,6 +14,26 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// `/sessions` 的一页结果：`total` 是服务端给出的会话总数，
+/// 客户端用「已取条数 < total」判定还有没有下一页。
+class SessionPage {
+  const SessionPage({
+    required this.sessions,
+    required this.total,
+    required this.totalKnown,
+    required this.pageFilled,
+  });
+
+  final List<Session> sessions;
+  final int total;
+
+  /// 服务端有没有给出 total。没有时只能靠 [pageFilled] 猜有没有下一页。
+  final bool totalKnown;
+
+  /// 本页是否取满（条数 >= limit）。total 未知时，未取满即到底。
+  final bool pageFilled;
+}
+
 /// 单条 SSE 流内部最多连续重连几次。与 [ChatScreen] 自己的「跨流 resume 重连」
 /// 叠加：单条流先自愈 4 次，全失败才把错误交给上层，由上层再走它自己的退避。
 const int _maxSseRetries = 4;
@@ -187,14 +207,29 @@ class EthanApiClient {
         .toList();
   }
 
-  Future<List<Session>> sessions({String query = ''}) async {
+  Future<List<Session>> sessions({String query = ''}) async =>
+      (await sessionsPage(query: query)).sessions;
+
+  /// 会话列表的一页。服务端 `/sessions` 返回 `total`，配合 [offset] 做
+  /// 「上滑加载更多」：hasMore 由 已取条数 < total 判定，而不是靠猜。
+  Future<SessionPage> sessionsPage(
+      {String query = '', int limit = 50, int offset = 0}) async {
     final data = await _request('GET', 'sessions', query: {
-      'limit': '50',
-      'offset': '0',
+      'limit': '$limit',
+      'offset': '$offset',
       if (query.trim().isNotEmpty) 'q': query.trim(),
     });
     final rows = (data is Map ? data['sessions'] : null) as List? ?? const [];
-    return rows.whereType<Map>().map(_session).toList();
+    final sessions = rows.whereType<Map>().map(_session).toList();
+    final total = data is Map ? data['total'] : null;
+    return SessionPage(
+      sessions: sessions,
+      // total 缺失时退回「本页不满一页即到底」：用 offset+条数 冒充 total 会让
+      // hasMore 恒真，一次接一次空转拉不到头。
+      total: total is num ? total.toInt() : offset + sessions.length,
+      totalKnown: total is num,
+      pageFilled: sessions.length >= limit,
+    );
   }
 
   Future<Session> createSession({String? model, String? mode}) async {
@@ -444,7 +479,8 @@ class EthanApiClient {
   /// 「服务器活着但内部报错」误报成网络断开，把用户引向错误的排查方向。
   Future<bool> health() async {
     try {
-      final request = http.Request('GET', _uri('health'))..headers.addAll(_headers);
+      final request = http.Request('GET', _uri('health'))
+        ..headers.addAll(_headers);
       final response = await _client.send(request);
       await response.stream.drain<void>();
       return response.statusCode >= 200 && response.statusCode < 300;

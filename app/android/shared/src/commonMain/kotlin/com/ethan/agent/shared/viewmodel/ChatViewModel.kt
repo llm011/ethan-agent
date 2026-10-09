@@ -557,6 +557,15 @@ class ChatViewModel(
                                 isLoading = false,
                             )
                         }
+                        // 切进「正在生成中」的会话：服务端 active_run=true，立即呈现进行中
+                        // 状态并接回流式输出。只在**网络刷新**那份（缓存快照里的 activeRun
+                        // 可能早已过时）且当前没有流在跑时接一次；cached flow 的缓存→网络
+                        // 两次发射里，第一次（缓存）不触发接流 —— 缓存里的 active_run 是
+                        // 上次退出页面时的旧值，接上去多半接到一条 204 空流。
+                        // resumeStream 内部自带 isStreaming/isResuming 幂等闸门，重复触发无害。
+                        if (session.activeRun) {
+                            resumeStreamIfNeeded(force = false)
+                        }
                     }
                 } catch (e: Exception) {
                     // 网络失败且无缓存时才显示错误；有缓存时数据已在 state 中
@@ -587,6 +596,10 @@ class ChatViewModel(
             usage = msg.usage,
             quote = msg.quote,
             createdAt = msg.createdAt,
+            // 服务端标着 running 的 assistant 消息（进度占位行，带半截正文/工具步骤）在
+            // 界面上仍以「正在生成」的气泡呈现（打字点动画），流接上后由既有收敛逻辑覆写。
+            // 词汇表与服务端一致：running | completed | interrupted | stopped。
+            isStreaming = msg.role == "assistant" && msg.status == "running",
             images = msg.images?.mapNotNull { img ->
                 img.url?.let { UiMessageImage(displayUrl = "${serverUrl.trimEnd('/')}/api/${it}") }
             } ?: emptyList(),

@@ -188,6 +188,14 @@ data class Message(
     @SerialName("tool_steps") val toolSteps: List<ToolStep>? = null,
     val images: List<MessageImage>? = null,
     val cards: List<FileCard>? = null,
+    /**
+     * 服务端消息状态：`completed`（默认）/ `running`（生成中的进度占位行）/
+     * `interrupted` / `stopped` —— 与服务端 `Message.status` 的词汇表一致
+     * （`ethan/providers/base.py`：running | completed | interrupted | stopped）。
+     * 「切进生成中的会话」场景下，最后一条 assistant 消息可能是 running —— 历史快照
+     * 里它带着半截正文/工具步骤，界面要把它当成「还在写」的气泡而不是已完成的消息。
+     */
+    val status: String = "completed",
 )
 
 @Serializable
@@ -198,6 +206,14 @@ data class SessionDetail(
     val source: String? = null,
     val mode: String? = null,
     val messages: List<Message> = emptyList(),
+    /**
+     * 该会话是否有一轮生成还在服务端跑着（`GET /sessions/{id}` 的 active_run）。
+     *
+     * 切进「正在生成中」的会话时，前端据此立即呈现进行中状态并接回流式输出 ——
+     * 不看这个字段的话，本地没有任何「还在生成」的信号，界面静得像什么都没发生。
+     * 旧后端不返回该字段 → false（按「没有活跃 run」兜底，与桌面端 `detail.active_run` 同语义）。
+     */
+    @SerialName("active_run") val activeRun: Boolean = false,
 )
 
 @Serializable
@@ -454,6 +470,13 @@ data class SaveSkillResponse(val name: String)
 @Serializable
 data class PollData(
     val sessions: List<SessionInfo> = emptyList(),
+    /**
+     * 当前有活跃生成 run 的会话 id 列表（`GET /poll` 的 active_sessions）。
+     *
+     * 会话列表用它画「生成中」指示器（对齐桌面端 Sidebar 的 Loader2 转圈）。
+     * 旧后端不返回该字段 → 空集合，列表不显示任何进行中标识。
+     */
+    @SerialName("active_sessions") val activeSessions: List<String> = emptyList(),
 )
 
 @Serializable

@@ -9,18 +9,49 @@ typedef RepositoryLoader<T> = Future<T> Function();
 /// server state. It never invents a value: an empty cache always waits for the
 /// real Ethan response, while a populated cache is returned immediately and
 /// refreshed in the background.
+///
+/// 「立刻返回旧值」只允许在 [staleAfter] 窗口内发生：窗口外的命中照样立即返回，
+/// 但一定会补一次后台刷新。此前这个后台刷新只把结果写进 [_cache]，没人重新读就
+/// 永远看不见 —— 表现就是「刷新请求明明发了，界面却一直不动，过很久才突然变新」。
+/// 现在 [refresh] 落地后会按 key 通知 [watch] 注册的监听者，由各页面把新数据接回
+/// 自己的 FutureBuilder。
 class EthanRepository {
-  EthanRepository(this.api);
+  EthanRepository(this.api,
+      {this.staleAfter = const Duration(seconds: 30), DateTime Function()? now})
+      : now = now ?? DateTime.now;
   final EthanApiService api;
+
+  /// 缓存被当作「新鲜」的时长；超时后的下一次读取会触发后台重校验。
+  final Duration staleAfter;
+  final DateTime Function() now;
+
   final Map<String, Object?> _cache = {};
   final Map<String, Future<Object?>> _inFlight = {};
+  final Map<String, DateTime> _fetchedAt = {};
+  final Map<String, Set<void Function()>> _listeners = {};
 
   T? peek<T>(String key) => _cache[key] as T?;
+
+  /// 订阅某个 key 的「后台刷新已落地」通知。监听者通常会重新走一遍
+  /// [cached] —— 刚落地的数据在 [staleAfter] 内必然命中且不再发起请求，
+  /// 因此 通知 → 重读 → 再通知 的环路在这里自然终止。
+  void watch(String key, void Function() listener) =>
+      _listeners.putIfAbsent(key, () => {}).add(listener);
+
+  void unwatch(String key, void Function() listener) =>
+      _listeners[key]?.remove(listener);
 
   Future<T> cached<T>(String key, RepositoryLoader<T> loader) async {
     final current = peek<T>(key);
     if (current != null) {
-      unawaited(refresh(key, loader).catchError((_) => current));
+      final fetchedAt = _fetchedAt[key];
+      final stale =
+          fetchedAt == null || now().difference(fetchedAt) > staleAfter;
+      // 只有过期才补后台刷新：新鲜期内反复进页面不再打请求（也杜绝
+      // 「监听者重读 → 再触发刷新 → 再通知」的自我放大）。
+      if (stale) {
+        unawaited(refresh(key, loader).catchError((_) => current));
+      }
       return current;
     }
     return refresh(key, loader);
@@ -31,11 +62,17 @@ class EthanRepository {
     if (existing != null) return await existing as T;
     final request = loader().then((value) {
       _cache[key] = value;
+      _fetchedAt[key] = now();
       return value as Object?;
     });
     _inFlight[key] = request;
     try {
-      return await request as T;
+      final value = await request as T;
+      // 成功落地才通知：失败时缓存维持旧值，页面不需要（也没法）拿到新数据。
+      for (final listener in (_listeners[key] ?? const {}).toList()) {
+        listener();
+      }
+      return value;
     } finally {
       _inFlight.remove(key);
     }

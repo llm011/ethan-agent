@@ -516,6 +516,27 @@ iOS（Flutter，`app/ios`）目前**没有**会话列表红点，只有聊天页
 
 ### 会话页：生成中反馈与右上角动作
 
+**切入「正在生成中」的会话必须立即呈现进行中状态并接流**（Android `ChatViewModel.loadInitial`
+的 `active_run` 分支）：
+
+- 服务端 `GET /sessions/{id}` 回 `active_run`（producer 未结束），`GET /poll` 回
+  `active_sessions`（活跃会话 id 列表）。Android 的 `SessionDetail.activeRun` /
+  `PollData.activeSessions` / `Message.status` 三个字段解析缺一不可——旧实现根本没解析
+  这些字段，切进生成中的会话时界面静得像什么都没发生（无 loading、无过程输出、
+  看不出还在跑），这是「active_run 状态展示」任务里漏掉的最后一块。
+- `loadInitial` 拿到**网络刷新**的详情后若 `active_run=true`，立即
+  `resumeStreamIfNeeded(force = false)`：`resumeStream` 自带幂等闸门（isStreaming/isResuming），
+  重复触发无害。**只在网络那份触发，缓存快照不触发**——缓存里的 active_run 是上次退出
+  页面时的旧值，接上去多半接到一条 204 空流。旧后端缺字段 → false（按无活跃 run 兜底）。
+- 接流走的是既有的 `GET /chat/{id}/stream`（**从头回放 + 实时推送**）：过程输出（工具步骤、
+  正文增量）由 `collectSseStream` 的回放甄别（`appendContent` 取较长者）原样复用，
+  不需要为「切进生成中的会话」另写一套解析。历史快照里 `status=running`（进度占位行）
+  的半截 assistant 消息在 UI 上保留 `isStreaming`（打字点动画），流接上后由既有收敛逻辑
+  覆写。状态词汇表与服务端一致：`running | completed | interrupted | stopped`。
+- 会话列表的「生成中」指示器由 `/poll` 的 `active_sessions` 驱动（Android `SessionsViewModel`
+  的 `activeSessionIds` + `SessionCard` 转圈，对齐桌面端 Sidebar 的做法），run 结束后
+  下一轮轮询自动消失，不需要前端做额外的收敛。
+
 三端（Web `message-bubble.tsx` / Android `TypingDots` / iOS `TypingDots`）用同一套语义：
 **生成中用三个错峰呼吸的点**，而不是转圈。转圈读作「这个控件在忙 / 加载失败」，
 三点才读作「对方正在打字」。Android 在气泡角色名行尾 + 「思考中…」前各放一处，
@@ -556,6 +577,31 @@ iOS 标题同样加了 `maxLines: 1 + ellipsis`，否则长标题会折行把三
 - 气泡折叠阈值（Android `messageCollapseState` 的 `contentWidthDp`）与气泡内可用宽度
   绑定，隐藏头像后**宽度变宽**，该常量需与布局同步调整，否则会系统性高估行数、把没超屏的
   消息也折起来。
+
+### 会话列表分页与刷新反馈（iOS）
+
+`GET /sessions` 自带 `limit` / `offset` / `total`，iOS 端（`app/ios/lib/screens/sessions_screen.dart`）
+按它做「上滑加载更多」：
+
+- **触底 buffer**：距列表底部不足 400px 才触发下一页（`_loadMoreBuffer`），滚动中途的
+  轻微惯性滑动不会误触发。
+- **footer 三态**：加载中 spinner（「加载中…」）→ 到底（「没有更多了」）→ 失败
+  （「加载更多失败 + 重试」）。加载失败**绝不动已有列表**，重试入口在 footer 上。
+- **hasMore 判定**：`total` 已知用「已取条数 < total」；`total` 缺失退回「本页取满
+  即还有下一页」（`totalKnown` + `pageFilled`）。别用 `offset + 本页条数` 冒充 total——
+  那会让 hasMore 恒真、一次接一次空转。
+- **单飞与代币**：刷新（`_refreshing`）与加载更多（`_loadingMore`）互斥；显式动作
+  （搜索提交 / 手动刷新 / 错误重试）走 `load(resetPage: true)`，会自增 `_loadMoreToken`
+  作废在飞的追加，防止旧分页带着旧关键词覆盖新列表。追加前按 session id 去重。
+
+**别往回退**：`RefreshIndicator.onRefresh` 必须返回真实等待的 future（返回立刻完成的
+空 future，指示器会一闪而过，用户以为没触发）；空列表也要包一层可滚动的 ListView
+（`AlwaysScrollableScrollPhysics`），否则内容不满一屏时物理上拉不动、下拉刷新失效。
+
+`EthanRepository`（`app/ios/lib/data/ethan_repository.dart`）的缓存有 30s TTL
+（`staleAfter`）：过期后的命中立即返回旧值并后台重校验，`refresh()` 落地后通过
+`watch()`/`unwatch()` 通知订阅页面重读。**后台刷新的结果必须通知界面**——只写缓存不
+通知，表现就是「请求早发了、界面过很久才突然变新」（本仓库修过的真实回归）。
 
 ---
 

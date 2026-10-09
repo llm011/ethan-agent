@@ -5,6 +5,13 @@ from datetime import datetime
 
 from ethan.core.config import get_config
 from ethan.core.context_budget import compress_previous_round_tools, enforce_context_budget
+from ethan.core.context_limit import (
+    effective_input_budget,
+    is_input_length_error,
+    total_input_chars,
+    trim_for_retry,
+    trim_to_limit,
+)
 from ethan.core.routing import _get_route, _match_fast_rule, classify_instant
 from ethan.core.tool_format import (
     _detail,
@@ -51,6 +58,20 @@ def _is_image_error(e: Exception) -> bool:
     """判断异常是否为图片相关错误（尺寸超限 / non-VLM 模型拒绝 image_url）。"""
     msg = str(e).lower()
     return any(p in msg for p in _IMAGE_ERROR_PATTERNS)
+
+
+def _is_retriable_connect_error(e: Exception) -> bool:
+    """连接类瞬态错误（建连失败/网关断连），当前 provider 上已无可挽回时
+    值得换备选模型重试。复用 fallback 层的瞬态判断，避免两份列表漂移。
+
+    注意：MidstreamBreakError（流中断重试耗尽）也在可重试之列——provider 层
+    重试耗尽后，配置了兜底模型的环境会再换备选模型重发一轮，而非直接让用户
+    手动重发。这是有意为之（与 FallbackProvider 换 provider 行为一致）；
+    仅在无兜底模型时异常才会冒泡、触发「重新发送」文案。
+    """
+    from ethan.providers.fallback import _is_retriable
+
+    return _is_retriable(e)
 
 
 def _save_msg_images_to_files(msg: Message, session_id: str) -> list[str]:
@@ -118,6 +139,7 @@ _SYNTHETIC_USER_PREFIXES = (
     "[继续。",  # 空响应 nudge
     "[继续执行任务。",  # 决策 silent nudge
     "[网络中断，",  # SSL 断连续接提示
+    "[会话历史已截断",  # 输入超限裁剪提示（context_limit.TRIM_NOTICE_PREFIX）
 )
 
 
@@ -586,6 +608,28 @@ class Agent:
             logger.warning("创建 timeout fallback provider 失败: %s", fb_model, exc_info=True)
         return None
 
+    def _trim_input_if_needed(self, working: list[Message], system: str) -> int:
+        """发送前全量输入长度预检：超预算就裁剪旧历史（proactive 防线）。
+
+        `context_budget` 只管控 tool result 体积，user/assistant 正文与 system
+        不设防——会话长期累积后单次请求可能超过上游硬限制（DashScope 系
+        `Range of input length should be [1, 997952]`，直接 400）。这里按
+        `effective_input_budget()`（默认留 5% 余量，环境变量可调）预检，
+        超限即从最旧的轮次裁起，保 system + 最近历史。
+
+        就地替换 working 列表内容（working 是 loop 的浅拷贝，session 历史
+        不受影响）。返回被省略的字符数（0 = 未触发裁剪）。
+        """
+        budget = effective_input_budget()
+        raw = total_input_chars(working, system)
+        if not budget or raw <= budget:
+            return 0
+        trimmed, omitted = trim_to_limit(working, system, budget)
+        if omitted:
+            working[:] = trimmed
+            logger.warning("输入超预算（%d 字 > 预算 %d 字），发送前裁剪较早历史 %d 字", raw, budget, omitted)
+        return omitted
+
     async def _request_consent(self, description: str, tool: str, detail: str = "") -> bool:
         """请求用户授权。根据 channel 走不同 provider：
         - 无 provider（如 heartbeat）：放行
@@ -618,6 +662,7 @@ class Agent:
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
+        self._trim_input_if_needed(working, system)  # 全量输入长度预检，超限先裁旧历史
 
         from ethan.core.loop_control import (
             LoopMonitor,
@@ -638,6 +683,7 @@ class Agent:
         _decision_prompt_injected = False  # 本轮开头是否注入过决策提示（pop 用）
         _enhanced_context_injected = False  # 本轮开头是否注入过增强上下文（pop 用）
         _image_stripped = False  # 图片超限时剥离重试（只允许一次，避免循环）
+        _length_trimmed = False  # 输入超限 400 兜底：裁剪历史重试（只允许一次，避免循环）
         _inject_extra_rounds = 0  # 因处理运行中补充信息而追加的额外轮次（上限防死循环）
         MAX_INJECT_EXTRA_ROUNDS = 5  # 最多追加 5 轮处理连续补充信息
 
@@ -712,6 +758,22 @@ class Agent:
                         response = await provider.chat(working, tools=tools, system=sys)
                     else:
                         raise
+                elif is_input_length_error(e) and not _length_trimmed:
+                    # 输入超模型上下文上限（如 DashScope「Range of input length
+                    # should be [1, 997952]」）：预检没拦住（估算偏差）时的 reactive
+                    # 兜底——激进裁剪历史后重试一次；裁不动（无历史可丢，或 system
+                    # 本身就把预算吃满、裁了也装不下）则转译为用户可读的错误，
+                    # 不再盲目重试、更不把 provider_error 原文抛给用户。
+                    _length_trimmed = True
+                    trimmed, omitted = trim_for_retry(working, sys, effective_input_budget())
+                    if not omitted or total_input_chars(trimmed, sys) > effective_input_budget() // 2:
+                        raise RuntimeError(
+                            "会话内容过长，已超过当前模型的输入上限，自动截断后仍放不下。"
+                            "请新开会话，或在设置页切换上下文更大的模型。"
+                        ) from e
+                    working[:] = trimmed
+                    logger.warning("chat() 上游 400 输入超限，裁剪 %d 字历史后重试: %s", omitted, e)
+                    response = await provider.chat(working, tools=tools, system=sys)
                 else:
                     raise
             self.usage.add(response.usage)
@@ -1067,6 +1129,7 @@ class Agent:
                 if persona:
                     minimal_system += f"\n{persona}"
                 provider = self._provider
+                self._trim_input_if_needed(working, minimal_system)  # 长会话尾部的打招呼也走预检
                 async for chunk in provider.stream_chat(working, tools=None, system=minimal_system):
                     if chunk.reasoning:
                         yield ThinkingEvent(delta=chunk.reasoning)
@@ -1083,6 +1146,7 @@ class Agent:
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
+        self._trim_input_if_needed(working, system)  # 全量输入长度预检，超限先裁旧历史
 
         # _select_route 内部已完成 Skill 匹配，yield 一次让消费者记录命中的 Skill 上下文
         if self.last_matched_skills:
@@ -1122,6 +1186,7 @@ class Agent:
         _inject_extra_rounds = 0  # 因处理运行中补充信息而追加的额外轮次（上限防死循环）
         MAX_INJECT_EXTRA_ROUNDS = 5  # 最多追加 5 轮处理连续补充信息
         _ssl_continue_used = False  # SSL 断连自动续接（仅允许一次）
+        _length_trimmed = False  # 输入超限 400 兜底：裁剪历史重试（只允许一次，避免循环）
 
         for i in range(max_iters + MAX_INJECT_EXTRA_ROUNDS):
             # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
@@ -1220,6 +1285,33 @@ class Agent:
                                 self.usage.add(chunk.usage)
                     else:
                         raise  # 没有图片可剥离，不是图片问题
+                elif is_input_length_error(e) and not _length_trimmed and not full_content:
+                    # 输入超模型上下文上限（如 DashScope「Range of input length
+                    # should be [1, 997952]」）：预检没拦住（估算偏差）时的 reactive
+                    # 兜底——激进裁剪历史后重试一次。走 InjectEvent 告知用户（有现成
+                    # UI 通道，不往正文里塞系统腔文案）；裁不动（无历史可丢，或
+                    # system 本身就把预算吃满）则抛用户可读错误，不盲目重试。
+                    _length_trimmed = True
+                    trimmed, omitted = trim_for_retry(working, sys, effective_input_budget())
+                    if not omitted or total_input_chars(trimmed, sys) > effective_input_budget() // 2:
+                        raise RuntimeError(
+                            "会话内容过长，已超过当前模型的输入上限，自动截断后仍放不下。"
+                            "请新开会话，或在设置页切换上下文更大的模型。"
+                        ) from e
+                    working[:] = trimmed
+                    logger.warning("stream_chat() iter=%d 上游 400 输入超限，裁剪 %d 字历史后重试: %s", i + 1, omitted, e)
+                    yield InjectEvent(messages=[f"会话过长，已自动截断较早的历史消息（约省略 {omitted} 字），正在继续处理…"])
+                    full_content = ""
+                    final_chunk = None
+                    async for chunk in provider.stream_chat(working, tools=tools, system=sys):
+                        if chunk.reasoning:
+                            yield ThinkingEvent(delta=chunk.reasoning)
+                        if chunk.content:
+                            full_content += chunk.content
+                            yield chunk.content
+                        if chunk.is_final:
+                            final_chunk = chunk
+                            self.usage.add(chunk.usage)
                 # lite 模型（fast 档）可能偶发 503/鉴权失败，或 lite 模型在当前
                 # provider 上不可用（如 OpenAI-compat base URL 不认识 gemini-flash-lite）。
                 # 若还没产出任何内容，回退主模型重试本轮一次，并禁用 lite provider
@@ -1241,12 +1333,12 @@ class Agent:
                         if chunk.is_final:
                             final_chunk = chunk
                             self.usage.add(chunk.usage)
-                elif isinstance(e, TimeoutError) and not full_content:
+                elif (isinstance(e, TimeoutError) or _is_retriable_connect_error(e)) and not full_content:
                     _timeout_fb = self._get_timeout_fallback(provider)
                     if _timeout_fb is not None:
                         logger.warning(
-                            "stream_chat() iter=%d 模型响应超时，切换备选模型重试: %s → %s",
-                            i + 1, provider.model, _timeout_fb.model,
+                            "stream_chat() iter=%d 模型响应超时/连接失败，切换备选模型重试: %s → %s: %s",
+                            i + 1, provider.model, _timeout_fb.model, e,
                         )
                         full_content = ""
                         final_chunk = None
