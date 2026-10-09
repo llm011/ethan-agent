@@ -255,6 +255,11 @@ def test_initialize_roundtrip():
         resp = await _route(conn, "initialize", {"protocolVersion": 1})
         assert resp.protocol_version == 1
         assert resp.agent_capabilities.load_session is True
+        # capabilities 必须挂在 AgentCapabilities 内，断言 wire 层防止 extra 被静默丢弃
+        wire = resp.model_dump(mode="json", by_alias=True, exclude_none=True)
+        prompt_caps = wire["agentCapabilities"]["promptCapabilities"]
+        assert prompt_caps["image"] is True
+        assert prompt_caps["embeddedContext"] is True
 
     asyncio.run(run())
 
@@ -265,6 +270,33 @@ def test_new_session_returns_id(monkeypatch, tmp_path):
         agent, conn, _ = _new_server_connection()
         resp = await _route(conn, "session/new", {"cwd": str(tmp_path), "mcpServers": []})
         assert resp.session_id.startswith("s_")
+
+    asyncio.run(run())
+
+
+def test_acp_cwd_drives_relative_file_and_shell_paths(monkeypatch, tmp_path):
+    """ACP cwd 必须同时进入 Agent 上下文、文件相对路径和 shell 执行目录。"""
+
+    async def run():
+        from ethan.acp_server.session import ACPSession
+        from ethan.core.context import get_working_dir
+        from ethan.tools.builtin.file import FileReadTool
+        from ethan.tools.builtin.shell import ShellTool
+
+        session = ACPSession("s_cwd", str(tmp_path), FakeTransport())
+        # create_agent 很重且依赖模型；用最小 fake 验证 _make_agent 的接线
+        fake_agent = type("FakeAgent", (), {"session_id": "", "runtime_context": "", "is_owner": True})()
+        monkeypatch.setattr("ethan.core.agent_factory.create_agent", lambda channel: fake_agent)
+        monkeypatch.setattr("ethan.core.consent.set_consent_provider", lambda provider: None)
+        await session._make_agent()
+
+        assert get_working_dir() == str(tmp_path)
+        assert str(tmp_path) in fake_agent.runtime_context
+
+        (tmp_path / "relative.txt").write_text("from-acp-cwd", encoding="utf-8")
+        assert await FileReadTool().run("relative.txt") == "from-acp-cwd"
+        shell_output = await ShellTool().run("pwd")
+        assert shell_output == str(tmp_path)
 
     asyncio.run(run())
 

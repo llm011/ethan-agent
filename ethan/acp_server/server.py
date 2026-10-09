@@ -65,8 +65,10 @@ class EthanACPAgent(Agent):
     async def initialize(self, protocol_version: int, client_capabilities=None, client_info=None, **kw):
         return InitializeResponse(
             protocol_version=1,
-            agent_capabilities=AgentCapabilities(load_session=True),
-            prompt_capabilities=PromptCapabilities(image=True, embedded_context=True),
+            agent_capabilities=AgentCapabilities(
+                load_session=True,
+                prompt_capabilities=PromptCapabilities(image=True, embedded_context=True),
+            ),
         )
 
     # ── session/new ──────────────────────────────────────────────────

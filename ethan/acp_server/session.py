@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from ethan.acp_server import mapping
 from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
@@ -30,7 +31,10 @@ class ACPSession:
 
     def __init__(self, session_id: str, cwd: str, conn):
         self.session_id = session_id  # ethan sessions.db 的会话 id（= ACP session id）
-        self.cwd = cwd
+        # ACP cwd 可能来自 client 输入。只接受已存在目录，避免 create_subprocess_* 在
+        # 首次工具调用时抛 FileNotFoundError；resolve 后供 ContextVar / system prompt 共用。
+        resolved_cwd = Path(cwd or ".").expanduser().resolve()
+        self.cwd = str(resolved_cwd) if resolved_cwd.is_dir() else str(Path.home())
         self._conn = conn  # AgentSideConnection，发 session_update / request_permission 用
         self._run_task: asyncio.Task | None = None  # 当前 prompt 的消费 task（cancel 用）
 
@@ -124,9 +128,18 @@ class ACPSession:
     async def _make_agent(self):
         from ethan.core.agent_factory import create_agent
         from ethan.core.consent import set_consent_provider
+        from ethan.core.context import set_working_dir
 
+        # ACP 的 cwd 是 runtime 契约：Multica 给每个任务分配独立工作目录。
+        # ContextVar 让文件/搜索/shell 工具的相对路径按 session 隔离解析；同时把
+        # cwd 放进 system runtime_context，避免模型继续把 ~/.ethan 当任务 workspace。
+        set_working_dir(self.cwd)
         agent = create_agent(channel="acp")
         agent.session_id = self.session_id
+        agent.runtime_context = (
+            f"ACP session working directory: {self.cwd}\n"
+            "Resolve relative file paths and run shell/search commands in this directory."
+        )
         agent.is_owner = False  # daemon 无头场景，无「主人本人」语义
         set_consent_provider(ACPConsentProviderForSession(self._conn, self.session_id, agent))
         return agent
