@@ -111,7 +111,7 @@ def _is_first_request_timeout(e: Exception) -> bool:
     except ImportError:
         pass
     msg = str(e).lower()
-    return "timed out" in msg or ("request timed out" in msg)
+    return "timed out" in msg
 
 
 class OpenAICompatProvider(BaseProvider):

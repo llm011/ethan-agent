@@ -1191,6 +1191,21 @@ class Agent:
         # agent 层重发是仅有的两层兜底，叠加起来也要有界，避免分钟级挂起。
         _same_model_retried = False
 
+        async def _pump(stream):
+            # 消费一轮流式响应：reasoning → ThinkingEvent、content → 累积并透传、
+            # final → 记 final_chunk + 计 usage。主路径与各异常兜底重试（图片剥离 /
+            # 400 裁剪 / lite 回退 / 备选模型 / 同模型）共用，消费逻辑改这里一处即可。
+            nonlocal full_content, final_chunk
+            async for chunk in stream:
+                if chunk.reasoning:
+                    yield ThinkingEvent(delta=chunk.reasoning)
+                if chunk.content:
+                    full_content += chunk.content
+                    yield chunk.content
+                if chunk.is_final:
+                    final_chunk = chunk
+                    self.usage.add(chunk.usage)
+
         for i in range(max_iters + MAX_INJECT_EXTRA_ROUNDS):
             # 上一轮注入的决策提示/增强上下文是临时 user 消息，本轮消费完后 pop 掉，避免污染 history
             if _decision_prompt_injected and working and working[-1].role == "user":
@@ -1258,15 +1273,8 @@ class Agent:
             # 前端在工具行展示「模型生成」耗时——与工具执行时长（collector 计算）分开。
             gen_start = time.monotonic()
             try:
-                async for chunk in provider.stream_chat(working, tools=tools, system=sys):
-                    if chunk.reasoning:
-                        yield ThinkingEvent(delta=chunk.reasoning)
-                    if chunk.content:
-                        full_content += chunk.content
-                        yield chunk.content
-                    if chunk.is_final:
-                        final_chunk = chunk
-                        self.usage.add(chunk.usage)
+                async for ev in _pump(provider.stream_chat(working, tools=tools, system=sys)):
+                    yield ev
             except Exception as e:
                 # 图片相关错误（尺寸超限 / non-VLM 拒绝 image_url）：写文件后重试一次。
                 # 图片已落盘，[image_paths: ...] 路径提示已在 content 中，
@@ -1277,15 +1285,8 @@ class Agent:
                         logger.warning("图片相关错误，写文件后重试: %s", e)
                         full_content = ""
                         final_chunk = None
-                        async for chunk in provider.stream_chat(working, tools=tools, system=sys):
-                            if chunk.reasoning:
-                                yield ThinkingEvent(delta=chunk.reasoning)
-                            if chunk.content:
-                                full_content += chunk.content
-                                yield chunk.content
-                            if chunk.is_final:
-                                final_chunk = chunk
-                                self.usage.add(chunk.usage)
+                        async for ev in _pump(provider.stream_chat(working, tools=tools, system=sys)):
+                            yield ev
                     else:
                         raise  # 没有图片可剥离，不是图片问题
                 elif is_input_length_error(e) and not _length_trimmed and not full_content:
@@ -1306,15 +1307,8 @@ class Agent:
                     yield InjectEvent(messages=[f"会话过长，已自动截断较早的历史消息（约省略 {omitted} 字），正在继续处理…"])
                     full_content = ""
                     final_chunk = None
-                    async for chunk in provider.stream_chat(working, tools=tools, system=sys):
-                        if chunk.reasoning:
-                            yield ThinkingEvent(delta=chunk.reasoning)
-                        if chunk.content:
-                            full_content += chunk.content
-                            yield chunk.content
-                        if chunk.is_final:
-                            final_chunk = chunk
-                            self.usage.add(chunk.usage)
+                    async for ev in _pump(provider.stream_chat(working, tools=tools, system=sys)):
+                        yield ev
                 # lite 模型（fast 档）可能偶发 503/鉴权失败，或 lite 模型在当前
                 # provider 上不可用（如 OpenAI-compat base URL 不认识 gemini-flash-lite）。
                 # 若还没产出任何内容，回退主模型重试本轮一次，并禁用 lite provider
@@ -1327,15 +1321,8 @@ class Agent:
                     self._lite_provider = self._provider  # 禁用 lite，后续 fast 档不再重试
                     full_content = ""
                     final_chunk = None
-                    async for chunk in provider.stream_chat(working, tools=tools, system=sys):
-                        if chunk.reasoning:
-                            yield ThinkingEvent(delta=chunk.reasoning)
-                        if chunk.content:
-                            full_content += chunk.content
-                            yield chunk.content
-                        if chunk.is_final:
-                            final_chunk = chunk
-                            self.usage.add(chunk.usage)
+                    async for ev in _pump(provider.stream_chat(working, tools=tools, system=sys)):
+                        yield ev
                 elif (isinstance(e, TimeoutError) or _is_retriable_connect_error(e)) and not full_content:
                     _timeout_fb = self._get_timeout_fallback(provider)
                     if _timeout_fb is not None:
@@ -1345,15 +1332,8 @@ class Agent:
                         )
                         full_content = ""
                         final_chunk = None
-                        async for chunk in _timeout_fb.stream_chat(working, tools=tools, system=sys):
-                            if chunk.reasoning:
-                                yield ThinkingEvent(delta=chunk.reasoning)
-                            if chunk.content:
-                                full_content += chunk.content
-                                yield chunk.content
-                            if chunk.is_final:
-                                final_chunk = chunk
-                                self.usage.add(chunk.usage)
+                        async for ev in _pump(_timeout_fb.stream_chat(working, tools=tools, system=sys)):
+                            yield ev
                     elif not _same_model_retried:
                         # 无备选模型（未配 fallback_model / 链上无下一个）：换模型这条路
                         # 走不通，但这类错误多为瞬态（同配置相邻请求时好时坏），同模型
@@ -1369,15 +1349,8 @@ class Agent:
                         )
                         full_content = ""
                         final_chunk = None
-                        async for chunk in provider.stream_chat(working, tools=tools, system=sys):
-                            if chunk.reasoning:
-                                yield ThinkingEvent(delta=chunk.reasoning)
-                            if chunk.content:
-                                full_content += chunk.content
-                                yield chunk.content
-                            if chunk.is_final:
-                                final_chunk = chunk
-                                self.usage.add(chunk.usage)
+                        async for ev in _pump(provider.stream_chat(working, tools=tools, system=sys)):
+                            yield ev
                     else:
                         raise
                 else:
