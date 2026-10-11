@@ -518,12 +518,18 @@ class ShellTool(BaseTool):
             # start_new_session=True 使子进程成为新会话/进程组的 leader，
             # 这样 os.killpg 可以一把杀掉整个进程组（包括 shell 派生的孙进程），
             # 避免 proc.kill() 只杀 shell 本身、子进程（python/管道/&后台）继续跑的问题。
+            from ethan.core.context import get_working_dir
+
+            # ACP client 在 session/new/load 传入 cwd；通过请求级 ContextVar 让
+            # 相对路径与 shell 命令都在任务目录执行。其他渠道未设置时保持旧语义：home。
+            working_dir = get_working_dir()
+            cwd = os.path.expanduser(working_dir or "~")
             proc = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 env=env,
-                cwd=os.path.expanduser("~"),  # 默认 home 目录，避免 launchd 下 cwd 为 /
+                cwd=cwd,
                 start_new_session=True,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)

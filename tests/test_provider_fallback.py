@@ -151,6 +151,84 @@ class TestIsRetriable:
         resp = httpx.Response(429, request=req)
         assert _is_retriable(httpx.HTTPStatusError("rate", request=req, response=resp))
 
+    # --- 5xx 一律重试（含裸 500）-------------------------------------------
+    # badcase：中转网关把上游故障压成 500，早先只认 502/503/504，导致主 provider
+    # 首次 500 直接冒泡中断整个会话（「模型调用失败即中断」）。
+
+    @pytest.mark.parametrize("code", [500, 501, 502, 503, 504, 599])
+    def test_httpx_5xx_retriable(self, code):
+        import httpx
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(code, request=req)
+        assert _is_retriable(httpx.HTTPStatusError("boom", request=req, response=resp))
+
+    @pytest.mark.parametrize("code", [400, 401, 403, 404, 413, 422])
+    def test_httpx_4xx_except_429_non_retriable(self, code):
+        import httpx
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(code, request=req)
+        assert not _is_retriable(httpx.HTTPStatusError("bad", request=req, response=resp))
+
+    @pytest.mark.parametrize("code", [500, 502, 503, 504])
+    def test_openai_5xx_retriable(self, code):
+        import httpx
+        import openai
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(code, request=req, json={})
+        assert _is_retriable(openai.APIStatusError("boom", response=resp, body=None))
+
+    def test_openai_internal_server_error_retriable(self):
+        """截图里的 badcase：openai.InternalServerError(500) 必须可重试。"""
+        import httpx
+        import openai
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(500, request=req, json={})
+        assert _is_retriable(
+            openai.InternalServerError("Error code: 500", response=resp, body=None)
+        )
+
+    def test_openai_401_non_retriable(self):
+        import httpx
+        import openai
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(401, request=req, json={})
+        assert not _is_retriable(openai.APIStatusError("unauthorized", response=resp, body=None))
+
+    def test_500_text_keyword_retriable(self):
+        # 网关把 5xx 压成纯文本、拿不到 status_code 时的兜底识别
+        assert _is_retriable(RuntimeError("500 Internal Server Error from upstream"))
+        assert _is_retriable(RuntimeError("Error: 500 internal server error"))
+
+    def test_bare_internal_server_error_text_not_retriable(self):
+        """裸 "internal server error" 不再算可重试：这里是子串匹配、不看状态码。
+
+        裸词会命中「400 ... upstream returned 500 internal server error」这类
+        4xx 正文，误判后 FallbackProvider 会 record_failure 连累健康 provider
+        熔断（3 次即 OPEN），同时挡掉 400 该走的裁剪/剥图兜底路径。
+        """
+        assert not _is_retriable(RuntimeError("Internal server error"))
+
+    def test_4xx_text_with_transient_words_not_retriable(self):
+        """4xx 文案里带瞬态词（含引用上游 5xx）不算可重试。
+
+        拿得到 status_code 时上面的 APIStatusError 分支已直接判定；走文案兜底的
+        场景已无 status_code，只能靠 "Error code: 4xx" 前缀自证不是 4xx。
+        """
+        assert not _is_retriable(
+            RuntimeError("400 invalid_request_error: tool call failed; internal server error in arguments")
+        )
+        assert not _is_retriable(
+            RuntimeError("Error code: 400 - upstream returned 500 Internal Server Error")
+        )
+        assert not _is_retriable(RuntimeError("Error code: 401 - Unauthorized: connection error"))
+        assert not _is_retriable(RuntimeError("Error code: 429 - rate limited"))
+        # 真实 400 状态对象仍可重试判定不受影响
+        import httpx
+        import openai
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(429, request=req, json={})
+        assert _is_retriable(openai.APIStatusError("rate limited", response=resp, body=None))
+
 
 # ---------------------------------------------------------------------------
 # FallbackProvider — chat
@@ -179,6 +257,20 @@ class TestFallbackProviderChat:
         with pytest.raises(ValueError, match="bad request"):
             asyncio.run(fp.chat([Message(role="user", content="hi")]))
         backup.chat.assert_not_awaited()
+
+    def test_falls_back_on_http_500(self):
+        """裸 500 也要切备选 provider，而不是直接冒泡中断会话。"""
+        import httpx
+        import openai
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(500, request=req, json={})
+        err = openai.InternalServerError("Error code: 500", response=resp, body=None)
+        primary = _make_failing_provider(err, model="m1")
+        backup = _make_provider("m2")
+        fp = FallbackProvider([("p1", primary), ("p2", backup)])
+        result = asyncio.run(fp.chat([Message(role="user", content="hi")]))
+        assert result.content == "ok"
+        backup.chat.assert_awaited_once()
 
     def test_all_providers_fail_raises_last(self):
         e1 = RuntimeError("connection error p1")
@@ -239,6 +331,36 @@ class TestFallbackProviderStream:
         fp = FallbackProvider([("p1", primary), ("p2", backup)])
         chunks = asyncio.run(self._collect(fp, [Message(role="user", content="hi")]))
         assert any(c.content == "hello" for c in chunks)
+
+    def test_stream_falls_back_on_http_500(self):
+        """流式建连阶段收到裸 500：切备选 provider 继续本轮。"""
+        import httpx
+        import openai
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(500, request=req, json={})
+        err = openai.InternalServerError("Error code: 500", response=resp, body=None)
+        primary = _make_failing_provider(err)
+        backup = _make_provider()
+        fp = FallbackProvider([("p1", primary), ("p2", backup)])
+        chunks = asyncio.run(self._collect(fp, [Message(role="user", content="hi")]))
+        assert any(c.content == "hello" for c in chunks)
+
+    def test_stream_does_not_fall_back_on_400(self):
+        import httpx
+        import openai
+        req = httpx.Request("POST", "http://x")
+        resp = httpx.Response(400, request=req, json={})
+        err = openai.APIStatusError("bad request", response=resp, body=None)
+        primary = _make_failing_provider(err)
+        backup = _make_provider()
+        fp = FallbackProvider([("p1", primary), ("p2", backup)])
+
+        async def _run():
+            async for _ in fp.stream_chat([Message(role="user", content="hi")]):
+                pass
+
+        with pytest.raises(openai.APIStatusError):
+            asyncio.run(_run())
 
     def setup_method(self):
         from ethan.providers.circuit_breaker import get_circuit_breaker

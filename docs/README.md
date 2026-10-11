@@ -40,6 +40,7 @@
 | [后台任务](./background-tasks.md) | 即时长任务异步执行、独立会话、按渠道回灌、终止、会话不进常规列表、主会话任务条 + 任务中心 Web 交互 |
 | [接口层](./interface.md) | CLI (REPL)、HTTP API (SSE)、命令行工具、Web UI 路由、桌面端（Tauri） |
 | [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode / Codex 接入、多轮会话、sub_steps 解析 |
+| [ACP Server](./acp-server.md) | Ethan 作为 ACP runtime 被拉起（`ethan acp`）：协议映射、Multica 接入、consent 桥接、渠道差异 |
 | [安装指南](./installation.md) | pip / Docker / 源码 / 桌面端（macOS + Windows）四种安装方式 |
 | [Computer Use Bridge](./computer-use-bridge.md) | Docker 容器内 ethan 操控宿主机桌面（cua-bridge TCP→UDS 桥） |
 | [浏览器控制 · 总览与架构](./browser/overview.md) | 调用链总览、三段链路职责、端到端时序、代码地图 |

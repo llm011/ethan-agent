@@ -28,6 +28,22 @@ def get_session_id() -> str:
     return ETHAN_SESSION_ID.get()
 
 
+# 当前请求的工作目录。ACP client 在 session/new / session/load 里传 cwd；
+# 文件、搜索、shell 工具解析相对路径时以它为基准。空串保持既有渠道语义：
+# 文件工具跟进程 cwd，shell 工具回退到 home。
+ETHAN_WORKING_DIR: ContextVar[str] = ContextVar("ETHAN_WORKING_DIR", default="")
+
+
+def set_working_dir(path: str) -> None:
+    """设置当前请求工作目录；ContextVar 保证并发 ACP session 隔离。"""
+    ETHAN_WORKING_DIR.set(path or "")
+
+
+def get_working_dir() -> str:
+    """读取当前请求工作目录；非 ACP 渠道默认为空。"""
+    return ETHAN_WORKING_DIR.get()
+
+
 def set_user_id(uid: str) -> None:
     """设置当前上下文的 user_id。空串或 None 都归一为 default profile。"""
     ETHAN_USER_ID.set(uid or "")
