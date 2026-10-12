@@ -188,7 +188,7 @@ export async function getShortcut(): Promise<string> {
 
 /** 面板发来的 search 请求：在扩展侧匹配，只回命中的几条。 */
 async function handleSearch(query: string, includeClosed = false) {
-  const tabs = (await queryTabs({})).map(toSessionTab);
+  const tabs = (await queryTabs({})).map(tab => toSessionTab(tab));
   const groups = new Map<number, { title?: string; color?: string }>();
   try {
     for (const g of await queryGroups({})) {

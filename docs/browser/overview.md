@@ -135,7 +135,7 @@ ethan/tools/builtin/
 ├── browser_page.py             browser_page
 ├── browser_network.py          browser_network
 ├── browser_selectors.py        selector / ref 解析
-└── browser_output.py           snapshot / eval 打包与落盘
+└── browser_output.py           snapshot / eval / user_list 打包与落盘
 
 browser-extension/
 ├── src/manifest.json            MV3 manifest(无 nativeMessaging,改 host_permissions)

@@ -5,6 +5,8 @@ import itertools
 import json
 import time
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Any
 
 from .browser_compat import browser as B
 
@@ -36,6 +38,94 @@ def _persist_snapshot(content: str, session: str) -> str:
 # （实测抖音 Top10 单 case input 高达 ~300 万 token）。策略与 snapshot 一致：
 # 完整结果落盘，prompt 只带首段，模型按需用 snapshot_read 翻页读取。
 _EVAL_MAX_CHARS = 8000  # eval 返回值（result 字段）超过此长度即落盘 + 截断首段
+
+_USER_TABS_MAX_CHARS = 24000  # user_list 返回值上限，超限即落盘 + 截断首段
+_USER_TABS_DIR = "/tmp/ethan-tablist"
+
+
+def _tab_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _persist_user_tabs(payload: dict) -> str:
+    """写可按行分页的完整 JSON；独占创建、0600 权限，失败移除半成品。"""
+    directory = Path(B._USER_TABS_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", prefix="user_tabs_", suffix=".json",
+            dir=directory, delete=False,
+        ) as file:
+            path = Path(file.name)
+            # 不能写单行 JSON：file_read 的 offset/max_lines 是行分页参数。
+            json.dump(payload, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+        return str(path)
+    except Exception:
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+
+
+def _pack_user_tabs(raw: dict | list) -> str:
+    """按最终 JSON 字符数限流；预览只含完整 tab，returned 精确计数。
+
+    小清单保持原字段并补 total。超限将原清单完整落盘，预览含显式截断标志
+    和读取指引。即使落盘失败或单个 tab 就超限，也绝不把超长内容回灌模型。
+    """
+    payload = raw if isinstance(raw, dict) else {"tabs": raw}
+    tabs = payload.get("tabs") or []
+    total = len(tabs)
+    complete = _tab_json({**payload, "total": total})
+    if len(complete) <= B._USER_TABS_MAX_CHARS:
+        return complete
+
+    out: dict[str, Any] = {
+        "tabs": [], "total": total, "returned": 0, "truncated": True,
+        "has_more": bool(total),
+    }
+    try:
+        out["path"] = _persist_user_tabs(payload)
+        out["hint"] = (
+            "仅预览，不是全量。完整 JSON 已落盘；用 file_read(path=path, "
+            "offset=1, max_lines=100) 按行分页，读完再整理。单行过长时可用 "
+            "browser_page(action='snapshot_read', path=path, offset=0, length=8000) "
+            "按字符分页（下一段 offset+=chunk_length）。"
+        )
+    except Exception:
+        out["hint"] = (
+            "清单过长且落盘失败；当前仅预览，不是全量。请改用 "
+            "browser_tab(action='find_tab', query=关键词) 收窄定位，勿据此整理全部 tab。"
+        )
+
+    # 先扣除最终元数据与 JSON 转义后的条目长度，再加入完整条目。
+    # returned 的位数也必须计入；不截断 JSON 文本，不粗数 tabId 字样。
+    base_chars = len(_tab_json(out))
+    encoded_tabs: list[str] = []
+    tab_chars = 0
+    for tab in tabs:
+        encoded = _tab_json(tab)
+        count = len(encoded_tabs) + 1
+        size = base_chars + tab_chars + len(encoded) + (count - 1) + len(str(count)) - 1
+        if size > B._USER_TABS_MAX_CHARS:
+            break
+        encoded_tabs.append(encoded)
+        tab_chars += len(encoded)
+    out["returned"] = len(encoded_tabs)
+    out["has_more"] = len(encoded_tabs) < total
+    # 将已序列化的对象拼入 []，避免对巨型列表反复序列化（线性开销）。
+    header = _tab_json({k: v for k, v in out.items() if k != "tabs"})
+    result = '{"tabs":[' + ",".join(encoded_tabs) + '],' + header[1:]
+    if len(result) <= B._USER_TABS_MAX_CHARS:
+        return result
+    # 极长自定义落盘目录也可能使元数据超预算；不要因读取指引再次泄漏体积。
+    fallback = {"tabs": [], "total": total, "returned": 0, "truncated": True,
+                "has_more": bool(total), "hint": "清单过长；请用 find_tab 按关键词收窄。"}
+    return _tab_json(fallback)
 
 
 def _truncate_eval_result(result, session: str) -> str:

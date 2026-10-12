@@ -132,7 +132,7 @@ flowchart TD
 
 ### ③ 会话归属门禁(防跨对话操控)
 
-授权解决的是"能不能用浏览器",归属解决的是"能不能用**这个** session"。`browser.py` 的 `_call()` 在把任何带 `browser_session_id` 的调用下发到 Hub **之前**,先做归属校验:
+授权解决的是"能不能用浏览器",归属解决的是"能不能用**这个** session"。`browser_runtime.py` 的 `_call()`（旧 `browser.py` 路径仍 re-export） 在把任何带 `browser_session_id` 的调用下发到 Hub **之前**,先做归属校验:
 
 ```python
 # 伪代码,见 ethan/tools/builtin/browser.py
@@ -160,7 +160,15 @@ async def _require_owned_or_recover(browser_session_id, ethan_sid):
 - `session_list` 的返回也按当前对话过滤(`_filter_owned_sessions`),不向某对话泄漏其他对话/用户的 session id。
 - 效果:即便对话 B 已通过自己的 consent 授权,也无法操作对话 A 创建的 session——跨对话操控在触达 Hub 之前就被拒绝。
 
-> `tab_user_list` 列出的是用户**未被任何 session 接管的原生标签**(供挑选可接管对象),不属于"别人对话的 managed session"。由于 `attach` 只能把标签纳入当前对话自己拥有的 session,跨对话**操控**这条路已被堵死;`user_list` 仅是标签可见性,对任意已授权 Agent 一致。
+> `tab_user_list` 查询所有窗口的全部标签，包括已分组/已被 session 接管的标签，并不按 session 归属过滤。由于 `attach` 只能把标签纳入当前对话自己拥有的 session，跨对话 session **操控**仍受上述门禁约束；`user_list` 是全局标签可见性，对任意已授权 Agent 一致。
+
+### 全量标签清单的体积保护
+
+- 扩展的 `listUserTabs()` 省略 `favIconUrl`，避免内嵌 base64 图标放大全量响应；会话操作及关键词搜索默认继续保留图标，搜索面板显示不变。
+- `browser_tab(action='user_list')` 的最终序列化 JSON（含元数据）限制为 **24,000 字符**。未超限时返回完整 `tabs` 和 `total`；超限时完整清单写入 `/tmp/ethan-tablist/` 下的唯一 JSON 文件，返回能装下的完整 `tabs` 前缀及 `total`、准确的 `returned`、`truncated=true`、`path`、`has_more` 和读取提示，不切半条 JSON、不靠文本猜计数。
+- 文件按行排版，使用 `file_read(path=..., offset=1, max_lines=100)` 按行分页读完（`offset` 为 1 起的行号）后再全量整理/核验。单个极长标题/URL 也不会令响应超限；预览可能为空，但完整数据仍在文件中。
+- 落盘失败仍返回有界预览和明确失败提示，**不返回超长全量 JSON，也不提供不存在的 path**。此时只能按关键词精确定位，不能拿残缺清单做全量整理。
+- 临时清单可能含敏感标题/URL，仅存本机；不承诺自动清理，任务完成后可按需删除。
 
 ### ④ 渠道硬策略
 
@@ -232,8 +240,10 @@ flowchart LR
 | `RPC_VERSION` | 1 | `protocol.py` | 协议版本(`auth_ok` 携带) |
 | `IDLE_TTL_SECONDS` | 1800s (30min) | `session_map.py` | session 空闲回收阈值 |
 | `_SWEEP_INTERVAL` | 300s (5min) | `session_map.py` | 空闲扫描间隔 |
-| `_SNAPSHOT_CHUNK_CHARS` | 10000 | `browser.py` | snapshot 分段返回的每段目标字符数 |
-| `_SNAPSHOT_DIR` | `/tmp/ethan-snapshots` | `browser.py` | snapshot 完整内容落盘目录 |
+| `_SNAPSHOT_CHUNK_CHARS` | 10000 | `browser_output.py` | snapshot 分段返回的每段目标字符数 |
+| `_SNAPSHOT_DIR` | `/tmp/ethan-snapshots` | `browser_output.py` | snapshot 完整内容落盘目录 |
+| `_USER_TABS_MAX_CHARS` | 24000 | `browser_output.py` | user_list 最终序列化响应的字符上限 |
+| `_USER_TABS_DIR` | `/tmp/ethan-tablist` | `browser_output.py` | 超限标签清单完整落盘目录 |
 | `MAX_NAME_LENGTH` | 100 | `ax-snapshot.ts` | 元素名称最大长度（原 160，缩短省空间） |
 | `DEFAULT_SCREENSHOT_FORMAT` | `webp` | `page-controller.ts` | 截图默认格式（原 png，webp 省 60-70%） |
 | `_MAX_AGE_SECONDS` | 1800s (30min) | `screenshot.py` | 截图文件保留时长 |

@@ -149,7 +149,7 @@ export class BrowserSessionStoreCore {
         groupId: session.groupId,
         windowId: session.windowId,
       });
-      return tabs.map(toSessionTab);
+      return tabs.map(tab => toSessionTab(tab));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new BrowserExtensionRpcError(

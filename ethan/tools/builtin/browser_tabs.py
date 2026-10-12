@@ -99,7 +99,13 @@ class BrowserTabTool(_BrowserToolBase):
                 return json.dumps(await B._call("tab_list", {"sessionId": session},
                                               browser_session_id=session), ensure_ascii=False)
             if action == "user_list":
-                return json.dumps(await B._call("tab_user_list", {}), ensure_ascii=False)
+                # 全量 tab 清单可能很长（几十个 tab，title 也可能很长），必须做
+                # 容量保护：超限时**完整清单落盘**并把首段返回给模型，同时打上
+                # total/returned/truncated/path 标记。没有这层保护时，超长返回值
+                # 会被上层链路静默截断——模型只看到前几条 tab 却以为是全部，
+                # 据此做 tab 整理必然漏 tab（真实踩过的坑）。
+                raw = await B._call("tab_user_list", {})
+                return B._pack_user_tabs(raw)
             if action == "find_tab":
                 # 匹配下沉到扩展侧（tabs.search）：tab 数据本来就只在那里。
                 # 早期版本是把全量 tab 拉回 Python 做子串匹配——那是把数据搬到

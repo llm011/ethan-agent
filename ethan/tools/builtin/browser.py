@@ -41,6 +41,9 @@ from .browser_output import (  # noqa: E402, F401
     _PERSIST_SEQ,
     _persist_snapshot,
     _EVAL_MAX_CHARS,
+    _USER_TABS_MAX_CHARS,
+    _USER_TABS_DIR,
+    _pack_user_tabs,
     _truncate_eval_result,
     _chunk_text,
 )
