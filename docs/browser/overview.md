@@ -126,7 +126,16 @@ ethan/browser/
 ├── auth.py            会话级一次性授权状态
 └── http_route.py      /api/browser/shot/{name} 截图文件路由
 
-ethan/tools/builtin/browser.py   browser_session / browser_tab / browser_page / browser_network / browser_client 五工具
+ethan/tools/builtin/
+├── browser.py                  兼容入口：re-export 五工具及旧辅助接口
+├── browser_compat.py           保留旧入口 monkeypatch 的跨模块兼容
+├── browser_runtime.py          RPC 调用、客户端路由、会话归属门禁和工具基类
+├── browser_sessions.py         browser_session / browser_client
+├── browser_tabs.py             browser_tab
+├── browser_page.py             browser_page
+├── browser_network.py          browser_network
+├── browser_selectors.py        selector / ref 解析
+└── browser_output.py           snapshot / eval 打包与落盘
 
 browser-extension/
 ├── src/manifest.json            MV3 manifest(无 nativeMessaging,改 host_permissions)
