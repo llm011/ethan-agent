@@ -53,7 +53,9 @@ browser_client(action="list")   # 多个客户端 → browser_client(action="use
 browser_tab(action="user_list")
 ```
 
-拿到全部 tab 的 `tabId` / `windowId` / `groupId` / `url` / `title` / `active`。字段是驼峰 `tabId`（不是 `tab_id`）；`groupId` 为 `-1` 表示游离。**后续所有判断基于这份清单，不臆造 tab。**
+拿到 tab 的 `tabId` / `windowId` / `groupId` / `url` / `title` / `active`（不带 favicon）。字段是驼峰 `tabId`（不是 `tab_id`）；无 `groupId`（或 `-1`）表示游离。**后续所有判断基于完整清单，不臆造 tab。**
+
+**先检查是否截断**：`truncated=true` 时，当前 `tabs` 仅为预览，`total` 是全部数量、`returned` 是预览中完整条目数。若有 `path`，先用 `file_read(path=..., offset=1, max_lines=100)` 按行分页读完整文件（`offset` 是 1 起的行号，逐页往后推），再做分类/整理及最终核验，不能把预览当成全量。若落盘失败（无 `path`），不要根据残缺清单执行全量整理；可用 `find_tab` 精确定位指定标签，或汇报阻塞。
 
 ## 第 2 步：分类打标（内存里做，不输出）
 
@@ -150,3 +152,4 @@ browser_tab(action="organize", ops=[
 - 不碰 tab 内容：不填表、不点击页面内元素。
 - 只整理当前这一个浏览器客户端的 tab。
 - **连接被顶替报错**时：先 `browser_client(action="use", name=...)` 重连 → 重新 `user_list` 拿最新 tabId → 重跑 `organize`。重跑安全（已关的会以 `skipped: not found` 返回，不误关、不重复）。若上次已部分生效（关闭落地、仅分组未应用），以最新 `user_list` 为准补齐差异。
+- **❌ 禁止拿历史 session 里的旧 tabId 挨个 `attach` 去试探**（真实踩过的坑，一次浪费七十多步）。tabId 只在**当前**这份 `user_list` 里有效，列表拿不全时唯一正路是读完整清单（见第 1 步），不是逐个 attach 碰运气。

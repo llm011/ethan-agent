@@ -84,8 +84,10 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
 
   async listUserTabs(): Promise<BrowserTabUserListResult> {
     const tabs = await queryTabs({});
+    // 全量清单省略可能很大的 base64 favicon；整理只需要标签元数据。
+    // 标题/URL 仍可能超限，工具层另做完整落盘和显式截断。
     return {
-      tabs: tabs.map(toSessionTab),
+      tabs: tabs.map(tab => toSessionTab(tab, { includeFavIcon: false })),
     };
   }
 
@@ -99,7 +101,7 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
   async searchTabs(
     params: BrowserTabSearchParams,
   ): Promise<BrowserTabSearchResult> {
-    const tabs = (await queryTabs({})).map(toSessionTab);
+    const tabs = (await queryTabs({})).map(tab => toSessionTab(tab));
     const groups = await this.loadGroupMeta();
     return searchTabs(tabs, params, groups);
   }

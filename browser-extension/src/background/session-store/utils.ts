@@ -75,7 +75,18 @@ export function getTabId(tab: chrome.tabs.Tab, fallback: string): number {
   return tab.id;
 }
 
-export function toSessionTab(tab: chrome.tabs.Tab): BrowserSessionTab {
+/**
+ * 把 Chrome tab 归一化成会话 tab 结构。
+ *
+ * user_list 传 includeFavIcon=false：内嵌 base64 favicon 会放大全量 RPC 响应，
+ * 且整理只需要标签元数据。默认保留 favicon，兼容会话操作及搜索面板图标。
+ * 带 options 参数后，Array.map 必须用包装函数，避免把索引当成 options 传入。
+ */
+export function toSessionTab(
+  tab: chrome.tabs.Tab,
+  options: { includeFavIcon?: boolean } = {},
+): BrowserSessionTab {
+  const { includeFavIcon = true } = options;
   const tabId = getTabId(tab, 'Missing Chrome tab id');
   return {
     tabId,
@@ -87,7 +98,7 @@ export function toSessionTab(tab: chrome.tabs.Tab): BrowserSessionTab {
     url: tab.url,
     title: tab.title,
     active: tab.active,
-    ...(tab.favIconUrl ? { favIconUrl: tab.favIconUrl } : {}),
+    ...(includeFavIcon && tab.favIconUrl ? { favIconUrl: tab.favIconUrl } : {}),
   };
 }
 
