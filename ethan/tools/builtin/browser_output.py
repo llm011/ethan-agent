@@ -8,6 +8,8 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
+from ethan.core.context_budget import MAX_TOOL_RESULT_CHARS
+
 from .browser_compat import browser as B
 
 # snapshot 分页：完整内容落盘 /tmp，prompt 里只带首段，agent 按需翻页读取。
@@ -39,12 +41,27 @@ def _persist_snapshot(content: str, session: str) -> str:
 # 完整结果落盘，prompt 只带首段，模型按需用 snapshot_read 翻页读取。
 _EVAL_MAX_CHARS = 8000  # eval 返回值（result 字段）超过此长度即落盘 + 截断首段
 
-_USER_TABS_MAX_CHARS = 24000  # user_list 返回值上限，超限即落盘 + 截断首段
+# user_list 返回值上限，超限即落盘 + 截断首段。必须低于上下文单条封顶
+# （context_budget.MAX_TOOL_RESULT_CHARS），否则进上下文时被从尾部再砍一刀，
+# 截断标记跟着丢——模型又看到一份「没写截断」的残缺清单。留 2000 余量给转义差异。
+_USER_TABS_MAX_CHARS = MAX_TOOL_RESULT_CHARS - 2000
 _USER_TABS_DIR = "/tmp/ethan-tablist"
 
 
 def _tab_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _user_tabs_file_text(payload: dict) -> str:
+    """整体仍是合法 JSON，但一个 tab 一行：file_read 的 offset/max_lines 是行分页，
+    max_lines=100 即一页 100 个 tab。indent=2 会让每个 tab 占约 8 行，翻页次数翻 8 倍。"""
+    tabs = payload.get("tabs")
+    if not isinstance(tabs, list):
+        return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    meta = _tab_json({k: v for k, v in payload.items() if k != "tabs"})
+    head = "{" + (meta[1:-1] + "," if len(meta) > 2 else "")
+    body = ",\n".join(_tab_json(tab) for tab in tabs)
+    return head + '"tabs":[\n' + body + ("\n" if body else "") + "]}\n"
 
 
 def _persist_user_tabs(payload: dict) -> str:
@@ -58,9 +75,7 @@ def _persist_user_tabs(payload: dict) -> str:
             dir=directory, delete=False,
         ) as file:
             path = Path(file.name)
-            # 不能写单行 JSON：file_read 的 offset/max_lines 是行分页参数。
-            json.dump(payload, file, ensure_ascii=False, indent=2)
-            file.write("\n")
+            file.write(_user_tabs_file_text(payload))
         return str(path)
     except Exception:
         if path is not None:
@@ -118,8 +133,9 @@ def _pack_user_tabs(raw: dict | list) -> str:
     out["returned"] = len(encoded_tabs)
     out["has_more"] = len(encoded_tabs) < total
     # 将已序列化的对象拼入 []，避免对巨型列表反复序列化（线性开销）。
+    # 元数据放在 tabs **之前**：万一下游仍按字符截尾，先丢的是预览条目而不是截断标记。
     header = _tab_json({k: v for k, v in out.items() if k != "tabs"})
-    result = '{"tabs":[' + ",".join(encoded_tabs) + '],' + header[1:]
+    result = header[:-1] + ',"tabs":[' + ",".join(encoded_tabs) + ']}'
     if len(result) <= B._USER_TABS_MAX_CHARS:
         return result
     # 极长自定义落盘目录也可能使元数据超预算；不要因读取指引再次泄漏体积。

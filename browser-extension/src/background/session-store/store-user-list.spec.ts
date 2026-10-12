@@ -43,7 +43,7 @@ describe('user_list favicon 体积保护', () => {
       url: tab.url, title: tab.title, active: tab.active,
     })));
     expect(result.tabs.every(tab => !('favIconUrl' in tab))).toBe(true);
-    expect(JSON.stringify(result).length).toBeLessThan(24_000);
+    expect(JSON.stringify(result).length).toBeLessThan(18_000);
     expect(tabs[0].favIconUrl).toBe(icon); // 不修改 Chrome 返回值
   });
 

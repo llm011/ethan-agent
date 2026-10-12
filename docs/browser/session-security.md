@@ -165,8 +165,8 @@ async def _require_owned_or_recover(browser_session_id, ethan_sid):
 ### 全量标签清单的体积保护
 
 - 扩展的 `listUserTabs()` 省略 `favIconUrl`，避免内嵌 base64 图标放大全量响应；会话操作及关键词搜索默认继续保留图标，搜索面板显示不变。
-- `browser_tab(action='user_list')` 的最终序列化 JSON（含元数据）限制为 **24,000 字符**。未超限时返回完整 `tabs` 和 `total`；超限时完整清单写入 `/tmp/ethan-tablist/` 下的唯一 JSON 文件，返回能装下的完整 `tabs` 前缀及 `total`、准确的 `returned`、`truncated=true`、`path`、`has_more` 和读取提示，不切半条 JSON、不靠文本猜计数。
-- 文件按行排版，使用 `file_read(path=..., offset=1, max_lines=100)` 按行分页读完（`offset` 为 1 起的行号）后再全量整理/核验。单个极长标题/URL 也不会令响应超限；预览可能为空，但完整数据仍在文件中。
+- `browser_tab(action='user_list')` 的最终序列化 JSON（含元数据）限制为 **18,000 字符**（`MAX_TOOL_RESULT_CHARS - 2000`：必须低于上下文单条工具结果封顶，否则会被从尾部再截一刀、截断标记随之丢失；为此元数据也放在 `tabs` 之前输出）。未超限时返回完整 `tabs` 和 `total`；超限时完整清单写入 `/tmp/ethan-tablist/` 下的唯一 JSON 文件，返回能装下的完整 `tabs` 前缀及 `total`、准确的 `returned`、`truncated=true`、`path`、`has_more` 和读取提示，不切半条 JSON、不靠文本猜计数。
+- 文件一个 tab 一行（整体仍是合法 JSON），使用 `file_read(path=..., offset=1, max_lines=100)` 按行分页读完（`offset` 为 1 起的行号）后再全量整理/核验。单个极长标题/URL 也不会令响应超限；预览可能为空，但完整数据仍在文件中。
 - 落盘失败仍返回有界预览和明确失败提示，**不返回超长全量 JSON，也不提供不存在的 path**。此时只能按关键词精确定位，不能拿残缺清单做全量整理。
 - 临时清单可能含敏感标题/URL，仅存本机；不承诺自动清理，任务完成后可按需删除。
 
@@ -242,7 +242,7 @@ flowchart LR
 | `_SWEEP_INTERVAL` | 300s (5min) | `session_map.py` | 空闲扫描间隔 |
 | `_SNAPSHOT_CHUNK_CHARS` | 10000 | `browser_output.py` | snapshot 分段返回的每段目标字符数 |
 | `_SNAPSHOT_DIR` | `/tmp/ethan-snapshots` | `browser_output.py` | snapshot 完整内容落盘目录 |
-| `_USER_TABS_MAX_CHARS` | 24000 | `browser_output.py` | user_list 最终序列化响应的字符上限 |
+| `_USER_TABS_MAX_CHARS` | 18000（`MAX_TOOL_RESULT_CHARS - 2000`） | `browser_output.py` | user_list 最终序列化响应的字符上限 |
 | `_USER_TABS_DIR` | `/tmp/ethan-tablist` | `browser_output.py` | 超限标签清单完整落盘目录 |
 | `MAX_NAME_LENGTH` | 100 | `ax-snapshot.ts` | 元素名称最大长度（原 160，缩短省空间） |
 | `DEFAULT_SCREENSHOT_FORMAT` | `webp` | `page-controller.ts` | 截图默认格式（原 png，webp 省 60-70%） |

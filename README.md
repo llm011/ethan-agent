@@ -105,7 +105,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 - agent-browser style: accessibility-tree snapshot + ref map, click/fill/type/press/select/scroll/hover, screenshot, keyboard/mouse, page `eval`, all over Chrome DevTools Protocol
 - Session is bound to the conversation (isolated per chat); page ops within a session are serialized, different sessions run in parallel; idle sessions are released (tabs kept) after 30 min
 - Session-level one-time consent: the first browser call in a chat asks once, then all browser ops (incl. `eval`) are allowed for that chat
-- Safe full-tab listing: `browser_tab(user_list)` omits favicons; responses over 24,000 characters save the full list locally and explicitly mark a bounded preview with counts and a file path. Read every page before bulk organization; if saving fails, the preview stays bounded and reports the failure
+- Safe full-tab listing: `browser_tab(user_list)` omits favicons; responses over 18,000 characters (kept below the 20,000-char per-tool-result context cap) save the full list locally and explicitly mark a bounded preview with counts and a file path. Read every page before bulk organization; if saving fails, the preview stays bounded and reports the failure
 - Transport is WebSocket only (extension → ethan), no native messaging host; see [docs/browser-control-plan.md](docs/browser-control-plan.md)
 
 **Desktop control (macOS, via cua-driver)**

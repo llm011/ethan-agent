@@ -129,10 +129,17 @@ def test_directory_failure_does_not_return_all(monkeypatch, tmp_path):
 
 
 def test_write_failure_removes_partial_file(monkeypatch):
-    def fail(*args, **kwargs):
-        args[1].write("partial")
-        raise OSError("disk full")
-    monkeypatch.setattr(browser_output.json, "dump", fail)
+    real_tempfile = browser_output.NamedTemporaryFile
+
+    def failing_tempfile(*args, **kwargs):
+        handle = real_tempfile(*args, **kwargs)
+
+        def write(_text):
+            handle.file.write("partial")
+            raise OSError("disk full")
+        handle.write = write
+        return handle
+    monkeypatch.setattr(browser_output, "NamedTemporaryFile", failing_tempfile)
     out = checked({"tabs": tabs()})
     assert "path" not in out and out["truncated"]
     assert list(Path(B._USER_TABS_DIR).iterdir()) == []
@@ -175,3 +182,19 @@ def test_tab_tool_calls_packer_through_legacy_patch(monkeypatch):
 def test_implementations_import_before_facade(module):
     code = f"import ethan.tools.builtin.{module}; import ethan.tools.builtin.browser"
     subprocess.run([sys.executable, "-c", code], check=True, capture_output=True)
+
+
+def test_budget_fits_context_cap_and_marks_survive_tail_cut():
+    """上下文单条封顶会从尾部截断；预算必须更小，且截断标记要在 tabs 之前。"""
+    from ethan.core.context_budget import MAX_TOOL_RESULT_CHARS
+    assert B._USER_TABS_MAX_CHARS < MAX_TOOL_RESULT_CHARS
+    result = B._pack_user_tabs({"tabs": tabs(300)})
+    head = result[:200]
+    assert '"truncated":true' in head and '"path"' in head and '"total":300' in head
+
+
+def test_file_has_one_tab_per_line():
+    raw = {"tabs": tabs(30), "ok": True}
+    lines = Path(checked(raw)["path"]).read_text().splitlines()
+    assert len(lines) == 30 + 2
+    assert json.loads(lines[1].rstrip(",")) == raw["tabs"][0]
