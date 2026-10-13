@@ -78,7 +78,9 @@ class _ProgressStreamer:
 
 @mcp_server.tool(
     # 聊天类非交互 MCP 客户端（如 codex）对未声明只读的工具会走审批并自动取消，
-    # 表现为工具「调不通」。Ethan 侧有自己的 consent 守卫（is_owner=False），这里声明只读放行。
+    # 表现为工具「调不通」，所以这里声明只读放行。注意：mcp 渠道没装 consent provider，
+    # agent 内的 shell / 写文件等工具会无确认直接执行（is_owner=False 只影响 system prompt），
+    # 访问控制完全靠 network.mcp_api_key 或网络层（如只监听回环 / IP 白名单）。
     annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True),
 )
 async def ask_ethan(prompt: str, session_id: str | None = None, ctx: Context | None = None) -> str:

@@ -380,6 +380,19 @@ MCP（Model Context Protocol）让 Ethan 连接外部 MCP server（如数据库�
 - 连接到 MCP server 后，自动将其暴露的 tools 注册到 `ToolRegistry`
 - 对 Agent Loop 完全透明
 
+### 反向：Ethan 作为 MCP server（`/mcp`）
+
+`ethan serve` 在 `/mcp/` 挂了一个 streamable HTTP MCP server（`ethan/interface/routers/mcp_server.py`），
+暴露一个工具 `ask_ethan(prompt, session_id?)`，供 codex / 豆包等外部客户端把 Ethan 当工具调用。
+
+- **鉴权**：`network.mcp_api_key` 非空时要求 `Authorization: Bearer <key>`；为空则不鉴权。
+  mcp 渠道**没有** consent 守卫，agent 内的 shell / 写文件会直接执行，所以对外暴露时务必靠 key 或网络层限制来源。
+- **只读注解**：`ask_ethan` 声明了 `readOnlyHint=true`。codex 等非交互客户端对未声明只读的工具会弹审批并自动取消
+  （表现为 `user cancelled MCP tool call`）。
+- **流式进度**：tools/call 只有一个最终 result，执行过程通过同一 SSE 响应先推通知——
+  工具开始/失败（`🔧` / `⚠️`）和正文增量（`✍️`，1.5s 节流）。客户端带 `_meta.progressToken` 时发
+  `notifications/progress`，否则只发 `notifications/message`（log）。
+
 ---
 
 ## 关于 Tool 数量对 LLM 的影响
