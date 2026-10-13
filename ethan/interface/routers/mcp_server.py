@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.types import ToolAnnotations
 from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -19,8 +21,69 @@ mcp_server = FastMCP("Ethan", stateless_http=True)
 mcp_server.settings.streamable_http_path = "/"
 
 
-@mcp_server.tool()
-async def ask_ethan(prompt: str, session_id: str | None = None) -> str:
+_TEXT_PUSH_INTERVAL = 1.5  # 正文增量推送节流（秒），避免逐 token 刷通知
+_PREVIEW_CHARS = 200
+
+
+class _ProgressStreamer:
+    """把 agent 的流式事件转成 MCP 通知，让客户端在长任务中实时看到进度。
+
+    tools/call 只能有一个最终 result，「流式」靠同一 SSE 响应里先推的通知：
+    - notifications/progress：客户端带了 progressToken 才会发（SDK 内部判断）
+    - notifications/message（log）：不依赖 progressToken，兜底给只看日志的客户端
+    推送失败（客户端已断开等）只记日志，不影响最终结果。
+    """
+
+    def __init__(self, ctx: Context | None):
+        self.ctx = ctx
+        self.step = 0
+        self._last_text_push = 0.0
+        self._pending_text = ""
+
+    async def _emit(self, message: str) -> None:
+        if self.ctx is None:
+            return
+        self.step += 1
+        try:
+            # 不用 ctx.report_progress：它不带 related_request_id，stateless HTTP 下通知会被
+            # 路由到不存在的独立 GET 流而静默丢失；带上后才会走本次 tools/call 的 SSE 响应。
+            rc = self.ctx.request_context
+            token = rc.meta.progressToken if rc.meta else None
+            if token is not None:
+                await rc.session.send_progress_notification(
+                    progress_token=token, progress=self.step, message=message,
+                    related_request_id=self.ctx.request_id,
+                )
+            await self.ctx.info(message)
+        except Exception:
+            logger.debug("ask_ethan progress push failed", exc_info=True)
+
+    async def on_tool(self, ev) -> None:
+        if ev.state == "start":
+            label = ev.intent or ev.args_summary or ""
+            await self._emit(f"🔧 {ev.tool_name}" + (f": {label[:_PREVIEW_CHARS]}" if label else ""))
+        elif ev.state == "error":
+            await self._emit(f"⚠️ {ev.tool_name} 失败: {(ev.result_preview or '')[:_PREVIEW_CHARS]}")
+
+    async def on_text(self, text: str, force: bool = False) -> None:
+        self._pending_text += text
+        now = time.monotonic()
+        if not self._pending_text.strip():
+            return
+        if force or now - self._last_text_push >= _TEXT_PUSH_INTERVAL:
+            self._last_text_push = now
+            chunk, self._pending_text = self._pending_text, ""
+            await self._emit(f"✍️ {chunk[-_PREVIEW_CHARS:]}")
+
+
+@mcp_server.tool(
+    # 聊天类非交互 MCP 客户端（如 codex）对未声明只读的工具会走审批并自动取消，
+    # 表现为工具「调不通」，所以这里声明只读放行。注意：mcp 渠道没装 consent provider，
+    # agent 内的 shell / 写文件等工具会无确认直接执行（is_owner=False 只影响 system prompt），
+    # 访问控制完全靠 network.mcp_api_key 或网络层（如只监听回环 / IP 白名单）。
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True),
+)
+async def ask_ethan(prompt: str, session_id: str | None = None, ctx: Context | None = None) -> str:
     """Ask Ethan agent a question. Ethan can search the web, read files, manage tasks, and more.
 
     Args:
@@ -76,12 +139,18 @@ async def ask_ethan(prompt: str, session_id: str | None = None) -> str:
     messages = memory.build_context() + [user_msg]
 
     collector = StreamCollector().bind(agent)
+    streamer = _ProgressStreamer(ctx)
     try:
         async for item in agent.stream_chat(messages):
             if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent, InjectEvent)):
                 collector.feed(item)
+                if isinstance(item, ToolEvent):
+                    await streamer.on_tool(item)
                 continue
-            collector.feed(item)
+            text = collector.feed(item)
+            if text:
+                await streamer.on_text(text)
+        await streamer.on_text("", force=True)
     except asyncio.CancelledError:
         pass
     except Exception as e:

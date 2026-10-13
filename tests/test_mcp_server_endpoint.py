@@ -120,3 +120,48 @@ def test_mcp_lifespan_is_entered_by_top_level_app(client):
 
     mgr = mcp_mod.mcp_server.session_manager
     assert mgr._task_group is not None, "session manager 的 task group 未初始化"
+
+
+def test_ask_ethan_declares_read_only(client):
+    """codex 等非交互客户端对未声明只读的工具会自动取消审批，表现为工具调不通。"""
+    r = client.post("/mcp/", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, headers=HEADERS)
+    tool = next(t for t in _parse_sse_all(r)[-1]["result"]["tools"] if t["name"] == "ask_ethan")
+    assert tool["annotations"]["readOnlyHint"] is True
+    assert "ctx" not in tool["inputSchema"]["properties"]
+
+
+def test_ask_ethan_streams_progress_before_result(client, monkeypatch):
+    """进度通知必须带 related_request_id 走本次 tools/call 的 SSE，先于最终 result 到达。"""
+    from types import SimpleNamespace
+
+    import ethan.interface.routers.deps as deps
+    from ethan.providers.base import ToolEvent
+
+    class _FakeAgent:
+        session_id = None
+        is_owner = True
+        usage = SimpleNamespace(input_tokens=0, output_tokens=0, cache_tokens=0)
+
+        async def stream_chat(self, messages):
+            yield ToolEvent(tool_name="shell", args_summary="date", state="start", intent="查时间")
+            yield ToolEvent(tool_name="shell", args_summary="date", state="done")
+            yield "现在是凌晨两点。"
+
+    monkeypatch.setattr(deps, "create_agent", lambda **kw: _FakeAgent())
+    body = {
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "ask_ethan", "arguments": {"prompt": "几点了"}, "_meta": {"progressToken": "p1"}},
+    }
+    r = client.post("/mcp/", json=body, headers=HEADERS)
+    events = _parse_sse_all(r)
+    methods = [e.get("method") or ("result" if "result" in e else "?") for e in events]
+    assert methods[-1] == "result"
+    progress = [e["params"]["message"] for e in events if e.get("method") == "notifications/progress"]
+    assert any("shell" in m and "查时间" in m for m in progress)
+    assert any("凌晨两点" in m for m in progress)
+    assert "凌晨两点" in events[-1]["result"]["content"][0]["text"]
+
+
+def _parse_sse_all(r) -> list[dict]:
+    import json
+    return [json.loads(line[5:]) for line in r.text.splitlines() if line.startswith("data:")]
