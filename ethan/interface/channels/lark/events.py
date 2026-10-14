@@ -36,24 +36,25 @@ _GROUP_TERM_TIMEOUT = 5
 
 
 async def _terminate_proc_group(proc) -> None:
-    """杀掉子进程及其整个进程组（SIGTERM → 超时 → SIGKILL）。
+    """杀掉子进程及其整个进程组（SIGTERM → 探活 → SIGKILL 补刀）。
 
     lark-cli `event consume` 会再 fork 出 `event _bus` 孙子进程，真正握着飞书长连接。
     只 terminate() 直接子进程时，孙子会被 init 收养成孤儿（PPID=1）继续占着
     「一个 app 一个长连接订阅者」的名额，导致重启后新实例收不到任何事件。
 
-    因为 spawn 时带了 start_new_session=True，子进程自成一个进程组（且与 ethan 主进程隔离，
-    不会误杀自己），这里按组投递信号即可把 consume + _bus 一起带走。
+    因为 spawn 时带了 start_new_session=True，子进程是进程组（兼会话）leader，
+    pgid == pid。这里直接用 proc.pid 当 pgid 按组投递信号：
+    - 不走 os.getpgid()：consume 退出被 asyncio 自动 reap 后 getpgid 会失败；
+    - 即便 consume 已退，只要孙子还在组里，PGID 就不会被回收，killpg 仍精确命中整组。
+    SIGTERM 后探活整组（killpg(pgid, 0) 只探测不发信号），还活着就 SIGKILL 补刀——
+    这正是本函数要堵的「consume 先退、孙子赖着」孤儿场景。
     """
     import os
     import signal
 
-    if proc is None or proc.returncode is not None:
+    if proc is None:
         return
-    try:
-        pgid = os.getpgid(proc.pid)
-    except ProcessLookupError:
-        return  # 子进程已退出
+    pgid = proc.pid  # start_new_session 保证组 leader，pgid == pid
 
     def _killpg(sig: int) -> bool:
         try:
@@ -66,13 +67,20 @@ async def _terminate_proc_group(proc) -> None:
         return
     try:
         await asyncio.wait_for(proc.wait(), timeout=_GROUP_TERM_TIMEOUT)
-    except asyncio.TimeoutError:
-        # 赖着不理 SIGTERM → 强杀整组兜底
-        _killpg(signal.SIGKILL)
-        try:
-            await proc.wait()
-        except Exception:
-            pass
+    except Exception:
+        pass  # 超时或 proc 已被 reap 都无妨，下面按整组探活决定是否补刀
+
+    # consume 退出 ≠ 整组退出：孙子 _bus 可能装了 SIGTERM handler 慢慢优雅关，
+    # 甚至脱离 consume 单独赖着。探一下整组是否还活着，还在就 SIGKILL 补刀。
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return  # 整组已清空，无孤儿
+    _killpg(signal.SIGKILL)
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=_GROUP_TERM_TIMEOUT)
+    except Exception:
+        pass
 
 # EventKey 常量：通过 lark-cli event list 获取
 # 注意：card.action.trigger 需 lark-cli ≥ 1.0.58（PR #1528）且在飞书开发者后台开启该 Console Event。

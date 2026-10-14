@@ -113,3 +113,51 @@ def test_terminate_proc_group_noop_on_dead_proc():
 def test_terminate_proc_group_none_is_safe():
     """proc=None 时安全返回。"""
     asyncio.run(_terminate_proc_group(None))
+
+
+# consume 先退、孙子 _bus 忽略 SIGTERM 赖着：验证整组仍被 SIGKILL 补刀收掉。
+_STUBBORN_GRANDCHILD = (
+    "import os,time,sys,signal\n"
+    "cf,gf = sys.argv[1], sys.argv[2]\n"
+    "pid = os.fork()\n"
+    "if pid == 0:\n"
+    "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"  # 孙子无视 SIGTERM
+    "    open(gf,'w').write(str(os.getpid()))\n"
+    "    time.sleep(300)\n"
+    "else:\n"
+    "    open(cf,'w').write(str(os.getpid()))\n"
+    "    time.sleep(0.3)\n"  # consume 很快自己退，不等孙子
+)
+
+
+def test_terminate_proc_group_sigkills_stubborn_grandchild():
+    """consume 先退、孙子忽略 SIGTERM 时，探活整组后应 SIGKILL 补刀，不留孤儿。"""
+
+    async def _run():
+        with tempfile.TemporaryDirectory() as d:
+            cf, gf = os.path.join(d, "child.pid"), os.path.join(d, "grand.pid")
+            r_fd, w_fd = os.pipe()
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-c", _STUBBORN_GRANDCHILD, cf, gf,
+                stdin=r_fd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+            os.close(r_fd)
+            os.close(w_fd)
+            grand = await _read_pid(gf)
+            await _read_pid(cf)
+            assert _alive(grand)
+            # 等 consume 自己退出，制造「子已死、孙还在且不理 SIGTERM」的局面
+            await asyncio.sleep(0.6)
+
+            await _terminate_proc_group(proc)
+            for _ in range(40):
+                if not _alive(grand):
+                    break
+                await asyncio.sleep(0.05)
+            assert not _alive(grand), "顽固孙子应被 SIGKILL 收掉，不留孤儿"
+
+    asyncio.run(_run())
+
