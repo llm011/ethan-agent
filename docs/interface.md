@@ -799,6 +799,8 @@ ethan code "query"              → ACP 委派 Coding Agent（详见 acp.md）
 
 依赖方向单向无环：`events → stream → send → render`。`api.py` 仍从 `channels.lark.events` 导入 `start/stop_lark_listener`。
 
+> **进程组清理（避免孤儿占订阅）**：`lark-cli event consume` 会再 fork 出 `event _bus` 孙子进程，真正握着飞书长连接。而飞书对**同一个 app 的同一个 event_key 只允许一个长连接订阅者**。因此 `events.py` spawn 子进程时带 `start_new_session=True`（自成进程组，与 ethan 主进程隔离），停止时用 `_terminate_proc_group()` 按组 `SIGTERM`→超时→`SIGKILL` 把 consume + `_bus` 一起带走。若只 `terminate()` 直接子进程，`_bus` 会被 init 收养成孤儿（PPID=1）继续占着订阅名额，导致重启后新实例「连上了却收不到任何事件」（日志全绿但 bot 不响应）。
+
 ### 配置方式
 
 在 `~/.ethan/config.yaml` 中添加：

@@ -31,6 +31,49 @@ logger = logging.getLogger(__name__)
 
 _listeners: list[asyncio.Task] = []
 
+# 杀子进程后等多久没退出就升级到 SIGKILL（秒）
+_GROUP_TERM_TIMEOUT = 5
+
+
+async def _terminate_proc_group(proc) -> None:
+    """杀掉子进程及其整个进程组（SIGTERM → 超时 → SIGKILL）。
+
+    lark-cli `event consume` 会再 fork 出 `event _bus` 孙子进程，真正握着飞书长连接。
+    只 terminate() 直接子进程时，孙子会被 init 收养成孤儿（PPID=1）继续占着
+    「一个 app 一个长连接订阅者」的名额，导致重启后新实例收不到任何事件。
+
+    因为 spawn 时带了 start_new_session=True，子进程自成一个进程组（且与 ethan 主进程隔离，
+    不会误杀自己），这里按组投递信号即可把 consume + _bus 一起带走。
+    """
+    import os
+    import signal
+
+    if proc is None or proc.returncode is not None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return  # 子进程已退出
+
+    def _killpg(sig: int) -> bool:
+        try:
+            os.killpg(pgid, sig)
+            return True
+        except ProcessLookupError:
+            return False  # 整组已没了
+
+    if not _killpg(signal.SIGTERM):
+        return
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=_GROUP_TERM_TIMEOUT)
+    except asyncio.TimeoutError:
+        # 赖着不理 SIGTERM → 强杀整组兜底
+        _killpg(signal.SIGKILL)
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+
 # EventKey 常量：通过 lark-cli event list 获取
 # 注意：card.action.trigger 需 lark-cli ≥ 1.0.58（PR #1528）且在飞书开发者后台开启该 Console Event。
 _EVENT_KEYS = [
@@ -106,6 +149,9 @@ async def _event_loop(event_key: str) -> None:
                 stdin=r_fd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                # 自成一个进程组（与 ethan 主进程隔离），停止时按组杀，连同
+                # lark-cli fork 出的 `event _bus` 孙子一起带走，不留孤儿。
+                start_new_session=True,
             )
             os.close(r_fd)  # 子进程已继承读端，父进程关掉自己的副本
             r_fd = -1
@@ -131,7 +177,7 @@ async def _event_loop(event_key: str) -> None:
                         "  → 原始错误：%s",
                         event_key, event_key, data["error"].get("message", "")
                     )
-                    proc.terminate()
+                    await _terminate_proc_group(proc)
                     return
 
                 # Events have nested structure: data.event.message
@@ -156,14 +202,9 @@ async def _event_loop(event_key: str) -> None:
 
         except asyncio.CancelledError:
             logger.info("[Lark] Event listener for %s cancelled.", event_key)
-            # 必须等子进程真正退出，否则 lark-cli 孤儿进程继续占着飞书 WebSocket 连接，
-            # 重启后新进程无法连接（或被飞书踢掉）。
-            if proc is not None and proc.returncode is None:
-                try:
-                    proc.terminate()
-                    await proc.wait()
-                except Exception:
-                    pass
+            # 必须杀掉整个进程组，否则 lark-cli 的 `event _bus` 孙子进程会被 init 收养成
+            # 孤儿（PPID=1），继续占着飞书 WebSocket 订阅名额，重启后新进程收不到任何事件。
+            await _terminate_proc_group(proc)
             return
         except Exception:
             logger.exception("[Lark] Event listener for %s crashed, reconnecting in %ss...", event_key, backoff)
