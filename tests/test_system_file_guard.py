@@ -90,11 +90,12 @@ class TestHeartbeatPromptGuard:
         assert "检查邮件" in out and "整理笔记" in out
         assert "健康检查记录" not in out
 
-    def test_over_limit_no_task_lines_falls_back_to_head_truncation(self):
-        """识别不到任务行时退化为硬截断+重建提示（线上真实发生：日志淹没任务定义）。"""
+    def test_over_limit_no_task_lines_falls_back_to_head_sample(self):
+        """识别不到任务行时只带头部小样本+重建提示，日志本体不再下发
+        （线上真实发生：日志淹没任务定义）。"""
         prompt = "x" * (HEARTBEAT_PROMPT_MAX_CHARS + 500)
         out = _guard_hb_prompt(prompt)
-        assert len(out) > HEARTBEAT_PROMPT_MAX_CHARS  # 头部 + 提示
+        assert len(out) < 4000  # 2K 样本 + 提示，远小于 20K
         assert out.startswith("x" * 100)
         assert "已找不到任何 [agent:xxx] 任务定义行" in out
         assert "重建" in out
@@ -107,7 +108,7 @@ class TestHeartbeatPromptGuard:
         assert len(prompt) > HEARTBEAT_PROMPT_MAX_CHARS
         out = _guard_hb_prompt(prompt)
         assert "已找不到任何 [agent:xxx] 任务定义行" in out
-        # 硬截断保头：日志被截进来一部分，结尾是重建提示
+        # 头部小样本 + 结尾重建提示，日志本体不下发
         assert out.endswith("避免继续膨胀。]")
         # 日志行不以任务块形式重组（没有任务行被保留）
         assert not any("指令" == ln.strip() for ln in out.splitlines())

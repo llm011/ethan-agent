@@ -175,6 +175,9 @@ async def _consolidate_profile_for_user(user_id: str) -> None:
 # 超过 20K 字符几乎必然是被运行日志污染（历史记录随每轮心跳追加、永不清理）。
 HEARTBEAT_PROMPT_MAX_CHARS = 20_000
 
+# 无任务行兜底时保留的头部样本大小：让模型对文件形态有感知即可，不搬运日志本体。
+_HEAD_SAMPLE_CHARS = 2_000
+
 # 任务定义行的识别：heartbeat.md 的任务以 [agent:xxx] 行注册，缩进行是它的指令。
 _AGENT_TASK_RE = re.compile(r"^\s*\d+\s+\[agent:[^\]]+\]")
 
@@ -186,8 +189,8 @@ def _guard_hb_prompt(prompt: str) -> str:
     上下文价值，只有确认膨胀后才需要截。
 
     找不到任务定义行时（日志已把 [agent:xxx] 行彻底淹没，线上真实发生过），
-    退化为硬截断——此时无论保留哪段都只是垃圾，截短至少不再浪费 token，
-    提示语明确告诉模型文件已需要人工重建。
+    退化为只保留一小段头部样本——此时无论保留哪段都只是日志垃圾，没必要
+    搬运本体，提示语明确告诉模型文件已需要人工重建。
     """
     if len(prompt) <= HEARTBEAT_PROMPT_MAX_CHARS:
         return prompt
@@ -214,8 +217,8 @@ def _guard_hb_prompt(prompt: str) -> str:
         len(prompt), HEARTBEAT_PROMPT_MAX_CHARS, len(kept),
     )
     if not kept:
-        # 无任务行：硬截断（保头），提示重建。文件状态需要人工/模型介入清理。
-        return prompt[:HEARTBEAT_PROMPT_MAX_CHARS] + "\n\n" + notice
+        # 无任务行：只带头部样本 + 提示重建，日志本体不再随 prompt 下发。
+        return prompt[:_HEAD_SAMPLE_CHARS] + "\n\n" + notice
     return "[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n" + notice + "\n\n" + "\n".join(kept)
 
 
