@@ -120,3 +120,28 @@ export function toSessionInfo(
     tabs,
   };
 }
+
+/**
+ * 规范化 URL 用于「同一会话里是否已打开该页」的去重比较。
+ *
+ * 为什么需要：tabs.open 本身不幂等，而上游（agent / MCP）在超时/断连等「假失败」后
+ * 会重试同一个 open——此时第一个 tab 往往已经建好，重试就多开一个。按规范化 URL 去重，
+ * 让重试命中已存在的 tab 而不是再建一个（见 openTab）。
+ *
+ * 规范化：去掉末尾斜杠、小写化 scheme+host、丢弃 hash（#fragment 不算不同页面）。
+ * 解析失败（相对路径等）就退回去掉首尾空白的原串，宁可不去重也不误判。
+ */
+export function normalizeUrlForDedup(raw: string | undefined): string {
+  const value = (raw ?? '').trim();
+  if (!value) {
+    return '';
+  }
+  try {
+    const u = new URL(value);
+    u.hash = '';
+    const normalized = u.toString();
+    return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+  } catch {
+    return value;
+  }
+}

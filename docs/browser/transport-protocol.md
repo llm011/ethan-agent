@@ -111,7 +111,7 @@ method 命名空间对齐扩展侧 dispatch 字符串,这样移植过来的扩�
 | `session_rename` | `sessions.rename` | 重命名 |
 | `session_release` | `sessions.release` | 放掉控制权(保留 tab) |
 | `session_close` | `sessions.close` | 关闭整个 TabGroup |
-| `tab_open` | `tabs.open` | 在 session 内开新 tab |
+| `tab_open` | `tabs.open` | 在 session 内开新 tab；按规范化 URL 幂等去重——同 session 已有同 URL 的 tab 时复用并激活它（返回 `reused:true`），不再新建，避免上游「假失败」重试把同一地址开好几次 |
 | `tab_list` | `tabs.list` | 列出 session 内 tab |
 | `tab_user_list` | `tabs.userList` | 列出用户全部 tab |
 | `tab_search` | `tabs.search` | 按关键词搜索已开 tab（匹配 title+url，返回候选列表；只搜开着的 tab） |
