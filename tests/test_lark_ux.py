@@ -126,6 +126,17 @@ def test_update_answer_entry():
     assert entry["assistant_row_id"] == 7
 
 
+def test_update_answer_entry_row_id_only():
+    # 定稿分支只回写 assistant_row_id、不带新文本（agent.py:686）。
+    # answer_text 曾是必传 kw，这类调用会抛 TypeError —— 回归守卫。
+    _register_answer("om_b", chat_id="c", session_id="s", question="q", question_msg_id="qm")
+    _update_answer_entry("om_b", answer_text="先登记的答案")
+    _update_answer_entry("om_b", assistant_row_id=42)  # 只补行 id
+    entry = _get_answer_entry("om_b")
+    assert entry["assistant_row_id"] == 42
+    assert entry["answer_text"] == "先登记的答案"  # 未传 answer_text 时不被清空
+
+
 def test_get_answer_entry_missing():
     assert _get_answer_entry("om_nonexistent") is None
     assert _get_answer_entry("") is None

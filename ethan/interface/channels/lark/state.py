@@ -395,12 +395,23 @@ def _register_answer(
         _lark_answer_map.pop(next(iter(_lark_answer_map)), None)
 
 
-def _update_answer_entry(answer_msg_id: str, *, answer_text: str, assistant_row_id: int | None = None) -> None:
-    """定稿后补写最终答案文本/落库行 id（登记时答案可能还在流式更新）。"""
+def _update_answer_entry(
+    answer_msg_id: str,
+    *,
+    answer_text: str | None = None,
+    assistant_row_id: int | None = None,
+) -> None:
+    """定稿后补写最终答案文本/落库行 id（登记时答案可能还在流式更新）。
+
+    两个字段都可选、各自独立：定稿时常只回写 assistant_row_id（此时没有新文本），
+    若把 answer_text 设为必传，这类「只补行 id」的调用会抛 TypeError（见
+    agent.py 定稿分支）。只有显式传入时才覆盖对应字段，None 表示本次不动它。
+    """
     entry = _lark_answer_map.get(answer_msg_id)
     if not entry:
         return
-    entry["answer_text"] = answer_text
+    if answer_text is not None:
+        entry["answer_text"] = answer_text
     if assistant_row_id is not None:
         entry["assistant_row_id"] = assistant_row_id
 
