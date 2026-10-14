@@ -184,6 +184,10 @@ def _guard_hb_prompt(prompt: str) -> str:
 
     正常情况（未超限）原样返回，不做任何智能解析——历史记录段对心跳也有
     上下文价值，只有确认膨胀后才需要截。
+
+    找不到任务定义行时（日志已把 [agent:xxx] 行彻底淹没，线上真实发生过），
+    退化为硬截断——此时无论保留哪段都只是垃圾，截短至少不再浪费 token，
+    提示语明确告诉模型文件已需要人工重建。
     """
     if len(prompt) <= HEARTBEAT_PROMPT_MAX_CHARS:
         return prompt
@@ -198,17 +202,20 @@ def _guard_hb_prompt(prompt: str) -> str:
             kept.append(ln)  # 任务行下属的缩进指令
         else:
             in_task = False
-    if not kept:
-        return prompt[:HEARTBEAT_PROMPT_MAX_CHARS]
     notice = (
-        "[⚠️ heartbeat.md 已超 20K 字符上限，本轮只执行任务定义行；"
-        "文件里的历史记录段已不随 prompt 下发，请在执行任务时顺手清理"
-        "（保留任务定义，归档/删除日志化内容，避免继续膨胀）。]"
+        "[⚠️ heartbeat.md 已超 20K 字符上限"
+        + ("，本轮只执行下列任务定义行" if kept else "，且文件里已找不到任何 [agent:xxx] 任务定义行")
+        + "，历史记录段已不随 prompt 下发。文件已被运行日志污染，"
+        "请在执行任务时顺手重建：只保留任务定义（[agent:xxx] 行及指令），"
+        "归档/删除日志化内容，避免继续膨胀。]"
     )
     logger.warning(
-        "[Heartbeat] heartbeat.md prompt 超限（%d 字符 > %d），仅保留 %d 行任务定义",
+        "[Heartbeat] heartbeat.md prompt 超限（%d 字符 > %d），保留 %d 行任务定义",
         len(prompt), HEARTBEAT_PROMPT_MAX_CHARS, len(kept),
     )
+    if not kept:
+        # 无任务行：硬截断（保头），提示重建。文件状态需要人工/模型介入清理。
+        return prompt[:HEARTBEAT_PROMPT_MAX_CHARS] + "\n\n" + notice
     return "[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n" + notice + "\n\n" + "\n".join(kept)
 
 
