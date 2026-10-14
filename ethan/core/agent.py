@@ -259,17 +259,23 @@ class Agent:
         cfg = get_config()
         workspace = cfg.defaults.workspace
         # system/*.md 全局共享（ethan 角色定义）；user_profile.md 按 profile 隔离
+        # 这些文件全文进每次请求的 system prompt，超限截断（只拦读不改盘），
+        # 防止 agent 自写/心跳追加把文件养到 MB 级吃掉整个上下文（线上 badcase：
+        # tools.md 被心跳日志养到 1.7M 字符 ≈ 100 万 token）。
+        from ethan.core.system_file_guard import guard_system_file_content
+
         system_dir = _system_dir()
         for name in ("identity", "soul", "agent", "tools"):
             p = system_dir / f"{name}.md"
             if p.exists():
                 content = p.read_text(encoding="utf-8").strip()
                 content = content.replace("{workspace}", workspace)
-                self._system_files[name] = content
+                self._system_files[name] = guard_system_file_content(content, name)
 
         profile_p = user_profile_path()
         if profile_p.exists():
-            self._system_files["user_profile"] = profile_p.read_text(encoding="utf-8").strip()
+            content = profile_p.read_text(encoding="utf-8").strip()
+            self._system_files["user_profile"] = guard_system_file_content(content, "user_profile")
 
     def reload_system_files(self) -> None:
         """Settings 更新后调用，重新加载 system 文件缓存。"""
