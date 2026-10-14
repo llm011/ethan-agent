@@ -372,6 +372,21 @@
   border: 1px solid color-mix(in oklch, var(--border) 72%, var(--primary));
   background: color-mix(in oklch, var(--background) 94%, var(--primary));
   -webkit-overflow-scrolling: touch;
+  /* 横向滚动条是浮层式，会盖住表格最后一行。留一条底部空隙 + 细滚动条，
+     让滚动条落在内容下方而不是压在最后一行上（截图里被挡的就是这里）。 */
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--border) 60%, var(--primary)) transparent;
+}
+.prose .table-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+.prose .table-wrapper::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--border) 60%, var(--primary));
+  border-radius: 4px;
+}
+.prose .table-wrapper::-webkit-scrollbar-track {
+  background: transparent;
 }
 .prose .table-wrapper table {
   margin: 0;

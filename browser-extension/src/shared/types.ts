@@ -181,6 +181,8 @@ export interface BrowserTabOpenResult {
   opened: true;
   sessionId: string;
   tab: BrowserSessionTab;
+  /** true 表示该会话里已存在同一 URL 的 tab，这次是复用并激活它，没有新建（幂等去重）。 */
+  reused?: boolean;
 }
 
 export interface BrowserTabListParams {

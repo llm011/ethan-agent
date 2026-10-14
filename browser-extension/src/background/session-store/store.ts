@@ -20,7 +20,7 @@ import { createSessionNotFoundError, BrowserExtensionRpcError } from './errors';
 import { BROWSER_RPC_ERROR_CODE } from '../../shared';
 import { BrowserSessionStoreTabs } from './store-tabs';
 import { searchTabs } from './tab-search';
-import { getTabId, toSessionTab } from './utils';
+import { getTabId, toSessionTab, normalizeUrlForDedup } from './utils';
 import { TAB_GROUP_ID_NONE } from './constants';
 import {
   createTab,
@@ -48,7 +48,32 @@ export class BrowserSessionStore extends BrowserSessionStoreTabs {
   async openTab(params: BrowserTabOpenParams): Promise<BrowserTabOpenResult> {
     await this.ensureLoaded();
     const session = this.getSessionOrThrow(params.sessionId);
-    await this.reconcileSessionOrThrow(session);
+    const info = await this.reconcileSessionOrThrow(session);
+
+    // 幂等去重：tabs.open 本身不幂等，上游在超时/断连等「假失败」后会重试同一个
+    // open，而第一次往往已经建好了 tab——不去重就会每重试一次多开一个（用户遇到的
+    // 「同一地址打开两三次」）。该会话里已有同 URL 的 tab 时，复用并激活它，不再新建。
+    const wantUrl = normalizeUrlForDedup(params.url);
+    if (wantUrl) {
+      const existing = info.tabs.find(
+        t => normalizeUrlForDedup(t.url) === wantUrl,
+      );
+      if (existing) {
+        const activeTab =
+          params.active ?? false
+            ? await updateTab(existing.tabId, { active: true })
+            : await getTab(existing.tabId);
+        session.activeTabId = existing.tabId;
+        session.updatedAt = Date.now();
+        await this.persist();
+        return {
+          opened: true,
+          reused: true,
+          sessionId: params.sessionId,
+          tab: toSessionTab(activeTab),
+        };
+      }
+    }
 
     const tab = await createTab({
       url: params.url,

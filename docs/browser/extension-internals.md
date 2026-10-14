@@ -168,6 +168,7 @@ flowchart LR
 - `attachCurrent` 接管当前 active tab 并归入新 session;`attach` 把已有 tab 纳入指定 session。
 - `getActiveTab(sessionId)` 返回该 session 当前活动 tab——page-controller 的所有页面操作都以它为目标。
 - `handleTabRemoved(tabId)`(由 `chrome.tabs.onRemoved` 触发)清理 session 内被关闭的 tab。
+- `openTab` **按规范化 URL 幂等去重**:`tabs.open` 本身不幂等,上游(agent/MCP)在超时/断连等「假失败」后会重试同一个 open,而第一个 tab 往往已经建好——不去重就每重试一次多开一个(用户遇到的「同一地址打开两三次」)。所以开之前先在本 session 的 tab 里按规范化 URL(去末尾斜杠、丢 hash、小写 scheme+host,见 `utils.normalizeUrlForDedup`)找有没有同一页,有就复用并激活它、返回 `reused:true`,不再新建。
 
 > 因为状态真源在扩展,ethan 服务端不做镜像;服务端只维护"ethan 会话 ↔ browser session"的归属映射(见[会话/并发/安全](session-security.md))。这一职责切分让服务端无状态、可随时重启,而浏览器状态始终以 Chrome 实际的 TabGroup 为准。
 
