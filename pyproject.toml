@@ -24,6 +24,7 @@ dependencies = [
     "apscheduler>=3.11.2",
     "curl-cffi>=0.15.0",
     "fastapi>=0.136.3",
+    "lark-oapi>=1.6.8",
     "lunar-python>=1.4.8",
     "mcp>=1.27.2,<2",
     "numpy>=1.26.0",
@@ -61,10 +62,10 @@ computer = [
     "cua-computer>=0.3.0",
 ]
 
-# 飞书渠道（可选）：配置飞书渠道时自动安装。
-lark = [
-    "lark-oapi>=1.6.8",
-]
+# 飞书渠道：lark-oapi 已移入 base dependencies（见上），不再是可选项——
+# 每次 uv sync 都会把 optional extra 删掉，导致飞书 listener 悄悄不启动。
+# 这里保留为空别名，向后兼容 `pip install 'ethan-agent[lark]'`。
+lark = []
 
 [project.urls]
 Homepage = "https://github.com/llm011/ethan-agent"

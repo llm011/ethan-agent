@@ -530,6 +530,7 @@ dependencies = [
     { name = "apscheduler" },
     { name = "curl-cffi" },
     { name = "fastapi" },
+    { name = "lark-oapi" },
     { name = "lunar-python" },
     { name = "mcp" },
     { name = "numpy" },
@@ -553,9 +554,6 @@ dependencies = [
 computer = [
     { name = "cua-computer" },
 ]
-lark = [
-    { name = "lark-oapi" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -572,7 +570,7 @@ requires-dist = [
     { name = "cua-computer", marker = "extra == 'computer'", specifier = ">=0.3.0" },
     { name = "curl-cffi", specifier = ">=0.15.0" },
     { name = "fastapi", specifier = ">=0.136.3" },
-    { name = "lark-oapi", marker = "extra == 'lark'", specifier = ">=1.6.8" },
+    { name = "lark-oapi", specifier = ">=1.6.8" },
     { name = "lunar-python", specifier = ">=1.4.8" },
     { name = "mcp", specifier = ">=1.27.2,<2" },
     { name = "numpy", specifier = ">=1.26.0" },
