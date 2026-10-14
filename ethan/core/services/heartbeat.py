@@ -8,6 +8,7 @@
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -170,6 +171,57 @@ async def _consolidate_profile_for_user(user_id: str) -> None:
         ETHAN_USER_ID.reset(token)
 
 
+# 心跳 prompt 的字符上限。任务定义行（[agent:xxx] + 指令）正常几十行封顶；
+# 超过 20K 字符几乎必然是被运行日志污染（历史记录随每轮心跳追加、永不清理）。
+HEARTBEAT_PROMPT_MAX_CHARS = 20_000
+
+# 无任务行兜底时保留的头部样本大小：让模型对文件形态有感知即可，不搬运日志本体。
+_HEAD_SAMPLE_CHARS = 2_000
+
+# 任务定义行的识别：heartbeat.md 的任务以 [agent:xxx] 行注册，缩进行是它的指令。
+_AGENT_TASK_RE = re.compile(r"^\s*\d+\s+\[agent:[^\]]+\]")
+
+
+def _guard_hb_prompt(prompt: str) -> str:
+    """超限的心跳 prompt 只保留任务定义行，丢弃日志化的历史记录。
+
+    正常情况（未超限）原样返回，不做任何智能解析——历史记录段对心跳也有
+    上下文价值，只有确认膨胀后才需要截。
+
+    找不到任务定义行时（日志已把 [agent:xxx] 行彻底淹没，线上真实发生过），
+    退化为只保留一小段头部样本——此时无论保留哪段都只是日志垃圾，没必要
+    搬运本体，提示语明确告诉模型文件已需要人工重建。
+    """
+    if len(prompt) <= HEARTBEAT_PROMPT_MAX_CHARS:
+        return prompt
+    lines = prompt.splitlines()
+    kept: list[str] = []
+    in_task = False
+    for ln in lines:
+        if _AGENT_TASK_RE.match(ln):
+            kept.append(ln)
+            in_task = True
+        elif in_task and ln.strip() and not ln.startswith("#"):
+            kept.append(ln)  # 任务行下属的缩进指令
+        else:
+            in_task = False
+    notice = (
+        "[⚠️ heartbeat.md 已超 20K 字符上限"
+        + ("，本轮只执行下列任务定义行" if kept else "，且文件里已找不到任何 [agent:xxx] 任务定义行")
+        + "，历史记录段已不随 prompt 下发。文件已被运行日志污染，"
+        "请在执行任务时顺手重建：只保留任务定义（[agent:xxx] 行及指令），"
+        "归档/删除日志化内容，避免继续膨胀。]"
+    )
+    logger.warning(
+        "[Heartbeat] heartbeat.md prompt 超限（%d 字符 > %d），保留 %d 行任务定义",
+        len(prompt), HEARTBEAT_PROMPT_MAX_CHARS, len(kept),
+    )
+    if not kept:
+        # 无任务行：只带头部样本 + 提示重建，日志本体不再随 prompt 下发。
+        return prompt[:_HEAD_SAMPLE_CHARS] + "\n\n" + notice
+    return "[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n" + notice + "\n\n" + "\n".join(kept)
+
+
 async def _run_heartbeat_md() -> None:
     """读取 heartbeat.md，若有内容则作为 agent 任务执行，结果保存到专属 session。"""
     from ethan.core.config import get_config
@@ -197,6 +249,11 @@ async def _run_heartbeat_md() -> None:
 
     logger.info("[Heartbeat] Running heartbeat.md tasks...")
     prompt = f"[Heartbeat] 正在执行系统心跳任务：heartbeat.md\n\n{content.strip()}"
+    # 心跳 prompt 护栏：heartbeat.md 全文进 user message，agent 自写的运行日志
+    # 会让它无界膨胀（线上 badcase：gws 检查日志自我增殖，单条 prompt 90KB+，
+    # 且这些日志还会被 agent 追加进 tools.md 撑爆 system prompt）。超限时只
+    # 保留任务定义行（[agent:xxx] 及其缩进子行），丢弃历史记录段并提示清理。
+    prompt = _guard_hb_prompt(prompt)
 
     hb_session = None
     try:

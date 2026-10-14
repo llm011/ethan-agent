@@ -225,9 +225,13 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     pass
 
             # session 轮转：当天执行次数超阈值则新建对话，避免高频任务会话无限膨胀
+            # count_today_runs 统计的是本次 user message 落库【之前】的当天条数
+            # （save_message 在下面），+1 把本次算上——否则每小时任务一天恰好
+            # 24 次触发、threshold=24 时最后一次判定值是 23，轮转永远差一步
+            # 不触发（线上 badcase：会话从 9/25 用到 10/14 从未轮转）。
             _rotate_threshold = _gc().defaults.schedule_session_rotate_threshold
             if _rotate_threshold > 0:
-                _today_runs = await store.count_today_runs(session_id)
+                _today_runs = await store.count_today_runs(session_id) + 1
                 if _today_runs >= _rotate_threshold:
                     _new_session = await store.create(_gc().defaults.model, source="schedule", mode="")
                     _new_title = f"[定时] {title}" if title else "[定时] 未命名任务"
