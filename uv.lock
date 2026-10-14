@@ -574,7 +574,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.136.3" },
     { name = "lark-oapi", marker = "extra == 'lark'", specifier = ">=1.6.8" },
     { name = "lunar-python", specifier = ">=1.4.8" },
-    { name = "mcp", specifier = ">=1.27.2" },
+    { name = "mcp", specifier = ">=1.27.2,<2" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "onnxruntime", specifier = ">=1.18.0" },
     { name = "openai", specifier = ">=2.41.1" },
