@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import threading
+import time
 from contextvars import ContextVar
 
 import httpx
@@ -137,13 +138,33 @@ def _is_tool_result_noise(text: str) -> bool:
 # 23:37~23:44 本机 TLS 握手全挂，同时触发的 4 个定时任务全部失败）；这里按
 # 1 → 3 → 7 分钟拉开，累计覆盖 ~11 分钟。
 _NET_RETRY_DELAYS: tuple[int, ...] = (60, 180, 420)
+# 判定「重跑会不会撞上下一次触发」时给重跑本身预留的耗时（秒）
+_NET_RETRY_RUN_MARGIN = 120
 
 
 def _is_network_error(e: Exception) -> bool:
-    """网络/上游瞬态故障判定，复用 FallbackProvider 的分类避免两份列表漂移。"""
+    """网络/上游瞬态故障判定，复用 FallbackProvider 的分类避免两份列表漂移。
+
+    TimeoutError 单列：openai_compat 流式 120s 无 chunk 抛的是中文文案的
+    TimeoutError，_is_retriable 的 "timeout" 关键词匹配不上。"""
     from ethan.providers.fallback import _is_retriable
 
-    return _is_retriable(e)
+    return isinstance(e, TimeoutError) or _is_retriable(e)
+
+
+def _next_run_ts(job_id: str) -> float | None:
+    """job 下一次触发的时间戳；无 job_id / 已无后续触发 / 查询失败返回 None。"""
+    if not job_id:
+        return None
+    try:
+        from ethan.scheduler.cron import get_scheduler
+
+        job = get_scheduler()._scheduler.get_job(job_id)
+        if job and job.next_run_time:
+            return job.next_run_time.timestamp()
+    except Exception:
+        pass
+    return None
 
 
 def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = "", title: str = "", **_extra):
@@ -319,6 +340,16 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                             or not _is_network_error(e)):
                         raise
                     delay = _NET_RETRY_DELAYS[net_retries]
+                    # 等完会撞上本 job 的下一次触发 → 放弃，交给下一次：fire 立即返回、
+                    # max_instances 拦不住，两轮会在同一 session 上并发跑、重复推送。
+                    # 预留 _NET_RETRY_RUN_MARGIN 给本轮重跑自身的耗时。
+                    _next = _next_run_ts(job_id)
+                    if _next is not None and time.time() + delay + _NET_RETRY_RUN_MARGIN >= _next:
+                        _logger.warning(
+                            "[Schedule] network error, skip deferred retry (next run in %ds): session=%s",
+                            int(_next - time.time()), session_id,
+                        )
+                        raise
                     net_retries += 1
                     _logger.warning(
                         "[Schedule] network error with no output, deferred retry %d/%d in %ds: session=%s: %s",

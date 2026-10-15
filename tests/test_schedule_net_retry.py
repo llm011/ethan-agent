@@ -38,8 +38,9 @@ class _FakeAgent:
         yield "任务完成"
 
 
-def _run(tmp_path, monkeypatch, behaviors):
+def _run(tmp_path, monkeypatch, behaviors, next_run=None):
     monkeypatch.setenv("ETHAN_HOME", str(tmp_path))
+    monkeypatch.setattr(sched_mod, "_next_run_ts", lambda job_id: next_run)
     monkeypatch.setattr(sched_mod, "_NET_RETRY_DELAYS", (0, 0, 0))
     monkeypatch.setattr(sched_mod, "_server_loop", None)
 
@@ -116,8 +117,19 @@ def test_partial_output_not_retried(tmp_path, monkeypatch):
     assert "半截输出" in out[0] and "定时任务后台执行失败" in out[0]
 
 
+def test_skip_retry_when_next_run_is_close(tmp_path, monkeypatch):
+    """等完会撞上下一次触发 → 不重跑，避免同 session 两轮并发、重复推送。"""
+    import time
+
+    created, msgs = _run(tmp_path, monkeypatch, ["net_fail", "ok"], next_run=time.time() + 60)
+    assert len(created) == 1
+    assert "定时任务后台执行失败" in _assistant(msgs)[0]
+
+
 def test_is_network_error_classification():
     assert sched_mod._is_network_error(MidstreamBreakError("x"))
+    # openai_compat 流式 chunk 超时的中文文案
+    assert sched_mod._is_network_error(TimeoutError("模型响应超时：超过 120 秒未收到新数据"))
     assert not sched_mod._is_network_error(ValueError("Error code: 400 - bad"))
 
 
