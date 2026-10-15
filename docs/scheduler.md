@@ -121,6 +121,17 @@ if chat_id:
 
 ---
 
+## 网络故障延迟重跑
+
+provider / agent 层的连接重试都在 ~25 秒内打完，挡不住分钟级的断网、VPN/代理切换。因此定时任务执行失败时，若同时满足：
+
+- 错误属于网络/上游瞬态故障（判定复用 `FallbackProvider._is_retriable`：连接错误、超时、429/5xx、流中断重试耗尽等）；
+- 本轮**未产出任何内容**（无正文、未执行过工具——避免重复执行带副作用的任务）；
+
+则按 `_NET_RETRY_DELAYS`（1 → 3 → 7 分钟，`ethan/tools/builtin/schedule.py`）退避后重建 agent 重跑，累计覆盖约 11 分钟。全部耗尽或不满足条件时，照旧把「定时任务后台执行失败」写入会话并通知来源渠道。
+
+---
+
 ## 持久化
 
 使用 SQLAlchemy + SQLite（`~/.ethan/scheduler.db`）。APScheduler 的 `SQLAlchemyJobStore` 序列化 Job 到数据库，`ethan serve` 启动时自动恢复所有 pending jobs，无需用户手动重建。

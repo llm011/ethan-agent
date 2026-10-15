@@ -434,8 +434,11 @@ class OpenAICompatProvider(BaseProvider):
                 # 一次往往不够）
                 if _break_retries >= _MAX_STREAM_BREAK_RETRIES:
                     raise MidstreamBreakError(
-                        "上游连接在流式响应中途断开，自动重试 "
-                        f"{_MAX_STREAM_BREAK_RETRIES} 次后仍失败（未产出任何内容）：{e}"
+                        # 零产出：可能是真中途断连，也可能是网关在流里直接回了连接类
+                        # 错误（如 "trae error 502 ... SSL handshake failure"），文案
+                        # 不说「中途」，避免误导成生成到一半被掐断。
+                        "上游连接失败（流式响应未产出任何内容），自动重试 "
+                        f"{_MAX_STREAM_BREAK_RETRIES} 次后仍失败：{e}"
                     ) from e
                 _break_retries += 1
                 import logging as _log

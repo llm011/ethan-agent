@@ -76,6 +76,7 @@ Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (stru
 
 **Scheduler & background tasks**
 - Create cron or interval jobs in conversation; SQLite-persisted, survives restarts
+- Network failures with no output are retried after 1 / 3 / 7 minutes, riding out short outages (VPN/proxy switches, flaky gateways)
 - `heartbeat.md`: write natural-language tasks; the system runs them periodically
 - Background tasks: kick off a long-running task that runs async in its own session without blocking the current chat; result is fed back when done (Lark pushes to the originating chat, web surfaces it in the task bar atop the main chat). Background sessions stay out of the sidebar and "All sessions" (a single task can fan out into many), reachable via the task bar and the `/background-tasks` page (view/stop, with a running-count badge in the sidebar)
 

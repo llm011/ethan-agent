@@ -132,6 +132,20 @@ def _is_tool_result_noise(text: str) -> bool:
     return isinstance(data, dict) and _is_pure_send_confirmation(data)
 
 
+# 定时任务遇到网络类故障（且未产出任何内容）时的延迟重跑间隔（秒）。provider/agent
+# 层的重试都在 ~25s 内打完，挡不住分钟级的断网 / VPN 切换（线上 badcase：
+# 23:37~23:44 本机 TLS 握手全挂，同时触发的 4 个定时任务全部失败）；这里按
+# 1 → 3 → 7 分钟拉开，累计覆盖 ~11 分钟。
+_NET_RETRY_DELAYS: tuple[int, ...] = (60, 180, 420)
+
+
+def _is_network_error(e: Exception) -> bool:
+    """网络/上游瞬态故障判定，复用 FallbackProvider 的分类避免两份列表漂移。"""
+    from ethan.providers.fallback import _is_retriable
+
+    return _is_retriable(e)
+
+
 def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channel_context: str = "{}", user_id: str = "", title: str = "", **_extra):
     """定时任务触发时的回调。
 
@@ -252,14 +266,19 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             user_msg = Message(role="user", content=prompt)
             await store.save_message(session_id, user_msg)
 
-            # 创建 agent（与普通对话路径一致）
-            schedule_model = _gc().defaults.schedule_model or None
-            agent = create_agent(schedule_model, channel="schedule", user_id=user_id)
-            agent.session_id = session_id
-            if agent.runtime_context:
-                agent.runtime_context = agent.runtime_context + "\n\n" + schedule_ctx
-            else:
-                agent.runtime_context = schedule_ctx
+            def _build_agent():
+                """创建 agent（与普通对话路径一致）。延迟重试时重建：上一轮的 agent
+                可能已把 lite provider 降级、FallbackProvider 记下了失败的 _last_used。"""
+                schedule_model = _gc().defaults.schedule_model or None
+                a = create_agent(schedule_model, channel="schedule", user_id=user_id)
+                a.session_id = session_id
+                if a.runtime_context:
+                    a.runtime_context = a.runtime_context + "\n\n" + schedule_ctx
+                else:
+                    a.runtime_context = schedule_ctx
+                return a
+
+            agent = _build_agent()
 
             # 加载历史上下文（让重复执行的任务能看到之前的结果）
             from ethan.memory.working import WorkingMemory
@@ -272,24 +291,41 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
             consent = AutoConsentProvider(session_id=session_id)
             set_consent_provider(consent)
 
-            # 流式执行 + 实时落库
-            collector = StreamCollector().bind(agent)
-
-            async for item in agent.stream_chat(messages):
-                if isinstance(item, ToolEvent):
-                    collector.feed(item)
-                    if item.state != "start":
-                        try:
-                            progress_msg_id = await _save_progress(
-                                store, session_id, progress_msg_id,
-                                collector.tool_steps or [], collector.a2ui or None,
-                                collector.mcp_apps or None,
-                                collector.cards or None,
-                            )
-                        except Exception:
-                            _logger.exception("定时任务实时保存工具进度失败 session=%s", session_id)
-                else:
-                    collector.feed(item)
+            # 流式执行 + 实时落库。网络类故障且零产出时延迟重跑（见 _NET_RETRY_DELAYS）
+            net_retries = 0
+            while True:
+                collector = StreamCollector().bind(agent)
+                try:
+                    async for item in agent.stream_chat(messages):
+                        if isinstance(item, ToolEvent):
+                            collector.feed(item)
+                            if item.state != "start":
+                                try:
+                                    progress_msg_id = await _save_progress(
+                                        store, session_id, progress_msg_id,
+                                        collector.tool_steps or [], collector.a2ui or None,
+                                        collector.mcp_apps or None,
+                                        collector.cards or None,
+                                    )
+                                except Exception:
+                                    _logger.exception("定时任务实时保存工具进度失败 session=%s", session_id)
+                        else:
+                            collector.feed(item)
+                    break
+                except Exception as e:
+                    # 已产出正文或跑过工具（可能有副作用）→ 不重跑，交给外层记失败
+                    produced = bool(collector.full or collector.tool_steps or progress_msg_id)
+                    if (produced or net_retries >= len(_NET_RETRY_DELAYS)
+                            or not _is_network_error(e)):
+                        raise
+                    delay = _NET_RETRY_DELAYS[net_retries]
+                    net_retries += 1
+                    _logger.warning(
+                        "[Schedule] network error with no output, deferred retry %d/%d in %ds: session=%s: %s",
+                        net_retries, len(_NET_RETRY_DELAYS), delay, session_id, e,
+                    )
+                    await asyncio.sleep(delay)
+                    agent = _build_agent()
 
             # 流结束：保存最终 assistant 消息（含完整 tool_steps）
             collector.flush_pending_injected()
