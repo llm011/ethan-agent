@@ -364,7 +364,7 @@ On first launch, configure the server URL (e.g. `http://<your-nas>:8900`) and Ac
 # or use the built-in commands:
 ethan server install    # install + start
 ethan server status     # check status (also flags multi-instance conflicts)
-ethan server restart    # restart
+ethan server restart    # restart (waits for /api/health; exits non-zero if not ready)
 ethan server stop       # stop
 ethan server uninstall  # uninstall
 ```

@@ -1,5 +1,6 @@
 """ethan server — macOS launchd service management."""
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -102,11 +103,7 @@ def install() -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    plist_content = _PLIST_TEMPLATE.format(
-        ethan_exe=str(exe),
-        bin_dir=str(exe.parent),
-        ethan_home=str(ethan_home),
-    )
+    plist_content = _render_plist()
 
     _launchctl("unload", str(PLIST_PATH))  # 忽略未加载时的错误
     PLIST_PATH.write_text(plist_content)
@@ -114,6 +111,14 @@ def install() -> None:
     result = _launchctl("load", str(PLIST_PATH))
     if result.returncode != 0:
         console.print(f"[red]launchctl load 失败：{result.stderr.strip()}[/red]")
+        raise typer.Exit(1)
+
+    # 同 restart：load 成功 ≠ 服务起来，等健康检查通过再宣告安装完成。
+    port = _service_port()
+    console.print(f"[dim]等待服务在 :{port} 就绪...[/dim]")
+    if not _wait_for_health(port):
+        console.print("[yellow]⚠ 服务已注册但未能就绪[/yellow]")
+        console.print(f"  请查看日志：{log_dir / 'api.err.log'}")
         raise typer.Exit(1)
 
     console.print("[green]✓ 服务已安装并启动，下次开机将自动运行。[/green]")
@@ -198,6 +203,100 @@ def uninstall() -> None:
     console.print("[green]✓ 服务已卸载。[/green]")
 
 
+def _installed_exe() -> Path | None:
+    """从已安装的 plist 里读出 ethan 可执行文件路径。
+
+    `restart` 不能用 `_ethan_exe()`（那是**当前进程**的 ethan）——在 worktree 里跑
+    `ethan server restart` 时，`sys.executable` 指向 worktree 的 .venv，按它重写
+    plist 会把常驻服务永久绑到那个临时目录上，worktree 一删服务就再也起不来。
+    """
+    if not PLIST_PATH.exists():
+        return None
+    try:
+        text = PLIST_PATH.read_text()
+    except OSError:
+        return None
+    m = re.search(r"<key>ProgramArguments</key>\s*<array>\s*<string>([^<]+)</string>", text)
+    if not m:
+        return None
+    exe = Path(m.group(1).strip())
+    return exe if exe.exists() else None
+
+
+def _render_plist(exe: Path | None = None) -> str:
+    """按当前代码里的模板渲染 plist 内容。
+
+    ``exe`` 缺省取当前进程的 ethan；``restart`` 会传入已安装 plist 里的路径，
+    避免把服务绑到临时 worktree 上。
+    """
+    exe = exe or _ethan_exe()
+    ethan_home = Path.home() / ".ethan"
+    return _PLIST_TEMPLATE.format(
+        ethan_exe=str(exe),
+        bin_dir=str(exe.parent),
+        ethan_home=str(ethan_home),
+    )
+
+
+def _refresh_plist_if_stale(console: Console) -> bool:
+    """plist 落后于代码模板时重写它，返回是否发生了重写。
+
+    模板里的 `ETHAN_NO_WATCHDOG=1`、`ThrottleInterval`、`NumberOfFiles` 加进去
+    之后，`restart` 只看 `PLIST_PATH.exists()` 就把旧 plist 原样 load 回去——老用户
+    永远享受不到新模板的修复，表现为双保姆互管一个端口、fd 上限过低导致
+    `database is locked`。这里比对内容，不一致就按新模板重写。
+
+    可执行文件路径优先沿用已安装 plist 里的值（见 ``_installed_exe``），只有读不到
+    时才回退到当前进程的 ethan。
+    """
+    if not PLIST_PATH.exists():
+        return False
+    try:
+        current = PLIST_PATH.read_text()
+    except OSError:
+        return False
+    desired = _render_plist(_installed_exe())
+    if current == desired:
+        return False
+    PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PLIST_PATH.write_text(desired)
+    console.print("[dim]检测到 launchd 配置落后于当前版本，已按新模板重写。[/dim]")
+    return True
+
+
+def _service_port() -> int:
+    """取 serve 实际监听端口（config 优先，缺省 8900）。"""
+    try:
+        from ethan.core.config import get_config
+
+        return int(get_config().server.port)
+    except Exception:
+        return 8900
+
+
+def _wait_for_health(port: int, timeout: float = 90.0) -> bool:
+    """轮询 /api/health 直到服务真正可用。
+
+    launchd 拉起 serve 时，Python 冷启动 import 明显比前台慢（实测 shell 0.5s
+    的 import 在 launchd 下要 12s+，完整启动 70s 量级），所以超时给得比较宽。
+    返回 True 表示端口已监听且健康检查通过。
+    """
+    import time
+    import urllib.request
+
+    url = f"http://127.0.0.1:{port}/api/health"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:  # noqa: S310
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+        time.sleep(1.0)
+    return False
+
+
 def _stop_leftover_instances(console: Console) -> None:
     """停掉 launchd 之外的残留 ethan 实例（如 watchdog 拉起的那个）。
 
@@ -242,6 +341,9 @@ def restart() -> None:
     """重启 Ethan 后台服务。"""
     console = Console()
     if _is_installed():
+        # 旧 plist 缺 ETHAN_NO_WATCHDOG / 资源上限等新配置，先按当前模板对齐，
+        # 否则 load 回去的还是那份老配置。
+        _refresh_plist_if_stale(console)
         _launchctl("unload", str(PLIST_PATH))
         # launchd 的进程停了，但可能还有别的实例占着端口，先清干净再拉起，
         # 否则新进程绑不上，重启看起来无效。
@@ -249,6 +351,17 @@ def restart() -> None:
         result = _launchctl("load", str(PLIST_PATH))
         if result.returncode != 0:
             console.print(f"[red]重启失败：{result.stderr.strip()}[/red]")
+            raise typer.Exit(1)
+
+        # `load` 返回 0 只代表任务被登记，不代表 serve 起来了（端口占用、
+        # 启动期异常都会让它立刻退出）。必须等健康检查通过再报成功——否则
+        # 用户看到「✓ 服务已重启」但访问失败，无从判断到底怎么了。
+        port = _service_port()
+        console.print(f"[dim]等待服务在 :{port} 就绪...[/dim]")
+        if not _wait_for_health(port):
+            console.print("[red]✗ 服务未能就绪。[/red]")
+            console.print(f"  launchd 已加载任务，但 http://127.0.0.1:{port}/api/health 无响应。")
+            console.print(f"  请查看日志：{Path.home() / '.ethan' / 'logs' / 'api.err.log'}")
             raise typer.Exit(1)
         console.print("[green]✓ 服务已重启。[/green]")
     else:

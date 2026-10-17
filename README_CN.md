@@ -361,7 +361,7 @@ cd app/android
 # 或使用内置命令：
 ethan server install    # 安装并启动
 ethan server status     # 查看状态（会提示多实例冲突）
-ethan server restart    # 重启
+ethan server restart    # 重启（等待 /api/health 就绪，未就绪则非零退出）
 ethan server stop       # 停止
 ethan server uninstall  # 卸载
 ```
