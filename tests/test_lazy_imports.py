@@ -21,7 +21,6 @@ import ast
 import importlib
 import pathlib
 
-import pytest
 
 import ethan
 

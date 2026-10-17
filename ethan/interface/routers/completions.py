@@ -84,6 +84,7 @@ class CompletionsRequest(BaseModel):
     messages: list[CompletionMessage]
     stream: bool = False
     session_id: str | None = None  # Ethan 扩展字段：指定对话 session
+    mode: str = ""  # Ethan 扩展字段：对话模式（见 core/modes.py），与 Web 的 req.mode 对齐
 
 
 @router.post("/v1/chat/completions")
@@ -104,6 +105,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
         req.session_id = _generate_id()
         model_id = req.model or get_config().defaults.model
         await store.create_with_id(req.session_id, model_id, source="api")
+        if req.mode:
+            await store.update_mode(req.session_id, req.mode)
 
         # 直接用首条消息作初始标题，保障 session 创建时就有可读标题
         # （_maybe_regen_title 后续会用智能标题覆盖，但即便它失败也不留"新对话"）
@@ -143,7 +146,7 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
 
     if req.stream:
         return StreamingResponse(
-            _stream_completions(agent, messages, store, session_id, req.model, user_id),
+            _stream_completions(agent, messages, store, session_id, req.model, user_id, req.mode),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -263,7 +266,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
     }
 
 
-async def _stream_completions(agent, messages, store, session_id: str, model: str | None, user_id: str = ""):
+async def _stream_completions(agent, messages, store, session_id: str, model: str | None,
+                              user_id: str = "", mode: str = ""):
     from ethan.core.stream_collector import StreamCollector
     from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
@@ -368,5 +372,6 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
         # 与非流式分支一致：首轮回复后补一个会话标题，否则走 completions 的会话
         # 在 Web/桌面端永远显示默认标题。
         asyncio.create_task(_maybe_regen_title(session_id))
-        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
+        # mode 与 chat.py 非流式分支一致：精简模式（minimal）会话不该触发记忆抽取
+        asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
         asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))

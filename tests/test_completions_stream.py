@@ -105,9 +105,35 @@ async def test_stream_completions_yields_text_and_finishes(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_stream_completions_passes_mode_to_consolidate(monkeypatch):
+    """mode 必须透传给 _maybe_consolidate，否则精简模式会被当成默认模式抽取记忆。"""
+    seen = {}
+
+    async def _noop(*a, **k):
+        return None
+
+    async def _capture(session_id, model, user_id="", mode=""):
+        seen["mode"] = mode
+
+    monkeypatch.setattr(completions_mod, "_maybe_regen_title", _noop)
+    monkeypatch.setattr(completions_mod, "_maybe_consolidate", _capture)
+    monkeypatch.setattr(completions_mod, "_maybe_generate_skill", _noop)
+
+    store = _Store()
+    _ = [
+        c async for c in completions_mod._stream_completions(
+            _Agent(["hi"]), [], store, "s_test_1234", "fake-model", "u1", "minimal"
+        )
+    ]
+    import asyncio
+
+    await asyncio.sleep(0)  # 让 create_task 跑起来
+    assert seen.get("mode") == "minimal"
+
+
+@pytest.mark.anyio
 async def test_stream_completions_reports_error_in_band(monkeypatch):
     """agent 中途抛错时：已产出内容保留，错误以 data 事件下发，不静默空 body。"""
-    from ethan.providers.base import ThinkingEvent
 
     async def _noop(*a, **k):
         return None
