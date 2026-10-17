@@ -267,6 +267,29 @@ def _refresh_plist_if_stale(console: Console) -> bool:
     return True
 
 
+def _launchd_state() -> tuple[int, int] | None:
+    """取 launchd 里本服务的 (pid, 退出码)。
+
+    `launchctl list` 每行是 `PID<TAB>状态<TAB>Label`，PID 为 `-` 表示进程当前
+    不在运行，此时状态列就是上回退出码（负数为信号）。没登记过则返回 None。
+    """
+    result = _launchctl("list")
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 3 or parts[2] != PLIST_NAME:
+            continue
+        pid_text, status_text = parts[0], parts[1]
+        pid = int(pid_text) if pid_text.isdigit() else 0
+        try:
+            status = int(status_text)
+        except ValueError:
+            status = 0
+        return pid, status
+    return None
+
+
 def _service_port() -> int:
     """取 serve 实际监听端口。
 
@@ -285,7 +308,7 @@ def _service_port() -> int:
         return 8900
 
 
-def _wait_for_health(port: int, timeout: float = 90.0) -> bool:
+def _wait_for_health(port: int, timeout: float = 120.0) -> bool:
     """轮询 /api/health 直到服务真正可用。
 
     launchd 拉起 serve 时，Python 冷启动 import 明显比前台慢（实测 shell 0.5s
@@ -376,6 +399,12 @@ def restart() -> None:
         if not _wait_for_health(port):
             console.print("[red]✗ 服务未能就绪。[/red]")
             console.print(f"  launchd 已加载任务，但 http://127.0.0.1:{port}/api/health 无响应。")
+            state = _launchd_state()
+            if state and state[0] == 0:
+                # 进程已经不在了：是启动失败退出，不是还在慢慢起
+                console.print(f"  serve 进程已退出，退出码 {state[1]}（负数=被信号终止）。")
+            else:
+                console.print("  serve 进程仍在运行，可能只是启动较慢或端口被占用。")
             console.print(f"  请查看日志：{Path.home() / '.ethan' / 'logs' / 'api.err.log'}")
             raise typer.Exit(1)
         console.print("[green]✓ 服务已重启。[/green]")

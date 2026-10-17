@@ -171,3 +171,39 @@ def test_service_port_default_on_error(monkeypatch):
 
     monkeypatch.setattr("ethan.core.config.get_config", boom)
     assert server_mod._service_port() == 8900
+
+
+# ── launchd 状态解析 ────────────────────────────────────────────────
+
+
+def test_launchd_state_running(monkeypatch):
+    """进程在跑时返回 (pid, 退出码)，供失败提示区分「慢」和「崩」。"""
+
+    class _R:
+        returncode = 0
+        stdout = "123\t0\tcom.ethan.agent\n-\t0\tcom.ethan.other\n"
+
+    monkeypatch.setattr(server_mod, "_launchctl", lambda *a: _R())
+    assert server_mod._launchd_state() == (123, 0)
+
+
+def test_launchd_state_exited_with_code(monkeypatch):
+    """PID 为 `-` 说明已退出，状态列即退出码。"""
+
+    class _R:
+        returncode = 0
+        stdout = "-\t1\tcom.ethan.agent\n"
+
+    monkeypatch.setattr(server_mod, "_launchctl", lambda *a: _R())
+    assert server_mod._launchd_state() == (0, 1)
+
+
+def test_launchd_state_not_registered(monkeypatch):
+    """没登记过（launchctl list 无该行）返回 None。"""
+
+    class _R:
+        returncode = 0
+        stdout = "123\t0\tcom.other.agent\n"
+
+    monkeypatch.setattr(server_mod, "_launchctl", lambda *a: _R())
+    assert server_mod._launchd_state() is None
