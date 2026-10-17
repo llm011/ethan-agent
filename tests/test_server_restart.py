@@ -115,11 +115,11 @@ def test_installed_exe_none_when_path_missing(plist, tmp_path):
 def test_wait_for_health_returns_false_on_timeout():
     """没人监听的端口必须在超时后返回 False，而不是直接报成功。"""
 
-    assert server_mod._wait_for_health("127.0.0.1", 1, timeout=0.5) is False
+    assert server_mod._wait_for_health(1, timeout=0.5) is False
 
 
 def test_wait_for_health_returns_true_when_up(monkeypatch):
-    """健康检查 200 时立即返回 True。"""
+    """健康检查 200 时立即返回 True，且探的是回环地址。"""
 
     class _Resp:
         status = 200
@@ -130,47 +130,44 @@ def test_wait_for_health_returns_true_when_up(monkeypatch):
         def __exit__(self, *a):
             return False
 
+    seen = {}
+
     def fake_urlopen(url, timeout=None):
-        assert url.endswith("/api/health")
+        seen["url"] = url
         return _Resp()
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    assert server_mod._wait_for_health("127.0.0.1", 8900, timeout=5) is True
+    assert server_mod._wait_for_health(8900, timeout=5) is True
+    # 固定回环：按 config 里的 LAN IP 探活会在换网络/VPN 时误判失败
+    assert seen["url"] == "http://127.0.0.1:8900/api/health"
 
 
-@pytest.mark.parametrize(
-    "host,expected",
-    [
-        ("0.0.0.0", "127.0.0.1"),
-        ("::", "127.0.0.1"),
-        ("", "127.0.0.1"),
-        ("127.0.0.1", "127.0.0.1"),
-        # 绑到具体 LAN 地址时，探活也要跟着换，否则永远连不上
-        ("192.168.1.10", "192.168.1.10"),
-    ],
-)
-def test_service_endpoint_maps_wildcard_host(host, expected, monkeypatch):
-    """通配地址换成回环；具体地址原样使用。"""
+def test_service_port_prefers_env(monkeypatch):
+    """ETHAN_SERVER_PORT 优先级高于 config，与 serve 自身的解析顺序一致。"""
+    monkeypatch.setenv("ETHAN_SERVER_PORT", "8981")
+    assert server_mod._service_port() == 8981
+
+
+def test_service_port_falls_back_to_config(monkeypatch):
+    """没有环境变量时用 config 里的端口。"""
+    monkeypatch.delenv("ETHAN_SERVER_PORT", raising=False)
 
     class _Srv:
-        pass
-
-    srv = _Srv()
-    srv.host = host
-    srv.port = 8900
+        port = 8901
 
     class _Cfg:
-        server = srv
+        server = _Srv()
 
     monkeypatch.setattr("ethan.core.config.get_config", lambda: _Cfg())
-    assert server_mod._service_endpoint() == (expected, 8900)
+    assert server_mod._service_port() == 8901
 
 
-def test_service_endpoint_falls_back_on_error(monkeypatch):
-    """读配置失败时回退到本机 8900，不能直接抛。"""
+def test_service_port_default_on_error(monkeypatch):
+    """读配置失败时回退 8900，不能直接抛。"""
+    monkeypatch.delenv("ETHAN_SERVER_PORT", raising=False)
 
     def boom():
         raise RuntimeError("config broken")
 
     monkeypatch.setattr("ethan.core.config.get_config", boom)
-    assert server_mod._service_endpoint() == ("127.0.0.1", 8900)
+    assert server_mod._service_port() == 8900

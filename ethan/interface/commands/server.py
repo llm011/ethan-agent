@@ -107,6 +107,9 @@ def install() -> None:
 
     _launchctl("unload", str(PLIST_PATH))  # 忽略未加载时的错误
     PLIST_PATH.write_text(plist_content)
+    # 与 restart 一致：先清掉 launchd 之外的残留实例，否则新进程撞上「同一
+    # sessions.db 已有实例」的守卫会直接退出，被 KeepAlive 反复重启。
+    _stop_leftover_instances(console)
 
     result = _launchctl("load", str(PLIST_PATH))
     if result.returncode != 0:
@@ -114,9 +117,9 @@ def install() -> None:
         raise typer.Exit(1)
 
     # 同 restart：load 成功 ≠ 服务起来，等健康检查通过再宣告安装完成。
-    host, port = _service_endpoint()
-    console.print(f"[dim]等待服务在 {host}:{port} 就绪...[/dim]")
-    if not _wait_for_health(host, port):
+    port = _service_port()
+    console.print(f"[dim]等待服务在 :{port} 就绪...[/dim]")
+    if not _wait_for_health(port):
         console.print("[yellow]⚠ 服务已注册但未能就绪[/yellow]")
         console.print(f"  请查看日志：{log_dir / 'api.err.log'}")
         raise typer.Exit(1)
@@ -264,36 +267,39 @@ def _refresh_plist_if_stale(console: Console) -> bool:
     return True
 
 
-def _service_endpoint() -> tuple[str, int]:
-    """取 serve 实际监听地址（config 优先，缺省 0.0.0.0:8900）。
+def _service_port() -> int:
+    """取 serve 实际监听端口。
 
-    host 可能是 `0.0.0.0` / `::` 这类通配地址，不能直接拿去连——换成回环地址。
-    用户若把 host 设成具体 LAN IP，就按那个 IP 探活，否则健康检查永远连不上。
+    优先级与 serve 自身一致（config._server_bind_defaults）：`ETHAN_SERVER_PORT`
+    环境变量 > config.yaml `server.port` > 8900。漏掉环境变量的话，shell 里设了
+    端口的人会去探一个没人监听的端口，重启必然误报失败。
     """
-    host, port = "127.0.0.1", 8900
+    env = os.environ.get("ETHAN_SERVER_PORT", "").strip()
+    if env.isdigit():
+        return int(env)
     try:
         from ethan.core.config import get_config
 
-        srv = get_config().server
-        port = int(srv.port)
-        if srv.host and srv.host not in ("0.0.0.0", "::", "[::]", ""):
-            host = srv.host
+        return int(get_config().server.port)
     except Exception:
-        pass
-    return host, port
+        return 8900
 
 
-def _wait_for_health(host: str, port: int, timeout: float = 90.0) -> bool:
+def _wait_for_health(port: int, timeout: float = 90.0) -> bool:
     """轮询 /api/health 直到服务真正可用。
 
     launchd 拉起 serve 时，Python 冷启动 import 明显比前台慢（实测 shell 0.5s
     的 import 在 launchd 下要 12s+，完整启动 70s 量级），所以超时给得比较宽。
     返回 True 表示端口已监听且健康检查通过。
+
+    固定探 `127.0.0.1`，与 `cli.py` 的 `_http_ready`、`api.py` 的就绪探测保持一致：
+    serve 默认绑 `0.0.0.0`，回环一样可连；而按 config 里的具体 LAN IP 探活，
+    换了 WiFi / 网线没插 / 走了 VPN 时就会连不上，把正常运行的实例误判成失败。
     """
     import time
     import urllib.request
 
-    url = f"http://{host}:{port}/api/health"
+    url = f"http://127.0.0.1:{port}/api/health"
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -365,11 +371,11 @@ def restart() -> None:
         # `load` 返回 0 只代表任务被登记，不代表 serve 起来了（端口占用、
         # 启动期异常都会让它立刻退出）。必须等健康检查通过再报成功——否则
         # 用户看到「✓ 服务已重启」但访问失败，无从判断到底怎么了。
-        host, port = _service_endpoint()
-        console.print(f"[dim]等待服务在 {host}:{port} 就绪...[/dim]")
-        if not _wait_for_health(host, port):
+        port = _service_port()
+        console.print(f"[dim]等待服务在 :{port} 就绪...[/dim]")
+        if not _wait_for_health(port):
             console.print("[red]✗ 服务未能就绪。[/red]")
-            console.print(f"  launchd 已加载任务，但 http://{host}:{port}/api/health 无响应。")
+            console.print(f"  launchd 已加载任务，但 http://127.0.0.1:{port}/api/health 无响应。")
             console.print(f"  请查看日志：{Path.home() / '.ethan' / 'logs' / 'api.err.log'}")
             raise typer.Exit(1)
         console.print("[green]✓ 服务已重启。[/green]")
