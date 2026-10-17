@@ -114,9 +114,9 @@ def install() -> None:
         raise typer.Exit(1)
 
     # 同 restart：load 成功 ≠ 服务起来，等健康检查通过再宣告安装完成。
-    port = _service_port()
-    console.print(f"[dim]等待服务在 :{port} 就绪...[/dim]")
-    if not _wait_for_health(port):
+    host, port = _service_endpoint()
+    console.print(f"[dim]等待服务在 {host}:{port} 就绪...[/dim]")
+    if not _wait_for_health(host, port):
         console.print("[yellow]⚠ 服务已注册但未能就绪[/yellow]")
         console.print(f"  请查看日志：{log_dir / 'api.err.log'}")
         raise typer.Exit(1)
@@ -264,17 +264,26 @@ def _refresh_plist_if_stale(console: Console) -> bool:
     return True
 
 
-def _service_port() -> int:
-    """取 serve 实际监听端口（config 优先，缺省 8900）。"""
+def _service_endpoint() -> tuple[str, int]:
+    """取 serve 实际监听地址（config 优先，缺省 0.0.0.0:8900）。
+
+    host 可能是 `0.0.0.0` / `::` 这类通配地址，不能直接拿去连——换成回环地址。
+    用户若把 host 设成具体 LAN IP，就按那个 IP 探活，否则健康检查永远连不上。
+    """
+    host, port = "127.0.0.1", 8900
     try:
         from ethan.core.config import get_config
 
-        return int(get_config().server.port)
+        srv = get_config().server
+        port = int(srv.port)
+        if srv.host and srv.host not in ("0.0.0.0", "::", "[::]", ""):
+            host = srv.host
     except Exception:
-        return 8900
+        pass
+    return host, port
 
 
-def _wait_for_health(port: int, timeout: float = 90.0) -> bool:
+def _wait_for_health(host: str, port: int, timeout: float = 90.0) -> bool:
     """轮询 /api/health 直到服务真正可用。
 
     launchd 拉起 serve 时，Python 冷启动 import 明显比前台慢（实测 shell 0.5s
@@ -284,7 +293,7 @@ def _wait_for_health(port: int, timeout: float = 90.0) -> bool:
     import time
     import urllib.request
 
-    url = f"http://127.0.0.1:{port}/api/health"
+    url = f"http://{host}:{port}/api/health"
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -356,11 +365,11 @@ def restart() -> None:
         # `load` 返回 0 只代表任务被登记，不代表 serve 起来了（端口占用、
         # 启动期异常都会让它立刻退出）。必须等健康检查通过再报成功——否则
         # 用户看到「✓ 服务已重启」但访问失败，无从判断到底怎么了。
-        port = _service_port()
-        console.print(f"[dim]等待服务在 :{port} 就绪...[/dim]")
-        if not _wait_for_health(port):
+        host, port = _service_endpoint()
+        console.print(f"[dim]等待服务在 {host}:{port} 就绪...[/dim]")
+        if not _wait_for_health(host, port):
             console.print("[red]✗ 服务未能就绪。[/red]")
-            console.print(f"  launchd 已加载任务，但 http://127.0.0.1:{port}/api/health 无响应。")
+            console.print(f"  launchd 已加载任务，但 http://{host}:{port}/api/health 无响应。")
             console.print(f"  请查看日志：{Path.home() / '.ethan' / 'logs' / 'api.err.log'}")
             raise typer.Exit(1)
         console.print("[green]✓ 服务已重启。[/green]")
