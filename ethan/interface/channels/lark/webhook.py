@@ -98,13 +98,16 @@ async def _send_lark_reply(client: lark.Client, chat_id: str, text: str) -> None
 async def _add_reaction(client: lark.Client, message_id: str, emoji: str = "THINKING_FACE") -> None:
     """Add a reaction emoji to a message to signal receipt.
 
-    复用 lark_send._send_reaction 的 SDK 实现（统一 reaction 调用入口）。
-    lark_send._send_reaction 内部用 _lark_client() 拿 client，这里传入的 client 仅用于
-    webhook 路径下的早期添加（client 已构建好）；如果 lark_send 自己能拿到 client 就直接用，
-    否则退回到这里传入的 client。为避免双 client 不一致，这里直接调 _send_reaction。
+    复用 lark_typing._send_reaction 的 SDK 实现（统一 reaction 调用入口）。
+    这个函数只用来「打个 THINKING 反应表示已收到」，失败不影响后续跑 Agent，
+    所以吞掉异常——否则 ImportError 之类的意外会把整条消息处理链打断。
     """
-    from ethan.interface.channels.lark.send import _send_reaction
-    await _send_reaction(message_id)
+    from ethan.interface.channels.lark.typing import _send_reaction
+
+    try:
+        await _send_reaction(message_id, emoji_type="THINKING")
+    except Exception:
+        logger.exception("添加 Lark thinking reaction 失败 message_id=%s", message_id)
 
 
 @lark_router.post("/lark/webhook")

@@ -17,7 +17,7 @@ from ethan.providers.base import Message
 from .deps import create_agent, verify_token
 from .helpers import _friendly_error
 from .producers import _save_progress
-from .tasks import _maybe_regen_title
+from .tasks import _maybe_consolidate, _maybe_generate_skill, _maybe_regen_title
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +265,6 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
 
 async def _stream_completions(agent, messages, store, session_id: str, model: str | None, user_id: str = ""):
     from ethan.core.stream_collector import StreamCollector
-    from ethan.interface.routers.chat import _maybe_consolidate, _maybe_generate_skill
     from ethan.providers.base import InjectEvent, SkillsMatchedEvent, ThinkingEvent, ToolEvent
 
     collector = StreamCollector().bind(agent)
@@ -366,6 +365,8 @@ async def _stream_completions(agent, messages, store, session_id: str, model: st
         else:
             await store.save_message(session_id, asst_msg)
         await store.touch(session_id)
+        # 与非流式分支一致：首轮回复后补一个会话标题，否则走 completions 的会话
+        # 在 Web/桌面端永远显示默认标题。
         asyncio.create_task(_maybe_regen_title(session_id))
         asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id))
         asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
