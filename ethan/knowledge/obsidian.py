@@ -11,9 +11,20 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
     def __init__(self, vault_path: Path, folder: str = ".", scene: str = ""):
         self._vault = vault_path
-        self._folder = folder
-        self._dir = vault_path / folder
         self._scene = scene
+        # 归一化 folder：剥掉任何重复的 scene 首段。
+        # registry 已保证 folder 只含一层 scene（"./work" → "work"），但历史配置
+        # （obsidian_folder="work" + scene="work"）会拼出 work/work，这里做最终兜底，
+        # 确保 self._dir 永远不落在 <vault>/<scene>/<scene>。
+        raw_folder = str(folder or ".").strip().strip("/")
+        parts = [p for p in raw_folder.split("/") if p]
+        scene_head = (scene or "").strip("/")
+        # 只在「剥完还能剩下内容」时剥，保证至少保留一层目录——
+        # folder="work" + scene="work" 是合法目标（vault/work），不能剥成 "."。
+        while scene_head and len(parts) > 1 and parts[0] == scene_head:
+            parts = parts[1:]
+        self._folder = "/".join(parts) if parts else "."
+        self._dir = vault_path / self._folder
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -37,6 +48,14 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         dup_dir = self._dir / self._scene
         if not dup_dir.is_dir():
             return
+        # 防御：若 self._dir 本身就是 <vault>/<scene>（正常情况），
+        # 绝不能在 <vault>/<scene> 下再建/搬 <scene> 子目录——那正是 bug 的产物。
+        try:
+            if self._dir.resolve() == (self._vault / self._scene).resolve():
+                print(f"[knowledge] refuse to migrate scene-named dir under scene root: {dup_dir}")
+                return
+        except OSError:
+            pass
         try:
             self._migrate_children(dup_dir, self._dir)
             # 仅当 dup_dir 真正空了才删
@@ -140,13 +159,15 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         """
         if not tags:
             return None
-        subpath = _safe_subpath(tags[0])
+        subpath = _safe_subpath(tags[0], self._scene)
         if subpath is None:
             return None
         scene = (self._scene or "").strip("/")
-        if scene and subpath.parts and subpath.parts[0] == scene:
-            # 二次兜底：剥掉残留的 scene 首段
+        # 循环剥掉所有残留的 scene 首段（兼容 "work/work/coze" 这类多层重复）
+        while scene and subpath.parts and subpath.parts[0] == scene:
             subpath = Path(*subpath.parts[1:]) if len(subpath.parts) > 1 else None
+            if subpath is None:
+                return None
         return subpath
 
     def add(self, title: str, content: str, tags: list[str] | None = None,
