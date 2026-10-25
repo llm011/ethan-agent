@@ -99,6 +99,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // 用 ref 而不是 state：它是纯写入侧的互斥标记，不该触发渲染；存会话 id 是为了
   // 「A 的加载还没完就切到 B」时不误挡 B 的刷新。
   const sessionLoadRef = useRef<string | null>(null);
+  // 上一次真正拿到独占权的会话 id：effect 重跑时用它判断「那次加载的标记还算不算自己的」。
+  // 和 sessionLoadRef 一起构成一个对称的借还：effect 开头归还上一次、走到真正加载时再借本次。
+  const lastLoadedSessionRef = useRef<string | null>(null);
 
   // 订阅「后台有会话变了」的信号（定时任务 / 别的窗口 / CLI / 渠道都可能改当前这条会话）。
   // 挂在这里而不是挂在某个子组件上：刷新要同时更新消息、标题和标注，这些都是
@@ -537,9 +540,12 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     olderReqSessionRef.current = null;
     setHasOlder(false);
     setLoadingOlder(false);
-    // 本次加载期间独占这个消息列表：静默刷新看到这个标记会主动让路（见 handleRefreshSession）。
-    // 清理函数里只在「标记还归自己」时才清，避免把后来那次加载的标记提前抹掉。
-    sessionLoadRef.current = initialSessionId ?? null;
+    // 先交还上一次加载的独占权（若还归自己）：走到这里说明这次 effect 已经接管了
+    // 消息列表，标记马上会按本次会话重写。清掉是为了让下面那些提前 return 的分支
+    // 不会把「上一个会话」的标记留在原地 —— handleRefreshSession 是按会话 id 比的，
+    // 留着一条过期的 id 不会误挡谁，但读代码的人得靠推理才能确认这一点。
+    if (sessionLoadRef.current === lastLoadedSessionRef.current) sessionLoadRef.current = null;
+    lastLoadedSessionRef.current = initialSessionId ?? null;
 
     if (!initialSessionId) {
       // 切换到新会话 — 保存当前输入并切换状态机
@@ -571,6 +577,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
 
     // 切换到目标会话 — 保存当前输入并恢复目标会话的输入状态
     inputStore.switchTo(initialSessionId, inputRef.current?.value);
+
+    // 本次加载期间独占这个消息列表：静默刷新看到这个标记会主动让路（见 handleRefreshSession）。
+    // 放在这里而不是 effect 开头：上面的「新会话 / 已在该会话且流式中」两个分支会提前
+    // return，它们根本没有要写入的列表，不该抢独占权。
+    sessionLoadRef.current = initialSessionId;
 
     // 重置 transient 状态：防止旧会话的 streaming 残留阻塞新会话操作
     _setStreaming(false);
@@ -689,7 +700,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     return () => {
       cancelled = true;
       // 交还独占权：只在标记仍是自己那次加载时清，避免把接着启动的那次加载的标记抹掉。
-      if (sessionLoadRef.current === initialSessionId) sessionLoadRef.current = null;
+      if (sessionLoadRef.current === initialSessionId) {
+        sessionLoadRef.current = null;
+        lastLoadedSessionRef.current = null;
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
