@@ -119,6 +119,8 @@ export function settleFromFreshPage(prev: Message[], page: Message[]): Message[]
   // 归位后如果 page 里那条定稿行被 prev 的内容对账挤掉了（空正文同 key 互顶），
   // 以 page 为准补回来 —— 它是后端的真实记录，比本地占位权威。
   const presentIds = new Set(withoutPlaceholders.map((m) => m.id));
+  // 只认数字 id 的 assistant：page 里没有数字 id 的行说明它还没定稿（或整页都是未定稿
+  // 行），补回来也没法参与后续按 id 的定位/提升，交给下一次刷新即可 —— 那时它已定稿。
   const missingAssistant = page.filter(
     (m) => m.role === "assistant" && typeof m.id === "number" && !presentIds.has(m.id),
   );
