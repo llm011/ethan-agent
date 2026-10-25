@@ -52,6 +52,15 @@ def user_memory_dir() -> Path:
     return user_data_dir() / "memory"
 
 
+def user_uploads_dir() -> Path:
+    """聊天附件（非图片上传）根目录：`<user_data_dir>/uploads`。
+
+    与图片（`assets/images/<session_id>/`）同思路：文件落盘、DB 只存元数据。
+    布局与归属逻辑见 `ethan/core/uploads.py`。
+    """
+    return user_data_dir() / "uploads"
+
+
 def user_facts_path() -> Path:
     """[已退役] 旧 facts.json 路径。仅供 legacy_migration 读取迁移源 + onboarding 判定老用户使用。
 

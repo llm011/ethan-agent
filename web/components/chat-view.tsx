@@ -52,7 +52,7 @@ import { ConsentGate } from "@ethan/shared/chat/consent-card";
 import { CleanupConfirmGate, type CleanupConfirmRequest } from "@ethan/shared/chat/cleanup-confirm-card";
 import { AskUserCard, type AskUserRequest } from "@ethan/shared/chat/ask-user-card";
 import { WaitForUserCard, type WaitForUserRequest } from "@ethan/shared/chat/wait-for-user-card";
-import { placeholderTitle, mapDetailMessages, historicUsageOf, isFirstQuerySignificant, pendingFileToImagePayload, revokePendingBlobUrls } from "@/components/chat/chat-helpers";
+import { placeholderTitle, mapDetailMessages, historicUsageOf, isFirstQuerySignificant, pendingFileToImagePayload, revokePendingBlobUrls, toChatFiles } from "@/components/chat/chat-helpers";
 import { consumeStream } from "@/components/chat/use-chat-stream";
 import { handleCommand } from "@/components/chat/chat-commands";
 import { useInputStore } from "@/components/chat/use-input-store";
@@ -765,6 +765,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         // 避免请求失败 / 被中止时排队消息被静默丢弃
 
         const chatMessages: ChatMessage[] = [{ role: "user", content: first.text }];
+        // 排队消息也可能带附件：把元数据带上，后端落库时自动从 _pending 归位
+        const firstFiles = toChatFiles([...(first.files || []), ...(first.images || [])]);
+        if (firstFiles.length > 0) chatMessages[0].files = firstFiles;
         if (first.images && first.images.length > 0) {
           chatMessages[0].images = await Promise.all(
             first.images.filter((f) => f.isImage).map(pendingFileToImagePayload)
@@ -1022,7 +1025,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const userMsg: Message = {
       role: "user",
       content,
-      files: nonImageFiles.map((f) => f.name),
+      files: nonImageFiles.map((f) => ({ name: f.name, path: f.path, rel_path: f.relPath, size: f.size })),
       images: imagesToSend.length > 0 ? imagesToSend : undefined,
       created_at: Date.now() / 1000,
       quote: quote ?? undefined,
@@ -1040,6 +1043,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     const chatMessages: ChatMessage[] = await Promise.all(newMessages.map(async (m) => ({
       role: m.role,
       content: m.content,
+      // 非图片附件只传元数据（正文留在服务端 uploads/），后端落库时归位到会话目录
+      files: m.files && m.files.length > 0 ? m.files : undefined,
       images: m.images ? await Promise.all(m.images.map(pendingFileToImagePayload)) : undefined,
     })));
 
@@ -1223,6 +1228,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
           }}
           stopping={stopping}
           onFilesChange={setPendingFiles}
+          sessionId={activeSession}
           onQuoteCancel={() => setQuote(null)}
           modes={modes}
           mode={mode}

@@ -45,6 +45,50 @@ async def _verify_token_or_cookie(request: Request) -> str:
     return user_id
 
 
+@router.get("/uploads/{session_id}/{filename}", dependencies=[Depends(_verify_token_or_cookie)])
+async def get_upload_file(session_id: str, filename: str):
+    """下载/预览聊天附件（非图片上传，如 .md/.pdf）。
+
+    目录由 URL 里的 session_id 段决定，**不接受文件名里带路径**：一个会话的附件
+    不会被另一个会话的链接读到（会话归属由调用方自己保证 session_id 正确）。
+    与图片路由不同，这里不做扩展名白名单——附件本来就可能是任意类型，安全边界
+    是「只能读 uploads/<session_id>/ 这一个目录」。
+
+    `filename` 是落盘名（`<uuid8>_<原始名>`），原始名由 `Content-Disposition` 还原。
+
+    归属校验：URL 里的 session_id 必须是当前用户的会话（与图片路由同样只靠
+    「本进程/profile 的会话库」隔离——多租户部署时每个用户有自己的 profile 目录，
+    别人的 session 目录根本不在自己的 uploads 下）。
+    """
+    from pathlib import Path
+
+    from ethan.core.uploads import PENDING_DIRNAME, upload_file_path
+    from ethan.memory.session import get_session_store
+
+    if "/" in session_id or "\\" in session_id or ".." in session_id:
+        raise HTTPException(status_code=400, detail="invalid path")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="invalid path")
+    # 未归属会话的暂存文件（uploads/_pending/）允许预览：上传后、发送前点 chip 也要能看
+    if session_id != PENDING_DIRNAME:
+        store = await get_session_store()
+        if not await store.load(session_id):
+            raise HTTPException(status_code=404, detail="not found")
+    path = upload_file_path(f"{session_id}/{filename}")
+    if path is None:
+        raise HTTPException(status_code=404, detail="not found")
+    # 落盘名形如 "1a2b3c4d_原始名.md"：去掉 uuid 前缀还原原始文件名
+    original = Path(filename).name
+    head, _, tail = original.partition("_")
+    if len(head) == 8 and tail and all(c in "0123456789abcdef" for c in head):
+        original = tail
+    return FileResponse(
+        path,
+        filename=original,
+        headers={"Cache-Control": "private, max-age=0"},
+    )
+
+
 @router.get("/images/{session_id}/{filename}", dependencies=[Depends(_verify_token_or_cookie)])
 async def get_asset_image(session_id: str, filename: str, fmt: str | None = None, w: int | None = None):
     """读取用户上传的图片文件。

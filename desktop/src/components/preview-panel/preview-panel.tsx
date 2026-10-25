@@ -19,12 +19,21 @@ export function storePanelSize(size: number) {
   } catch {}
 }
 
-async function fetchFileContent(path: string, sessionId?: string | null): Promise<string> {
-  const sig = await signFileUrl(getApiUrl(), getAuthToken(), [path]);
-  const s = sig[path];
-  const sidQ = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
-  const sigQ = s ? `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}` : "";
-  const url = `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}${sidQ}${sigQ}`;
+async function fetchFileContent(path: string, sessionId?: string | null, assetRelPath?: string): Promise<string> {
+  let url: string;
+  if (assetRelPath) {
+    // 聊天附件：走 /api/assets/uploads/<rel_path>，不依赖 messages.cards 的会话 grant，
+    // 鉴权同 <img>（cookie 或 ?token=，Tauri webview 跨源必须带 token）。路径段各自编码。
+    const token = getAuthToken();
+    const q = token ? `?token=${encodeURIComponent(token)}` : "";
+    url = `${getApiUrl()}/assets/uploads/${assetRelPath.split("/").map(encodeURIComponent).join("/")}${q}`;
+  } else {
+    const sig = await signFileUrl(getApiUrl(), getAuthToken(), [path]);
+    const s = sig[path];
+    const sidQ = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+    const sigQ = s ? `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}` : "";
+    url = `${getApiUrl()}/files/download?path=${encodeURIComponent(path)}${sidQ}${sigQ}`;
+  }
   const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`Failed to fetch file: ${res.status}`);
   return res.text();
@@ -76,7 +85,7 @@ export function PreviewPanel() {
     setError("");
     setContent("");
 
-    fetchFileContent(file.path, file.sessionId)
+    fetchFileContent(file.path, file.sessionId, file.assetRelPath)
       .then((text) => { if (alive) setContent(text); })
       .catch((e) => { if (alive) setError(e.message); })
       .finally(() => { if (alive) setLoading(false); });

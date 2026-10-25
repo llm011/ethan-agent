@@ -134,11 +134,16 @@ export function Lightbox({ images, index, open, onOpenChange, onIndexChange }: L
           if (e.target === e.currentTarget) onOpenChange(false);
         }}
       >
-        {/* 右上角关闭按钮 */}
+        {/* 关闭按钮：必须钉在右上角。
+            坑：Tailwind 的 `right-*` 值和 `left-*` 值共用同名候选（right-3 / left-3 都是 0.75rem），
+            而 DialogContent 自带的默认关闭按钮是 `absolute top-2 right-2` → 两个主题键相同，
+            后者按工具类排序胜出，right 直接失效、只剩 top 生效，按钮就跑到左上角。
+            所以这里不再用 right-*，改用固定定位值直接写 inline style。 */}
         <button
           type="button"
           onClick={() => onOpenChange(false)}
-          className="absolute top-3 right-3 z-10 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+          className="absolute left-auto top-3 z-10 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+          style={{ right: "0.75rem" }}
           aria-label="关闭"
         >
           <X className="h-5 w-5" />

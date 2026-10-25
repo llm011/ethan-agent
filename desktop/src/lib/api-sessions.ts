@@ -287,14 +287,26 @@ export async function cleanupTrivialSessions(): Promise<{ deleted: number; delet
   return res.json();
 }
 
-export async function uploadFile(file: File): Promise<{ path: string; filename: string }> {
+/** 上传聊天附件（非图片）。session_id 有则直接落到 uploads/<session_id>/，否则落 uploads/_pending/ 等落库时归位。 */
+export async function uploadFile(
+  file: File,
+  sessionId?: string | null,
+): Promise<{ path: string; filename: string; size?: number; rel_path?: string }> {
   const form = new FormData();
   form.append("file", file);
   const h: HeadersInit = {};
   const token = getAuthToken();
   if (token) h["Authorization"] = `Bearer ${token}`;
-  const res = await fetchWithTimeout(`${getApiUrl()}/upload`, { method: "POST", headers: h, body: form });
-  if (!res.ok) throw new Error("Upload failed");
+  const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+  const res = await fetchWithTimeout(`${getApiUrl()}/upload${q}`, { method: "POST", headers: h, body: form });
+  if (!res.ok) {
+    // 413 是「文件过大」，把后端原因透出来，别一律吞成 Upload failed
+    let detail = "";
+    try {
+      detail = (await res.json())?.detail || "";
+    } catch {}
+    throw new Error(detail || `Upload failed (${res.status})`);
+  }
   return res.json();
 }
 
