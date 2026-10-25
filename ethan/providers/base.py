@@ -53,6 +53,9 @@ class Message:
     a2ui: Optional[list] = None  # ui_card 工具产出的 A2UI envelope 列表，持久化以便刷新后仍渲染卡片
     mcp_apps: Optional[list] = None  # 工具 UI 资源列表 [{uri, data}]，持久化后刷新仍可重渲染交互式图表
     images: list[dict] = field(default_factory=list)  # [{"data": "base64...", "media_type": "image/png"}]
+    # 非图片附件（上传的文档等）：只存元数据，正文在 uploads/ 目录下，见 ethan/core/uploads.py
+    # [{"name", "path", "rel_path", "size", "media_type"}]
+    files: Optional[list] = None
     matched_skills: Optional[list] = None  # 本次对话命中的 Skill 列表 [{name, is_default}]，用于可视化
     ttfb_ms: Optional[int] = None  # 收到第一个文本块的耗时（毫秒）
     total_ms: Optional[int] = None  # 从请求到完成的总耗时（毫秒）

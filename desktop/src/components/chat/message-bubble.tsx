@@ -13,6 +13,9 @@ import { Lightbox, type LightboxImage } from "./lightbox";
 import { type SearchResultCard } from "./search-card-carousel";
 import { ImageGallery, type ImageCard } from "./image-gallery";
 import { FileCardView, type FileCard } from "./file-card";
+import { ChatFiles } from "@ethan/shared/chat/attachment-list";
+import { usePreview } from "@/components/preview-panel/preview-context";
+import { openUrl } from "@/lib/external-link";
 import { applyHighlights } from "@/lib/highlight";
 import { fetchMessageIntermediate, fetchToolRaw } from "@/lib/api-sessions";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
@@ -265,6 +268,8 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
     return () => window.clearInterval(timer);
   }, [showRunningPlaceholder, refreshing]);
   // 用户附带的图片点击放大用的 Lightbox 状态
+  // 侧边预览面板：附件 md/html 与「产物文件」共用同一面板
+  const preview = usePreview();
   const [userImages, setUserImages] = useState<LightboxImage[]>([]);
   const [userImageIndex, setUserImageIndex] = useState(0);
   const [userLightboxOpen, setUserLightboxOpen] = useState(false);
@@ -416,9 +421,20 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
                 </div>
               )}
               {msg.files && msg.files.length > 0 && (
-                <div className="text-xs opacity-70 mb-1">
-                  {msg.files.map((f, j) => <span key={j} className="mr-2">📎 {f}</span>)}
-                </div>
+                // 与产物文件一致：md/html 侧边预览、图片开全局 Lightbox、其余直接下载
+                <ChatFiles
+                  files={msg.files}
+                  getUrl={(relPath) => assetUrl(`assets/uploads/${relPath}`)}
+                  onPreview={({ name, path, relPath, kind }) =>
+                    preview.open({ path, filename: name, kind, sessionId, assetRelPath: relPath })
+                  }
+                  onPreviewImage={({ url, title }) => {
+                    setUserImages([{ url, title }]);
+                    setUserImageIndex(0);
+                    setUserLightboxOpen(true);
+                  }}
+                  onDownload={({ url }) => { void openUrl(url).catch(() => {}); }}
+                />
               )}
               {msg.images && msg.images.length > 0 && (
                 <div className="flex gap-1.5 flex-wrap mb-1.5">

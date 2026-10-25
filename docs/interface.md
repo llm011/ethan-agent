@@ -380,6 +380,26 @@ CLI 内部维护 `WorkingMemory` 实例：
 另：侧边栏的取数 effect 以「所在区块」而不是完整 `pathname` 作依赖，避免 `/chat/[id]`
 之间切换时把会话列表/定时任务重新拉一遍。
 
+### 聊天附件的存储与访问契约
+
+对话里上传的**非图片文件**（.md / .pdf / 代码等）和图片一样走「文件落盘、DB 只存元数据」：
+
+| 环节 | 约定 |
+|------|------|
+| 落盘 | `POST /api/upload?session_id=`（前端 `uploadFile()`）→ `ethan/core/uploads.py::store_upload()`，写到 `~/.ethan/uploads/<session_id>/<uuid8>_<原文件名>`；上传时还没有会话 id（新会话第一句）则先落 `uploads/_pending/` |
+| 归属 | `/api/chat` 用户消息落库前调 `adopt_uploads()`，把 `_pending/` 里的文件搬进 `uploads/<session_id>/`（搬不动就留在原地，不阻断落库；文件已不存在的条目直接丢弃） |
+| 入库 | `messages.files`（TEXT JSON）：`[{name, path, rel_path, size, media_type}]`，**不含正文** |
+| 回读 | `GET /api/sessions/{id}` 每条消息带 `files`；前端 `mapDetailMessages()` 映射进 `Message.files` |
+| 访问 | `GET /api/assets/uploads/{session_id}/{filename}`（`ethan/interface/routers/assets.py`），鉴权同图片：Bearer / cookie / `?token=` 三通道；只读 `uploads/<session_id>/`，URL 里的 session 必须存在（否则 404），不做扩展名白名单，`Content-Disposition` 还原原始文件名 |
+| 消费 | 前端共享组件 `packages/shared/src/chat/attachment-list.tsx`：md/html → 侧边预览面板（`preview.open({assetRelPath})`，走 `assets/uploads/...` 拉正文）；图片 → 全局 Lightbox；其他 → 下载 |
+| 清理 | 删除会话时连带 `rmtree(uploads/<session_id>)`；启动时 `prune_pending()` 清掉 7 天前没人认领的 `_pending/` 孤儿 |
+
+⚠️ 不要再用 `tempfile` 把上传落到 `/tmp` / `/var/folders`：不在清理策略里、也不在 `file_jail` 的
+home//tmp 范围内，重启或系统清理后模型 `file_read` 和前端预览都会失效。
+
+⚠️ 老会话没有 `files` 字段，正文里只留着 `[Uploaded file: <name> at <path>]` 前缀。前端
+`legacyFilesFromContent()` 从这个前缀回填名字（没有 `rel_path` → 不可点，仅展示），不改库。
+
 ### 记忆列表的分页（不要往回退）
 
 记忆页三端（Android / Web / Desktop）的列表都是**下滑加载更多**，接口统一

@@ -255,6 +255,9 @@ async def get_session(
                     else img
                     for img in (getattr(m, "images", None) or [])
                 ],
+                # 非图片附件元数据：只存路径不存正文，前端用 assetUrl() 拼
+                # /api/assets/uploads/<rel_path> 访问（见 ethan/core/uploads.py）
+                "files": getattr(m, "files", None) or [],
                 "matched_skills": getattr(m, "matched_skills", None),
                 "ttfb_ms": getattr(m, "ttfb_ms", None),
                 "total_ms": getattr(m, "total_ms", None),

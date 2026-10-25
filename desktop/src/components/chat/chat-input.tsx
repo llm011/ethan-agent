@@ -47,6 +47,8 @@ interface ChatInputProps {
   onSend: (text: string) => void;
   onStop?: () => void;
   onFilesChange: (files: PendingFile[]) => void;
+  // 当前会话 id：上传非图片附件时直接落到 uploads/<session_id>/（新会话可能还没有 id）
+  sessionId?: string | null;
   onQuoteCancel: () => void;
   modes?: ModeEntry[];
   mode?: string;
@@ -76,6 +78,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   onSend,
   onStop,
   onFilesChange,
+  sessionId = null,
   onQuoteCancel,
   modes = [],
   mode = "",
@@ -136,8 +139,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       if (file.type.startsWith("image/")) {
         added.push(await readImageFile(file));
       } else {
-        const result = await uploadFile(file);
-        added.push({ name: result.filename, path: result.path });
+        const result = await uploadFile(file, sessionId);
+        added.push({ name: result.filename, path: result.path, size: result.size, relPath: result.rel_path });
       }
     }
     onFilesChange([...pendingFiles, ...added]);
@@ -167,12 +170,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       if (file.type.startsWith("image/")) {
         added.push(await readImageFile(file));
       } else {
-        const result = await uploadFile(file);
-        added.push({ name: result.filename, path: result.path });
+        const result = await uploadFile(file, sessionId);
+        added.push({ name: result.filename, path: result.path, size: result.size, relPath: result.rel_path });
       }
     }
     onFilesChange([...pendingFiles, ...added]);
-  }, [pendingFiles, onFilesChange]);
+  }, [pendingFiles, onFilesChange, sessionId]);
 
   // 旧会话可能只存了纯 model id。升级策略：
   // - 唯一匹配：确定无疑，直接升级为 provider/id

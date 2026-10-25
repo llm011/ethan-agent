@@ -12,6 +12,8 @@ export interface QueuedMessage {
   id: string;
   text: string;
   images?: PendingFile[];
+  /** 非图片附件（上传文档等），与 images 一起随消息发出 */
+  files?: PendingFile[];
 }
 
 interface InputState {
@@ -165,6 +167,7 @@ export function useInputStore() {
       id: genQueueId(),
       text,
       images: images && images.length > 0 ? images : undefined,
+      files: images && images.some((f) => !f.isImage) ? images.filter((f) => !f.isImage) : undefined,
     };
     latestRef.current = { ...latestRef.current, queue: [...latestRef.current.queue, item] };
     flush();
