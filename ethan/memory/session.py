@@ -1213,6 +1213,11 @@ class SessionStore:
         shutil.rmtree(user_intermediate_dir() / session_id, ignore_errors=True)
         # 聊天附件随会话一起清（图片资产 assets/images/ 仍保留，属于既有行为）
         shutil.rmtree(user_uploads_dir() / session_id, ignore_errors=True)
+        # 同 id 会话被删后重新创建时，曾归属它的附件可能还留在 _pending/（搬迁失败 / 跨端排队），
+        # 不清掉会被 adopt_uploads 重新认领到新会话上。
+        from ethan.core.uploads import discard_pending_for
+
+        discard_pending_for(session_id)
         await self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         await self._db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         await self._db.commit()
@@ -1952,6 +1957,21 @@ async def retry_on_db_locked(
             await asyncio.sleep(delay)
             delay = min(delay * 2, 8.0)
     raise AssertionError("unreachable")
+
+
+async def session_exists(session_id: str) -> bool:
+    """会话是否存在（便宜查询，不加载消息）。
+
+    附件下载路由用它做归属校验：`store.load()` 会把整条会话的消息读出来并反序列化，
+    每次开附件都做一遍太浪费；这里只 `SELECT 1 FROM sessions`。
+    会话库不可用（还没初始化）时按「不存在」处理，路由返回 404，不抛 500。
+    """
+    try:
+        store = await get_session_store()
+        async with store._db.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)) as cursor:
+            return await cursor.fetchone() is not None
+    except Exception:  # noqa: BLE001 — 归属校验失败一律按不存在处理
+        return False
 
 
 async def get_session_store(db_path: Path | None = None) -> "SessionStore":

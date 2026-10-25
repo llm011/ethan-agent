@@ -58,22 +58,24 @@ async def get_upload_file(session_id: str, filename: str):
 
     归属校验：URL 里的 session_id 必须是当前用户的会话（与图片路由同样只靠
     「本进程/profile 的会话库」隔离——多租户部署时每个用户有自己的 profile 目录，
-    别人的 session 目录根本不在自己的 uploads 下）。
+    别人的 session 目录根本不在自己的 uploads 下）。`_pending/` 是尚未归属会话的
+    暂存区（上传后、发送前点开 chip 也要能看），只接受本次上传返回的落盘名，
+    不发目录列表。
     """
     from pathlib import Path
 
     from ethan.core.uploads import PENDING_DIRNAME, upload_file_path
-    from ethan.memory.session import get_session_store
+    from ethan.memory.session import session_exists
 
     if "/" in session_id or "\\" in session_id or ".." in session_id:
         raise HTTPException(status_code=400, detail="invalid path")
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="invalid path")
-    # 未归属会话的暂存文件（uploads/_pending/）允许预览：上传后、发送前点 chip 也要能看
-    if session_id != PENDING_DIRNAME:
-        store = await get_session_store()
-        if not await store.load(session_id):
-            raise HTTPException(status_code=404, detail="not found")
+    # 未归属会话的暂存文件（uploads/_pending/）允许预览：上传后、发送前点 chip 也要能看。
+    # 注意 _pending 是「本 profile 的暂存区」，不是某个会话的目录——仍然要求登录态
+    # （上面的 _verify_token_or_cookie），且文件名带 uuid 前缀不可枚举。
+    if session_id != PENDING_DIRNAME and not await session_exists(session_id):
+        raise HTTPException(status_code=404, detail="not found")
     path = upload_file_path(f"{session_id}/{filename}")
     if path is None:
         raise HTTPException(status_code=404, detail="not found")

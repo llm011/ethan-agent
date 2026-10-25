@@ -6,7 +6,8 @@
 布局（`user_uploads_dir()` = `<user_data_dir>/uploads`，default profile 即 `~/.ethan/uploads`）：
 
     uploads/
-      _pending/<uuid8>_<safe_name>     ← 上传时还没有 session_id（新会话第一句）
+      _pending/<uuid8>_<safe_name>            ← 上传时还没有 session_id（新会话第一句）
+      _pending/<session_id>__<原落盘名>        ← 搬迁失败的残留（带归属标记，删会话时清）
       <session_id>/<uuid8>_<safe_name> ← 已归属某个会话
 
 为什么不再用 `tempfile.NamedTemporaryFile`：落在 `/var/folders/...`（macOS）或
@@ -18,12 +19,15 @@
 """
 from __future__ import annotations
 
+import logging
 import mimetypes
 import re
 import shutil
 import time
 import uuid
 from pathlib import Path
+
+_log = logging.getLogger(__name__)
 
 # 单文件上限（与前端提示保持一致；后端是权威校验）
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -128,6 +132,28 @@ def _normalize(raw: dict | str, session_id: str) -> dict | None:
     }
 
 
+def discard_pending_for(session_id: str) -> int:
+    """删除会话时清掉仍指向该会话的 `_pending/` 残留（搬迁失败的孤儿）。
+
+    想搬进 `<session_id>/` 但 `shutil.move` 失败的文件会留在 `_pending/`，之后在
+    `adopt_uploads()` 里重试时改名为 `f"{session_id}__{原落盘名}"`（打上归属标记），
+    便于在这里按前缀清理。用户传了但没发送的文件没有归属标记，留给 `prune_pending()`
+    按时间清，不会误删。
+    """
+    pending = uploads_root() / PENDING_DIRNAME
+    if not pending.is_dir():
+        return 0
+    removed = 0
+    for p in pending.iterdir():
+        try:
+            if p.is_file() and p.name.startswith(f"{session_id}__"):
+                p.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def adopt_uploads(session_id: str, raw_files: list | None) -> list[dict]:
     """把本次消息携带的附件归属到 `session_id`，返回规范化后的元数据列表。
 
@@ -153,7 +179,16 @@ def adopt_uploads(session_id: str, raw_files: list | None) -> list[dict]:
                 meta["rel_path"] = f"{session_id}/{dst.name}"
             except OSError:
                 # 搬不动就保留在 _pending/，至少还能下载；不阻断消息落库。
-                pass
+                # 但必须打上归属标记：否则同 id 会话删了重建时可能被"借"到新会话上，
+                # 也无法在删除会话时按前缀清掉（见 discard_pending_for）。
+                _log.warning("adopt_uploads: 无法把 %s 搬进 %s，暂留 _pending/", src, target_dir, exc_info=True)
+                try:
+                    marked = src.with_name(f"{session_id}__{src.name}")
+                    src.rename(marked)
+                    meta["path"] = str(marked.resolve())
+                    meta["rel_path"] = f"{PENDING_DIRNAME}/{marked.name}"
+                except OSError:
+                    _log.warning("adopt_uploads: 标记 %s 的归属失败，仅保留原路径", src, exc_info=True)
         out.append(meta)
     return out
 

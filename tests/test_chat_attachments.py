@@ -69,7 +69,7 @@ def store_handle(store):
 
 
 @pytest.fixture()
-def client(data_dir, store_handle, monkeypatch):
+def client(data_dir, store, store_handle, monkeypatch):
     monkeypatch.setattr(settings_mod, "get_session_store", store_handle, raising=False)
     # chat 路由用的是 `from ethan.memory.session import get_session_store` 的模块级名字
     monkeypatch.setattr(chat_mod, "get_session_store", store_handle)
@@ -79,6 +79,11 @@ def client(data_dir, store_handle, monkeypatch):
     import ethan.memory.session as session_mod
 
     monkeypatch.setattr(session_mod, "get_session_store", store_handle)
+
+    async def _exists(sid: str) -> bool:
+        return await store.load(sid) is not None
+
+    monkeypatch.setattr(session_mod, "session_exists", _exists)
     # 建 agent 必然失败（本机 provider 配置与测试无关）：用户消息在它之前落库，
     # 失败只会让请求返回错误，不影响本文件要验证的落库/归属逻辑。
     monkeypatch.setattr(
@@ -131,7 +136,7 @@ def test_upload_file_path_rejects_traversal(data_dir):
     meta = uploads_mod.store_upload(b"x", "a.txt", session_id="s_a")
     stored = meta["rel_path"].split("/", 1)[1]
     assert uploads_mod.upload_file_path(f"s_a/{stored}") is not None
-    assert uploads_mod.upload_file_path(f"s_a/../../evil.txt") is None
+    assert uploads_mod.upload_file_path("s_a/../../evil.txt") is None
     assert uploads_mod.upload_file_path("../outside.txt") is None
 
 
@@ -269,3 +274,17 @@ def test_delete_session_cleans_uploads(store, data_dir):
     assert (user_uploads_dir() / meta["rel_path"]).is_file()
     assert asyncio.run(_run()) is True
     assert not (user_uploads_dir() / "s_del").exists()
+
+
+def test_discard_pending_for_only_removes_marked_files(data_dir):
+    """删除会话时只清带 `<session_id>__` 标记的残留，用户没发送的上传不受影响。"""
+    keep = uploads_mod.store_upload(b"x", "draft.md")
+    marked_dir = uploads_mod.uploads_root() / uploads_mod.PENDING_DIRNAME
+    marked = marked_dir / "s_old__keep_me.md"
+    marked.write_bytes(b"y")
+
+    removed = uploads_mod.discard_pending_for("s_old")
+
+    assert removed == 1
+    assert not marked.exists()
+    assert (uploads_mod.uploads_root() / keep["rel_path"]).is_file()
