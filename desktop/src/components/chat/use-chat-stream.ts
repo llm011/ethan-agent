@@ -1,6 +1,6 @@
 import type { StreamChunk } from "@/lib/api";
 import { notifyDesktop } from "@/lib/notify";
-import { MESSAGE_PAGE_SIZE, makeTempId, replaceTailKeepOlder } from "@ethan/shared/chat/history";
+import { MESSAGE_PAGE_SIZE, isTempId, makeTempId, replaceTailKeepOlder } from "@ethan/shared/chat/history";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
 import type { Message, Usage } from "@ethan/shared/chat/types";
 import type { ConsentRequest } from "@ethan/shared/components/consent-dialog";
@@ -89,6 +89,43 @@ export function mergeMissingUserMessages(local: Message[], fromServer: Message[]
   if (missing.length === 0) return fromServer;
 
   return [...fromServer, ...missing];
+}
+
+/**
+ * 断线收尾路径专用：把「刚拉到的一页」并进列表，保证不留下重复气泡。
+ *
+ * 单靠 `replaceTailKeepOlder` 不够（真实 bug：桌面端两个任务同时在跑时，点进其中
+ * 一个，同一条回复渲染成两个气泡，刷新后消失）：
+ *
+ * 走到这里之前，`consumeStream` 已经往列表 push 过一条占位气泡 —— `tmp:` 临时 id、
+ * 正文还是空串（`replaceTailKeepOlder` 会把它直接丢掉，所以**必须**先把它归位）。
+ * 而同一时刻，后端那条还没定稿的进度行也是空正文，于是同一个 role+content 配额里
+ * 挤着好几条空 assistant。按内容对账算不清「谁是这一轮」，结果要么留下两条，
+ * 要么把本地无 id 的 user 消息挤掉。
+ *
+ * 所以分两步：
+ *   1. 交给 `replaceTailKeepOlder` 处理「更早历史 / 本地乐观 user 消息」的对账
+ *      （它已经会把 `tmp:` 占位排除在内容对账之外，见 history.ts 的 `isTempId` 分支）；
+ *   2. 再按 **id** 核对一遍：占位一律不留，page 里那条真实 assistant 必须在场。
+ *
+ * page 里没有可归位的 assistant（本轮无回复、或拉到的页不含它）时，占位气泡仍然
+ * 直接丢弃：保留它等于保留一个空壳，而下次刷新它一定会消失 —— 留着只会让用户
+ * 以为「有一条回复丢了」。
+ */
+export function settleFromFreshPage(prev: Message[], page: Message[]): Message[] {
+  if (page.length === 0) return prev;
+  const merged = replaceTailKeepOlder(prev, page);
+  // 占位气泡的定稿版本在 page 里；这里只负责确保它**没有**留下来。
+  const withoutPlaceholders = merged.filter((m) => !isTempId(m.id));
+  // 归位后如果 page 里那条定稿行被 prev 的内容对账挤掉了（空正文同 key 互顶），
+  // 以 page 为准补回来 —— 它是后端的真实记录，比本地占位权威。
+  const presentIds = new Set(withoutPlaceholders.map((m) => m.id));
+  const missingAssistant = page.filter(
+    (m) => m.role === "assistant" && typeof m.id === "number" && !presentIds.has(m.id),
+  );
+  if (missingAssistant.length === 0) return withoutPlaceholders;
+  // 把缺的补在末尾（它们是最新的那几条），顺序按 page 的顺序
+  return [...withoutPlaceholders, ...missingAssistant];
 }
 
 // 消费一条 SSE 事件流，增量更新最后一条 assistant 消息，结束后定稿。
@@ -602,7 +639,7 @@ export async function consumeStream(
             // 关键：不能整表替换 —— 用户上滚翻出来的更早几页不在这一页里，
             // 直接 setMessages(这一页) 会让它们凭空消失。
             const mergedMsgs = mergeMissingUserMessages(baseMessages, freshMsgs);
-            writeMsgs(prev => replaceTailKeepOlder(prev, mergedMsgs));
+            writeMsgs(prev => settleFromFreshPage(prev, mergedMsgs));
             setBgPolling(null);
             setConsentRequest(null);
             setCleanupConfirm(null);

@@ -217,6 +217,28 @@ describe("replaceTailKeepOlder", () => {
     expect(out.some((x) => isTempId(x.id))).toBe(false);
   });
 
+  it("占位气泡与后端空进度行同 key 时，占位气泡不能吃掉无 id user 消息的配额", () => {
+    // 真实场景：两个任务同时在跑，点进其中一个。会话加载路径把「占位 assistant
+    // （空正文、tmp: id）」push 进列表，同时后端那条**还没定稿的进度行**（有真实
+    // id、正文也是空的）出现在拉回来的一页里 ⇒ 同一个 `assistant\u0000` key 在
+    // page 里出现两次。
+    //
+    // 若占位气泡掉进无 id 的内容对账，它会按配额认领其中一份，把本该留给本地乐观
+    // user 消息的额度挤掉；随后 consumeStream 定稿时按 liveId 又找不到它 → push
+    // 出第二条，用户看到两个一模一样的气泡（刷新后消失）。
+    const ph = newAssistantPlaceholder<M>([]);
+    const prev = [{ role: "user", content: "两个任务" } as M, ph];
+    const page = [m(1, "user", "两个任务"), m(2, "assistant", "")];
+
+    const out = replaceTailKeepOlder(prev, page);
+
+    // 占位气泡被无条件丢弃
+    expect(out.some((x) => isTempId(x.id))).toBe(false);
+    // user 消息只留 page 里那份（不能被当成「后端没落库」再补一条）
+    expect(out.filter((x) => x.role === "user")).toHaveLength(1);
+    expect(out.map((x) => x.id)).toEqual([1, 2]);
+  });
+
   it("无 id 的本地乐观消息，page 里没有时要留住（否则发出去的消息凭空消失）", () => {
     // 后端没落库这条 query：page 里完全没有它
     const prev = [m(1, "user"), m(2, "assistant"), { role: "user", content: "b" } as M];

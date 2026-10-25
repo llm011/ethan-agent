@@ -160,6 +160,18 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   // handleRefreshSession 的串行化链：指向「最近一次刷新的 promise」，见其定义处。
   const refreshChainRef = useRef<Promise<void> | null>(null);
 
+  // 「这个会话正在被别的写入路径接管」的标记（会话加载 / 流式续接）。
+  //
+  // 静默刷新（3s idle-refresh、占位条 5s 轮询）只看 `streaming`，但那面旗在这两段
+  // 里并不可靠：`streaming` 要到 `detail.active_run` 分支才置 true，而会话加载的
+  // 整个前半程（拉页 + 渲染 + 等 /stream 首包）都是 false。窗口里插进来一次刷新，
+  // 就会和加载路径**交错替换同一个消息列表** —— 两条路径各自按内容对账，占位气泡
+  // 与后端空进度行同 key 互顶，正是「同一条回复两个气泡」的温床。
+  //
+  // 用 ref 而不是 state：它是纯写入侧的互斥标记，不该触发渲染；存会话 id 是为了
+  // 「A 的加载还没完就切到 B」时不误挡 B 的刷新。
+  const sessionLoadRef = useRef<string | null>(null);
+
   // 订阅「后台有会话变了」的信号（定时任务 / 别的窗口 / CLI / 渠道都可能改当前这条会话）。
   // 挂在这里而不是挂在某个子组件上：刷新要同时更新消息、标题、用量和标注，这些都是
   // ChatView 自己的状态。事件消费见下面那个 useEffect。
@@ -430,6 +442,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const handleRefreshSession = useCallback(async () => {
     const sid = activeSession;
     if (!sid || streaming || bgPolling) return;
+    // 会话加载 / 流式续接正持有这个会话的消息列表：此时再拉一页并替换，两条路径会
+    // 交错覆盖同一份状态（见 sessionLoadRef 的注释）。放弃这次刷新是安全的 ——
+    // 加载路径本身会渲染最新一页，而它在途期间的任何变化都会被下一次轮询捕获。
+    if (sessionLoadRef.current === sid) return;
     // 同一时刻只允许一次在途刷新：串行化用「上一次的 promise」而不是一个 boolean ——
     // 订阅者（占位条的 5s 轮询 / 后台变化的 3s 轮询）随时可能在上一发还没回来时再触发，
     // 用 boolean 的话第二发会被直接丢掉，而第二发往往才是真正需要的那次（新内容到了）。
@@ -535,6 +551,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     olderReqSessionRef.current = null;
     setHasOlder(false);
     setLoadingOlder(false);
+    // 本次加载期间独占这个消息列表：静默刷新看到这个标记会主动让路（见 handleRefreshSession）。
+    // 清理函数里只在「标记还归自己」时才清，避免把后来那次加载的标记提前抹掉。
+    sessionLoadRef.current = initialSessionId ?? null;
 
     if (!initialSessionId) {
       // 切换到新会话 — 保存当前输入并切换状态机
@@ -690,7 +709,11 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         setMessages([]);
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // 交还独占权：只在标记仍是自己那次加载时清，避免把接着启动的那次加载的标记抹掉。
+      if (sessionLoadRef.current === initialSessionId) sessionLoadRef.current = null;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
 
