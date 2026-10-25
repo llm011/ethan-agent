@@ -121,12 +121,26 @@ async function friendlyHttpError(res: Response): Promise<string> {
 }
 
 /** 重连一个仍在进行的生成：刷新页面后调此函数，回放缓冲 + 继续实时。
- *  无活跃 run 时后端返回 204，这里返回 null，调用方走普通 fetchSession。 */
+ *  无活跃 run 时后端返回 204，这里返回 null，调用方走普通 fetchSession。
+ *
+ *  传输层失败（连不上 / 超时 / 连接被掐）不能静默吞成 `null`：`null` 的语义是
+ *  「**后端明确说没有活跃 run**」，调用方据此走「拉最终结果」的收尾分支。把网络
+ *  错误也归成 `null`，调用方就会在半途既走收尾分支、又继续等一条其实没接上的流 ——
+ *  两者交错替换消息列表，是「同一条回复出现两个气泡」的来源之一（服务端仍有活跃
+ *  run 时尤其明显：DB 里那条还是空的进度行）。这里按 `streamChat` 的口径抛中文错误，
+ *  让调用方走自己的失败分支，而不是伪装成「没有 run」。 */
 export async function streamResume(sessionId: string, signal?: AbortSignal): Promise<AsyncGenerator<StreamChunk> | null> {
-  const res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stream`, {
-    headers: headers(),
-    signal,
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stream`, {
+      headers: headers(),
+      signal,
+    });
+  } catch (e) {
+    // 用户主动中断（切会话/新发送抢占）要原样抛 AbortError，调用方据此静默收尾
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    throw new Error("连接不上 Ethan 服务，请确认后端已启动后重试。");
+  }
   if (res.status === 204 || !res.ok) return null;
   return parseSSE(res);
 }
