@@ -35,7 +35,11 @@ _DESTRUCTIVE_PATTERNS = [
     # 覆写系统/设备文件。/dev/null、/dev/stdout、/dev/stderr 是重定向黑洞/透传目标，
     # 写入无副作用，放行（否则 `2>/dev/null` 这类极常见写法会被误判高危，
     # 在超级权限模式下被静默拒绝）；/dev/sda、/dev/tcp 等仍拦截。
-    r'>\s*/dev/(?!null\b|stdout\b|stderr\b)|>\s*/etc/|>\s*/sys/|>\s*/boot/',
+    # 注意：目标后紧跟串尾/空白/分隔符时 `\b` 不成立（如 `2>/dev/null` 的结尾），
+    # 故用 `(?=$|[\s;&|)…])` 而非 `\b`，否则 `2>/dev/null` 会被误判（ETHA-49 连带修复）。
+    # 后接 `>`/`<` 也放行：那是「黑洞 + 再重定向」的写法（如 `>/dev/null>out.txt`），
+    # /dev/null 本身仍无副作用，真正的写入目标由下一个重定向的规则判定。
+    r'>\s*/dev/(?!(?:null|stdout|stderr)(?=$|[\s;&|)=><\'"/]))|>\s*/etc/|>\s*/sys/|>\s*/boot/',
     r':\(\)\s*\{.*\|.*&.*\}',                   # fork bomb
     r'\bgit\b.*\b(?:reset\s+--hard|clean\s+-\w*[fd]|push\s+.*--force|push\s+.*-f)\b',  # 破坏性 git
 ]
@@ -300,7 +304,7 @@ def _strip_heredoc_data_body(cmd: str) -> str:
 
 
 def _is_rm_tmp_only(command: str) -> bool:
-    """rm 命令的所有操作目标是否全部位于 /tmp/ 下。
+    """rm 命令的所有操作目标是否全部位于 /tmp 下（允许不带 /tmp/ 前缀）。
 
     只检查 rm 开头的命令；如果命令有管道/分号组合，保守返回 False。
     """
@@ -313,7 +317,113 @@ def _is_rm_tmp_only(command: str) -> bool:
     paths = [p for p in parts[1:] if not p.startswith("-")]
     if not paths:
         return False
-    return all(p.startswith("/tmp/") or (p == "/tmp") for p in paths)
+    return all(_is_tmp_path(p) for p in paths)
+
+
+# ── /tmp 下清理类命令豁免 ──────────────────────────────────────
+#
+# 背景（2026-10-28 ETHA-49 反馈）：
+#   cd /tmp && rm -rf /tmp/tft && bytedcli ... -o /tmp/tft 2>&1 | tail -
+# 目标是 /tmp 下的临时目录，却整条被判「高危 shell 命令」弹窗。旧豁免
+# _is_rm_tmp_only 有两条硬伤：
+#   1. 要求命令以 rm 开头——`cd /tmp && rm ...` 直接不命中；
+#   2. 命令里出现任意 `;&|` 组合符就放弃——「清理 + 调 CLI + 管道」永远走不到。
+# 用户明确表达过「/tmp 里的文件都不用管」，/tmp 下 rm 是临时目录清理，
+# 不属于不可逆的数据破坏。
+#
+# 新豁免按命令段（; && || | 换行）逐段判定，放行需同时满足：
+#   1. 只命中破坏性规则（混入 curl|sh / eval / chmod 777 / 提权等高危即不豁免）；
+#   2. 每个破坏性命中都落在「rm 且目标全在 /tmp/」的命令段内；
+#   3. 没有命令替换/反引号/动态执行/后台执行（见 _TMP_EXEMPT_BAD_COMPOSE_RE）；
+#   4. 不涉及提权（sudo/doas），没有 secret 环境变量引用。
+#
+# `cd ..` 之后的相对路径、`rm -rf tmp/x` 都不算命中 /tmp——相对路径落点取决于
+# 运行时 cwd，无法静态确认，维持原判。
+
+# 按 shell 命令分隔符切段（|| 先于 |，&& 先于 &）
+_TMP_EXEMPT_SPLIT_RE = re.compile(r'\|\||&&|[;\n|&]')
+# 豁免口径下仍视为「危险组合」的写法：命令替换/子 shell、反引号、动态执行、
+# 后台执行（& 后跟空白）。管道 / ; / && / 丢弃输出的重定向本身不危险——
+# `&&` 链和 `| tail -` 正是用户反馈里「清理 + 调 CLI + 看 tail」的正常形态。
+_TMP_EXEMPT_BAD_COMPOSE_RE = re.compile(r'\$\(|`|&&\s*&|[^\s>&]&\s+|\beval\b|\bsource\b|\bexec\b')
+# 丢弃输出的标准重定向（`2>/dev/null`、`&>/dev/null`、`2>&1`）：只是静音输出，
+# 不产生额外写入目标，豁免口径内允许出现。
+_STD_DEV_NULL_REDIRECT_RE = re.compile(
+    r'(?:&|[0-9])?>>?&?\s*/dev/null|(?:&|[0-9])?>>?&[0-9]+'
+)
+_RM_LEADING_RE = re.compile(r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*rm\b\s*(.*)$', re.DOTALL)
+
+
+def _is_tmp_path(p: str) -> bool:
+    """/tmp 本身或 /tmp/ 下的路径（含 .. 的路径静态无法确认落点，不算）。"""
+    if ".." in p.split("/"):
+        return False
+    return p == "/tmp" or p.startswith("/tmp/")
+
+
+def _rm_segment_tmp_only(seg: str) -> bool:
+    """单个命令段是否为「rm 且所有目标在 /tmp/」的形态。"""
+    m = _RM_LEADING_RE.match(seg.strip())
+    if not m:
+        return False
+    rest = m.group(1)
+    if "$" in rest or "`" in rest:
+        return False
+    # 重定向只允许丢弃输出的标准写法；其余重定向（> file、输入 <、写到设备）
+    # 说明有额外目标，超出口径。
+    cleaned = _STD_DEV_NULL_REDIRECT_RE.sub(' ', rest)
+    if re.search(r'[<>]', cleaned):
+        return False
+    targets = [t for t in cleaned.split() if not t.startswith("-")]
+    if not targets:
+        return False
+    return all(_is_tmp_path(t) for t in targets)
+
+
+def _destructive_hits(scan_cmd: str):
+    """返回 scan_cmd 里所有破坏性规则的命中（保留每个命中位置）。"""
+    hits = []
+    for pat in _DESTRUCTIVE_PATTERNS:
+        hits.extend(m for m in re.finditer(pat, scan_cmd))
+    return hits
+
+
+def _is_tmp_cleanup(scan_cmd: str, raw_cmd: str = "") -> bool:
+    """整条命令是否为「/tmp 下清理」形态，可豁免破坏性等高危判定。
+
+    只豁免「破坏性命中全部来自 /tmp 段内 rm」的命令；混入任何其余高危
+    （curl|sh、eval、chmod 777、提权等）一律不豁免。
+    """
+    if not scan_cmd:
+        return False
+    src = raw_cmd or scan_cmd
+    # 0. 除破坏性规则外还命中了其余高危：不是单纯的 /tmp 清理
+    if re.search("|".join(_RISKY_PATTERNS), scan_cmd):
+        return False
+    # 3./4. 提权、secret 引用：一律不豁免（扫原始命令，不剥 heredoc）
+    if re.search(r'(?:^|[\s;&|(])sudo(?:\s|$)|(?:^|[\s;&|(])doas(?:\s|$)', src):
+        return False
+    if _detect_secret_env_refs(src):
+        return False
+    if _TMP_EXEMPT_BAD_COMPOSE_RE.search(_shell_level_command(scan_cmd)):
+        return False
+    hits = _destructive_hits(scan_cmd)
+    if not hits:
+        return True
+    # 2. 每个破坏性命中都必须落在某个「rm 且目标全在 /tmp/」的段内
+    rm_spans = []
+    offset = 0
+    for seg in _TMP_EXEMPT_SPLIT_RE.split(scan_cmd):
+        pos = scan_cmd.find(seg, offset)
+        if pos < 0:
+            return False
+        if _rm_segment_tmp_only(seg):
+            rm_spans.append((pos, pos + len(seg)))
+        offset = pos + len(seg)
+    for h in hits:
+        if not any(s <= h.start() and h.end() <= e for s, e in rm_spans):
+            return False
+    return bool(rm_spans)
 
 
 def _is_safe_readonly(command: str) -> bool:
@@ -414,7 +524,7 @@ class ShellTool(BaseTool):
         # 剥离后再扫危险模式，避免 body 里的描述性文字（如任务说明里的
         # "git push --force"）被误判成破坏性命令。
         scan_cmd = _strip_heredoc_data_body(cmd)
-        if _DANGEROUS_RE.search(scan_cmd):
+        if _DANGEROUS_RE.search(scan_cmd) and not _is_tmp_cleanup(scan_cmd, cmd):
             # 高危命令：文案标红提示，且每次都问（见 consent_always）
             return f"⚠️ 高危 shell 命令，请确认：{cmd[:200]}"
         # 环境变量列举命令（env/printenv/set 等）：不需要 $VAR 就能 dump 所有 secret，
@@ -442,12 +552,13 @@ class ShellTool(BaseTool):
     def consent_always(self, command: str = "", **kwargs) -> bool:
         # 高危命令始终重新询问，即使本会话已授权过 shell，也不计入会话放行。
         # 这是普通模式/无人值守模式的口径（破坏性 + 高危非破坏性 + 密钥泄露面）。
-        # 例外：rm 操作目标全部在 /tmp/ 下时放行，不反复弹窗。
+        # 例外：rm 操作目标全部在 /tmp/ 下时放行（含 `cd /tmp && rm ... && cmd | tail`
+        # 这类组合命令，见 _is_tmp_cleanup），不反复弹窗。
         # 危险扫描用剥离 heredoc 数据正文后的命令串（同 consent_check）。
         cmd = command or ""
         scan_cmd = _strip_heredoc_data_body(cmd)
         if _DANGEROUS_RE.search(scan_cmd):
-            if _is_rm_tmp_only(cmd):
+            if _is_rm_tmp_only(cmd) or _is_tmp_cleanup(scan_cmd, cmd):
                 return False
             return True
         return _is_env_dump(scan_cmd) or bool(_detect_secret_env_refs(cmd))
@@ -458,12 +569,14 @@ class ShellTool(BaseTool):
         # eval / chmod 777 / env dump / secret 引用）在超级模式下自动放行——
         # 见 agent loop 对 auto_approve 的处理。
         #
-        # 例外：rm 操作目标全部在 /tmp/ 下时视为安全（临时文件清理），不弹窗。
+        # 例外：rm 操作目标全部在 /tmp/ 下时视为安全（临时文件清理），不弹窗，
+        # 组合命令形态见 _is_tmp_cleanup。
         # 危险扫描用剥离 heredoc 数据正文后的命令串（同 consent_check）。
         cmd = command or ""
-        if not _DESTRUCTIVE_RE.search(_strip_heredoc_data_body(cmd)):
+        scan_cmd = _strip_heredoc_data_body(cmd)
+        if not _DESTRUCTIVE_RE.search(scan_cmd):
             return False
-        if _is_rm_tmp_only(cmd):
+        if _is_rm_tmp_only(cmd) or _is_tmp_cleanup(scan_cmd, cmd):
             return False
         return True
     parameters = {
