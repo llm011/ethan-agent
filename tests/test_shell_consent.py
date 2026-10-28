@@ -530,3 +530,13 @@ def test_std_dev_null_redirect_not_dangerous():
     # 近名设备仍拦截
     assert _DANGEROUS_RE.search("echo x 2>/dev/nullx")
     assert _DANGEROUS_RE.search("echo x 2>/dev/sda")
+
+
+def test_std_dev_null_then_redirect_not_dangerous():
+    """`>/dev/null>out.txt`（黑洞 + 再重定向）不因紧跟 `>` 被判设备覆写。"""
+    tool = ShellTool()
+    assert not _DANGEROUS_RE.search("ls -la >/dev/null>out.txt")
+    assert not tool.consent_check(command="ls -la >/dev/null>out.txt").startswith("⚠️ 高危")
+    # 真正的写入目标照常拦截
+    assert _DANGEROUS_RE.search("echo x > /dev/sda>y")
+    assert _DANGEROUS_RE.search("echo x >/dev/null> /etc/passwd")

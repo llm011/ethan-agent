@@ -37,7 +37,9 @@ _DESTRUCTIVE_PATTERNS = [
     # 在超级权限模式下被静默拒绝）；/dev/sda、/dev/tcp 等仍拦截。
     # 注意：目标后紧跟串尾/空白/分隔符时 `\b` 不成立（如 `2>/dev/null` 的结尾），
     # 故用 `(?=$|[\s;&|)…])` 而非 `\b`，否则 `2>/dev/null` 会被误判（ETHA-49 连带修复）。
-    r'>\s*/dev/(?!(?:null|stdout|stderr)(?=$|[\s;&|)\'"]))|>\s*/etc/|>\s*/sys/|>\s*/boot/',
+    # 后接 `>`/`<` 也放行：那是「黑洞 + 再重定向」的写法（如 `>/dev/null>out.txt`），
+    # /dev/null 本身仍无副作用，真正的写入目标由下一个重定向的规则判定。
+    r'>\s*/dev/(?!(?:null|stdout|stderr)(?=$|[\s;&|)=><\'"/]))|>\s*/etc/|>\s*/sys/|>\s*/boot/',
     r':\(\)\s*\{.*\|.*&.*\}',                   # fork bomb
     r'\bgit\b.*\b(?:reset\s+--hard|clean\s+-\w*[fd]|push\s+.*--force|push\s+.*-f)\b',  # 破坏性 git
 ]
