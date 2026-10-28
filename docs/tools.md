@@ -468,7 +468,7 @@ rank→编号列表、stats→`column_set` 大数字、timeline→分节）。�
 
 | 工具 | 触发条件 | 授权记忆粒度（scope） |
 |------|---------|----------------------|
-| `shell` | 任意命令；**高危命令**（rm -rf / sudo / 管道执行 / dd / mkfs / 覆写系统文件 / fork bomb / 破坏性 git / env dump / secret 引用等）`consent_always=True` 每次必问；其中**破坏性**子集（rm -rf / 格式化 / 写设备 / fork bomb / 破坏性 git）`consent_destructive=True` 超级权限下也必问 | 工具名（普通命令授权一次，本会话其余普通命令放行；高危命令不计入放行） |
+| `shell` | 任意命令；**高危命令**（rm -rf / sudo / 管道执行 / dd / mkfs / 覆写系统文件 / fork bomb / 破坏性 git / env dump / secret 引用等）`consent_always=True` 每次必问；其中**破坏性**子集（rm -rf / 格式化 / 写设备 / fork bomb / 破坏性 git）`consent_destructive=True` 超级权限下也必问。**例外**：rm 目标全部在 `/tmp/` 下的清理命令（含 `cd /tmp && rm -rf /tmp/x && cmd 2>&1 \| tail` 这类组合命令）不判高危、不弹窗；混入 `/tmp` 外目标、`..`、提权、`curl \| sh`、额外写入重定向等仍照常拦截 | 工具名（普通命令授权一次，本会话其余普通命令放行；高危命令不计入放行） |
 | `file_write` / `file_edit` | 任意路径，但 `/tmp` 等临时目录**默认豁免**，`tools.trusted_dirs` 白名单目录（含子目录）也免问（见下文「信任目录白名单」） | **目录**（授权某目录后，其子目录/同目录文件免问） |
 | `file_read` | 仅当路径在 `~/.ethan/.secrets/` 内 | **单文件**（每个密钥单独问一次，不目录放行） |
 | `get_secret` | 任意密钥读取 | 工具名 |
