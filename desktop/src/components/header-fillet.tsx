@@ -12,20 +12,22 @@ import { useSidebar } from "@/components/layout-shell";
  *      圆弧凸向左上方（半径 12px，圆心在 P 点右下方 12px 处）。
  *
  * 实现原理（三个关键点）：
- *   - 融合块：header 左侧 12px 宽、向下延伸 13px 的 bg-sidebar 方块，
+ *   - 融合块：header 左侧 12px 宽、向下延伸 12px 的 bg-sidebar 方块，
  *     盖住圆弧区段、并为圆弧左上侧提供 sidebar 底色；
  *     同时盖住 header border-b 的左端 12px，让底线从圆弧起点处开始。
+ *     高度必须与圆弧盘分工明确、正好止于圆弧底部（header + 12px）：多出 1px
+ *     就会在圆弧脚下横着露出一条 sidebar 色小尾巴，看起来像"转角没画完"。
  *   - 圆弧盘：rounded-tl-full 的 12×12 方块（-left-px + top-full）。
  *     border-radius 会把背景裁剪成"圆心在右下角的四分之一圆盘"：盘内（圆弧右下）
  *     显示内容区背景色，盘外（圆弧左上月牙）透明露出融合块的 sidebar 色；
  *     border-l + border-t 沿圆角弯曲，正是那条可见的弧线。
  *   - 对齐细节：top-full（top:100%）相对 header 的 padding box，即方块顶边恰好与
- *     border-b 完全重叠；-left-px 让 border-l 与 sidebar 右边缘完全重叠。
+ *     border-b 完全重叠；-left-px 让 border-l 与 sidebar 的 border-r 完全重叠。
  *
- * 与 Web 端的差异：Web 的 `<aside>` 带 `border-r border-border`（那条竖线也要靠
- * 融合块盖住），桌面端的 `<aside>` 没有 border-r —— 融合块同样盖过去，只是盖的是
- * 空白，不影响表现，无需为桌面端单独调整。两端主题 token（--sidebar / --background）
- * 定义一致，故此处可直接复用同一套几何。
+ * 与 Web 端一致：两端 `<aside>` 都带 `border-r border-border`。圆弧收尾的那 1px
+ * 竖线必须由 sidebar 的 border-r 接住（融合块只盖到 header + 圆弧区段），否则
+ * 弧线画到一半就凭空断掉，转角会显得粗糙、竖向缺一条边线。两端主题 token
+ * （--sidebar / --background）定义一致，故可直接复用同一套几何。
  *
  * 前置条件：
  *   - 使用此组件的 header 必须有 `relative bg-sidebar border-b border-border`；
@@ -39,11 +41,12 @@ export function HeaderFillet() {
 
   return (
     <>
-      {/* 融合块：盖住 sidebar 右边缘（header 区段 + 圆弧区段）与 header 底线左端，
-          并为圆弧左上侧提供 sidebar 底色。100% = header padding box 高度，+13px 延伸到圆弧底部。 */}
+      {/* 融合块：盖住 sidebar 的 border-r（header 区段 + 圆弧区段）与 header 底线左端，
+          并为圆弧左上侧提供 sidebar 底色。100% = header padding box 高度，+12px 正好延伸到圆弧底部，
+          圆弧以下的竖线交还给 sidebar 的 border-r 接续。 */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -left-px top-0 h-[calc(100%+13px)] w-3 bg-sidebar max-md:hidden"
+        className="pointer-events-none absolute -left-px top-0 h-[calc(100%+12px)] w-3 bg-sidebar max-md:hidden"
       />
       {/* 外凸圆弧盘：从 header 底线平滑弯向下方 sidebar 右边缘 */}
       <div
