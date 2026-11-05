@@ -37,10 +37,12 @@ export function HeaderFillet() {
   return (
     <>
       {/* 融合块：盖住 sidebar 竖线（header 区段 + 圆弧区段）与 header 底线左端，
-          并为圆弧左上侧提供 sidebar 底色。100% = header padding box 高度，+13px 延伸到圆弧底部。 */}
+          并为圆弧左上侧提供 sidebar 底色。100% = header padding box 高度，+12px 正好延伸到圆弧底部，
+          圆弧以下的竖线交还给 sidebar 的 border-r 接续——多盖 1px 会在圆弧脚下横着露出一条
+          sidebar 色小尾巴，转角看起来像没画完。 */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -left-px top-0 h-[calc(100%+13px)] w-3 bg-sidebar max-md:hidden"
+        className="pointer-events-none absolute -left-px top-0 h-[calc(100%+12px)] w-3 bg-sidebar max-md:hidden"
       />
       {/* 外凸圆弧盘：从 header 底线平滑弯向下方 sidebar 右边框 */}
       <div

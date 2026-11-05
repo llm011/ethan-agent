@@ -577,7 +577,7 @@ export function Sidebar() {
       onConfirm={doDeleteSession}
       onCancel={() => setConfirmState({ open: false, id: "" })}
     />
-    <aside className="w-full h-full flex flex-col bg-sidebar text-sidebar-foreground">
+    <aside className="w-full h-full flex flex-col bg-sidebar text-sidebar-foreground border-r border-border">
       <div className="p-4 pt-[28px] flex items-center justify-between gap-2" data-tauri-drag-region>
         <h1
           className="text-lg font-semibold flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1"
