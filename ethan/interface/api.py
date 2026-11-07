@@ -40,6 +40,7 @@ from ethan.interface.routers import (
     sessions,
     settings,
     skills,
+    tts,
     ui_resources,
     wait_for_user,
 )
@@ -266,6 +267,7 @@ app.include_router(feishu_doc.router, prefix="/api")  # /api/feishu-doc — 扩�
 app.include_router(background_tasks.router, prefix="/api")
 app.include_router(ui_resources.router, prefix="/api")  # /api/ui-resources — 工具 UI 模板
 app.include_router(images.router, prefix="/api")  # /api/images — image_search 下载的图片
+app.include_router(tts.router, prefix="/api")  # /api/tts — 阅读模式朗读（代理本地 ethan-tts）
 app.include_router(assets.router, prefix="/api")  # /api/assets — 用户上传的图片等资产
 app.include_router(files.router, prefix="/api")  # /api/files — deliver_file 交付文件的下载/预览
 app.include_router(releases.router, prefix="/api")  # /api/releases — Android APK 公开下载（302 到 CDN）

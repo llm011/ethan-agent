@@ -6,7 +6,7 @@ Ethan 的两个媒体技能——`article-to-video`（文章转视频）和 `boo
 | 后端 | 说明 | 依赖 |
 | --- | --- | --- |
 | `edge-tts`（默认） | 微软 Edge 在线语音，装完即用 | 首次运行自动装 `edge-tts` |
-| `ethan-tts` | 本机跑的 [ethan-tts](https://github.com/jsongo/ethan-tts)（Qwen3-TTS） | 需要自己安装，仅 Apple Silicon |
+| `ethan-tts` | 本机跑的 [ethan-tts](https://github.com/llm011/ethan-tts)（Qwen3-TTS） | 需要自己安装，仅 Apple Silicon |
 
 **默认就是 `edge-tts`，不配置也能用。** 只有想用本机音色（更自然、可克隆、不联网）时才需要改配置。
 
@@ -16,13 +16,19 @@ Ethan 的两个媒体技能——`article-to-video`（文章转视频）和 `boo
 
 ### 1. 先装好 ethan-tts
 
-Ethan 不打包它，需要单独安装（仓库：[jsongo/ethan-tts](https://github.com/jsongo/ethan-tts)）：
+Ethan 不打包它，需要单独安装（仓库：[llm011/ethan-tts](https://github.com/llm011/ethan-tts)）：
 
 ```bash
-git clone https://github.com/jsongo/ethan-tts.git
+git clone https://github.com/llm011/ethan-tts.git
 cd ethan-tts
-uv tool install --python 3.12 --editable .
+uv venv --python 3.12 .venv                      # 服务环境（要装 mlx-audio 全家桶）
+uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/python download_model.py               # 默认 4bit 模型约 1.6 GB
+uv tool install --python 3.12 --editable .       # CLI，工具环境与上面的服务环境各管各的
 ```
+
+`uv tool install` 只装出 CLI，它负责跟服务说话（服务没跑时会自动在后台拉起）；
+服务端依赖和模型权重得单独准备，否则第一次合成就失败。
 
 装完确认命令可用，并看一眼有哪些音色：
 
@@ -226,11 +232,40 @@ tts:
 
 ---
 
+## 阅读模式朗读
+
+阅读模式右上角有朗读按钮（🔊）。点了会**流式**念出来：边生成边播，不用等整段合成完。
+
+- **读什么**：正文里有选中就读选中那段，没选中读全篇。卡片（图片/文件/A2UI）不念。
+- **首包延迟**：服务已常驻时约 **0.4 秒**出声。
+- **首次使用**：服务没跑时会自动拉起并加载模型，实测约 **6–10 秒**，界面上会显示
+  「正在启动本地语音」的提示，不会让你以为按钮坏了。
+- **控制**：点一次开始/暂停，再点继续；旁边的停止按钮随时中止。
+
+底层链路是 `POST /api/tts/speak`：ethan 后端确认服务在线后，直连本机 ethan-tts 的
+`/api/tts/stream`，把 PCM 逐块转发给浏览器，前端用 Web Audio 边收边播。
+
+> **为什么不经过 `ethan-tts say --stream`？** 那个 CLI 命令内部是「整段读完再落盘」，
+> 不往 stdout 吐音频，拿它做流式代理只会等到全部合成完（实测直接 120 秒超时）。
+> 所以这条链路绕开 CLI，直连服务的 HTTP 接口。
+
+**跟读高亮是估算的。** ethan-tts 的流式接口不返回词级时间戳，所以当前句是按
+「已播时长 × 句子字数占比」推出来的：正文按句末标点切段，播到第 N 段高亮第 N 段。
+句间停顿均匀时对得挺准；连续长句、没有停顿的段落会偏，实测在一两百毫秒量级。
+要精确得等 TTS 侧返回时间轴。
+
+**没装 ethan-tts 时**：按钮置灰，tooltip 提示「本机未安装 ethan-tts，无法朗读」。
+不会偷偷回退到在线 TTS —— 朗读是本地功能，回退会把正文发给第三方服务。
+
+---
+
 ## 相关文件
 
 | 用途 | 路径 |
 | --- | --- |
-| 共享实现 | `ethan/defaults/skills/_shared/tts_backend.py` |
+| 共享实现（技能） | `ethan/defaults/skills/_shared/tts_backend.py` |
 | 技能内说明 | `ethan/defaults/skills/article-to-video/references/tts-backends.md` |
 | 配置模型 | `ethan/core/config.py` 的 `TtsConfig` |
-| 测试 | `tests/test_tts_backend.py` |
+| 阅读模式朗读路由 | `ethan/interface/routers/tts.py` |
+| 朗读前端 hook | `web/hooks/use-speaking.ts`、`desktop/src/hooks/use-speaking.ts` |
+| 测试 | `tests/test_tts_backend.py`、`tests/test_tts_router.py` |
