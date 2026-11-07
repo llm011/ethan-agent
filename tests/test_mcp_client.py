@@ -155,3 +155,80 @@ def test_bad_server_skipped_not_reported(http_server):
     finally:
         mgr.disconnect_all()
         _stop_loop(mgr)
+
+def test_tool_call_strips_server_prefix():
+    """对外名字带 server 前缀，发给服务端的必须是原始名。
+
+    回归背景：MCPTool 曾把带前缀的注册名直接发给服务端，服务端只认原始名，
+    报 `Unknown tool: dida365_add_task` —— 工具能列出来却永远调不通。
+    这里不走网络，直接盯 call_tool 的入参，避免集成测试因环境问题跑不起来时
+    这个 bug 再次静默回归。
+    """
+    import asyncio as _asyncio
+
+    from ethan.tools.mcp_client import MCPTool
+
+    seen: dict = {}
+
+    class _FakeSession:
+        async def call_tool(self, name, arguments=None):
+            seen["name"] = name
+            seen["arguments"] = arguments
+
+            class _Result:
+                content = []
+
+            return _Result()
+
+    class _FakeRunner:
+        async def run(self, coro):
+            return await coro
+
+    tool = MCPTool(
+        name="dida365_add_task",
+        description="",
+        parameters={"type": "object", "properties": {}},
+        session=_FakeSession(),
+        runner=_FakeRunner(),
+        remote_name="add_task",
+    )
+
+    _asyncio.run(tool.run(title="写周报"))
+
+    assert tool.name == "dida365_add_task"      # 对外仍是带前缀的名字
+    assert seen["name"] == "add_task"           # 发给服务端的是原始名
+    assert seen["arguments"] == {"title": "写周报"}
+
+
+def test_tool_call_without_remote_name_falls_back_to_name():
+    """没传 remote_name 时保持旧行为（向后兼容）。"""
+    import asyncio as _asyncio
+
+    from ethan.tools.mcp_client import MCPTool
+
+    seen: dict = {}
+
+    class _FakeSession:
+        async def call_tool(self, name, arguments=None):
+            seen["name"] = name
+
+            class _Result:
+                content = []
+
+            return _Result()
+
+    class _FakeRunner:
+        async def run(self, coro):
+            return await coro
+
+    tool = MCPTool(
+        name="plain_tool",
+        description="",
+        parameters={"type": "object", "properties": {}},
+        session=_FakeSession(),
+        runner=_FakeRunner(),
+    )
+
+    _asyncio.run(tool.run())
+
+    assert seen["name"] == "plain_tool"
