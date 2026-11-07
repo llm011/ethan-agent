@@ -22,7 +22,13 @@ const WAV_HEADER_BYTES = 44;
 
 export type SpeakState = "idle" | "connecting" | "playing" | "paused";
 
-/** 把正文切成朗读句，和 ethan-tts 的切句规则近似（按句末标点，过长再按逗号拆）。 */
+/**
+ * 把正文切成朗读句（按句末标点，过长再按逗号拆，和 ethan-tts 的切句规则近似）。
+ *
+ * **跟读高亮必须用同一份实现**：markdown.tsx 也从这里导入。
+ * 之前两处各写一份、高亮那份没做「过长再按逗号拆」，结果朗读切 5 段高亮只有 2 段，
+ * 念到第 3 句还停在第 1 句上。
+ */
 export function splitSpeakSentences(text: string, maxLen = 40): string[] {
   const parts = text.split(/(?<=[。！？；!?;\n])/).filter((s) => s.trim());
   const out: string[] = [];

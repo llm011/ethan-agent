@@ -9,6 +9,7 @@ import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { MermaidBlock } from "@ethan/shared/components/mermaid-block";
 import { forwardRef, useMemo, useState, useEffect } from "react";
 import { Lightbox, type LightboxImage } from "./lightbox";
+import { splitSpeakSentences } from "@/hooks/use-speaking";
 
 let _katex: typeof import("katex").default | undefined;
 let _katexLoading: Promise<void> | undefined;
@@ -165,11 +166,6 @@ export const markdownComponents: Components = {
 
 // ---- 朗读跟读高亮 ----
 
-/** 按句末标点切段，规则与 use-speaking 的 splitSpeakSentences 保持一致。 */
-function splitSentencesForHighlight(text: string): string[] {
-  return text.split(/(?<=[。！？；!?;\n])/).map((t) => t.trim()).filter(Boolean);
-}
-
 /** 在 DOM 文本节点里找到每段句子的字符区间（偏移相对整棵子树的纯文本）。 */
 function locateSentenceRanges(
   root: HTMLElement,
@@ -322,9 +318,7 @@ export const MarkdownContent = forwardRef<
     }
     clear();
     // 按句末标点切段，和 use-speaking 的 splitSpeakSentences 对应
-    const segments = splitSentencesForHighlight(
-      (root.textContent || "").trim(),
-    );
+    const segments = splitSpeakSentences((root.textContent || "").trim());
     const ranges = locateSentenceRanges(root, segments);
     const target = ranges[speakSentence];
     if (!target) return;

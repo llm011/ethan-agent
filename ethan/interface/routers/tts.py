@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import time
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -119,8 +120,6 @@ async def speak(req: SpeakRequest):
     deadline = time.monotonic() + STARTUP_TIMEOUT_SEC
 
     # 拉起服务 + 等模型可用，放在流开始之前，失败还能正常返回 5xx。
-    import anyio
-
     await anyio.to_thread.run_sync(lambda: _ensure_server(command, deadline))
 
     payload = {"text": req.text}
