@@ -49,6 +49,24 @@ class ServerConfig(BaseModel):
     port: int = 8900  # 监听端口
 
 
+class TtsConfig(BaseModel):
+    """媒体技能（article-to-video / book-audio-digest）的 TTS 后端配置。
+
+    默认 edge-tts（在线）；backend=ethan 时改用本机安装的 ethan-tts CLI。
+    加进 Config 模型是为了让 config.yaml 的 tts: 段能随 save_config 往返保存——
+    pydantic 会忽略模型外的顶层字段，不加这段的话用户手写的 tts 配置会在下一次
+    设置保存时被静默丢掉。
+    """
+
+    backend: str = "edge"  # edge | ethan
+    voice: str = ""  # ethan 后端音色（id 或名称，如 preset:Vivian）
+    instruct: str = ""  # ethan 后端语气指令
+    base_url: str = ""  # ethan-tts 服务地址，空=用 CLI 默认 127.0.0.1:8765
+    command: str = ""  # ethan-tts 可执行文件，空=用 PATH 里的 ethan-tts
+    timeout_sec: float = 0.0  # 单次合成超时，0=用内置默认 300s
+    autostart: bool = True  # 服务没跑时是否让 CLI 后台拉起本地 ethan-tts
+
+
 class WeChatConfig(BaseModel):
     enabled: bool = False  # 设为 true 后 ethan serve 自动启动 iLink 长轮询
     # 登录凭证由 ethan wechat login（或首次启动时扫码）自动写入
@@ -307,6 +325,7 @@ class Config(BaseModel):
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     lark: LarkConfig = Field(default_factory=LarkConfig)
     wechat: WeChatConfig = Field(default_factory=WeChatConfig)
+    tts: TtsConfig = Field(default_factory=TtsConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     users: list["UserConfig"] = Field(default_factory=list)  # 多用户体系；为空时自动生成 admin
 

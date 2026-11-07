@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Deterministic Edge TTS + Open Motion pipeline for the article-to-video skill."""
+"""Deterministic configurable-TTS + Open Motion pipeline for the article-to-video skill.
+
+TTS backend defaults to edge-tts and can be switched to a local ethan-tts CLI
+via the manifest, ~/.ethan/config.yaml or ETHAN_TTS_BACKEND (see tts_backend.py).
+"""
 
 from __future__ import annotations
 
@@ -20,6 +24,36 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+
+def _load_tts_backend():
+    """定位并导入共享 TTS 后端。
+
+    正常布局：<skills_root>/_shared/tts_backend.py，两个技能目录都在同一 skills_root
+    下（~/.ethan/skills/ 或打包的 ethan/defaults/skills/）。若用户只单独安装了某一个
+    技能（setup 的单技能安装），_shared 可能缺失，此时给出明确的修复指引，而不是
+    抛一个看不懂的 ImportError。
+    """
+    here = Path(__file__).resolve()
+    candidates = [here.parents[2] / "_shared"]
+    # 安装后布局（尊重 ETHAN_DATA_DIR，和 ethan/core/paths.py 的 skills 目录一致）。
+    data_dir = os.environ.get("ETHAN_DATA_DIR")
+    base = Path(data_dir).expanduser() if data_dir else Path.home() / ".ethan"
+    candidates.append(base / "skills" / "_shared")
+    for candidate in candidates:
+        if (candidate / "tts_backend.py").is_file():
+            if str(candidate) not in sys.path:
+                sys.path.insert(0, str(candidate))
+            import tts_backend
+            return tts_backend
+    raise RuntimeError(
+        "找不到共享 TTS 模块 _shared/tts_backend.py；"
+        "请重新运行 ethan setup 让内置技能整树同步（或手动复制 "
+        "ethan/defaults/skills/_shared/ 到 ~/.ethan/skills/_shared/）"
+    )
+
+
+tts_backend = _load_tts_backend()
 
 VISUAL_TYPES = {"kinetic-text", "steps", "stat", "quote", "summary", "candlestick"}
 FPS_VALUES = {24, 25, 30, 60}
@@ -378,6 +412,20 @@ def normalize_manifest(raw: Any, *, library_root: Path | None = None) -> dict[st
             raise ManifestError("voice.volume must look like +0% or -10%")
         if not isinstance(voice["pitch"], str) or not PITCH_RE.fullmatch(voice["pitch"]):
             raise ManifestError("voice.pitch must look like +0Hz or -10Hz")
+        # 可选字段：backend 只接受 edge / ethan；ethan 后端下用 ethan_voice 指定本地音色。
+        backend_raw = voice_raw.get("backend")
+        if backend_raw is not None:
+            if not isinstance(backend_raw, str) or not backend_raw.strip():
+                raise ManifestError("voice.backend must be a non-empty string (edge or ethan)")
+            if backend_raw.strip().lower().replace("_", "-") not in {"edge", "edge-tts", "ethan", "ethan-tts", "local"}:
+                raise ManifestError("voice.backend must be edge or ethan")
+            voice["backend"] = backend_raw.strip()
+        ethan_voice_raw = voice_raw.get("ethan_voice")
+        if ethan_voice_raw is not None:
+            voice["ethan_voice"] = _require_text(ethan_voice_raw, "voice.ethan_voice", maximum=100)
+        instruct_raw = voice_raw.get("instruct")
+        if instruct_raw is not None:
+            voice["instruct"] = _require_text(instruct_raw, "voice.instruct", maximum=300)
     except ManifestError as exc:
         if voice_inherited:
             # 报错要指向真正的修改位置：这个 voice 来自 presenter 的 character.json，
@@ -626,7 +674,7 @@ def paginate_subtitles(subtitles: list[Subtitle], *, maximum: int) -> list[Subti
     return paginated
 
 
-def _tts_cache_key(scene: dict[str, Any], voice: dict[str, str]) -> str:
+def _tts_cache_key(scene: dict[str, Any], voice: dict[str, Any]) -> str:
     payload = json.dumps({"narration": scene["narration"], "voice": voice}, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
@@ -642,37 +690,20 @@ def _valid_tts_cache(media_path: Path, srt_path: Path) -> bool:
 _inflight_tts: dict[str, asyncio.Future[None]] = {}
 
 
-async def _synthesize_once(text: str, voice: dict[str, str], media_path: Path, srt_path: Path) -> None:
-    try:
-        import edge_tts
-    except ImportError as exc:
-        raise RuntimeError("edge-tts is missing; run with: uv run --with 'edge-tts>=7,<8' python ...") from exc
-
-    communicate = edge_tts.Communicate(
-        text,
-        voice["name"],
-        rate=voice["rate"],
-        volume=voice["volume"],
-        pitch=voice["pitch"],
-    )
-    submaker = edge_tts.SubMaker()
-    with media_path.open("wb") as audio_file:
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_file.write(chunk["data"])
-            elif chunk["type"] in {"WordBoundary", "SentenceBoundary"}:
-                submaker.feed(chunk)
-    srt_path.write_text(submaker.get_srt(), encoding="utf-8")
-    if media_path.stat().st_size < 256:
-        raise RuntimeError("Edge TTS returned an empty audio file")
-    if not parse_srt(srt_path.read_text(encoding="utf-8")):
-        raise RuntimeError("Edge TTS returned no subtitle boundaries")
+async def _synthesize_once(
+    text: str, config: tts_backend.TtsConfig, media_path: Path, srt_path: Path
+) -> None:
+    """委托给可配置的 TTS 后端（edge-tts 或本地 ethan-tts）。"""
+    await tts_backend.synthesize(text, config, media_path, srt_path)
 
 
-async def _synthesize_scene(scene: dict[str, Any], voice: dict[str, str], cache_dir: Path, *, retries: int) -> None:
+async def _synthesize_scene(
+    scene: dict[str, Any], config: tts_backend.TtsConfig, cache_dir: Path, *, retries: int
+) -> None:
     """单场景 TTS：校验缓存 → 带重试的合成 → 原子替换缓存文件。协程化以支持并发。"""
-    key = _tts_cache_key(scene, voice)
-    cached_audio = cache_dir / f"{key}.mp3"
+    key = _tts_cache_key(scene, config.cache_signature())
+    suffix = config.media_suffix
+    cached_audio = cache_dir / f"{key}{suffix}"
     cached_srt = cache_dir / f"{key}.srt"
     if _valid_tts_cache(cached_audio, cached_srt):
         return
@@ -689,12 +720,12 @@ async def _synthesize_scene(scene: dict[str, Any], voice: dict[str, str], cache_
         last_error: Exception | None = None
         for attempt in range(1, retries + 1):
             nonce = uuid.uuid4().hex
-            pending_audio = cache_dir / f".{key}.{nonce}.mp3.tmp"
+            pending_audio = cache_dir / f".{key}.{nonce}{suffix}.tmp"
             pending_srt = cache_dir / f".{key}.{nonce}.srt.tmp"
             try:
-                await _synthesize_once(scene["narration"], voice, pending_audio, pending_srt)
+                await _synthesize_once(scene["narration"], config, pending_audio, pending_srt)
                 if not _valid_tts_cache(pending_audio, pending_srt):
-                    raise RuntimeError("Edge TTS produced an invalid cache entry")
+                    raise RuntimeError("TTS produced an invalid cache entry")
                 pending_audio.replace(cached_audio)
                 pending_srt.replace(cached_srt)
                 last_error = None
@@ -717,12 +748,23 @@ async def _synthesize_scene(scene: dict[str, Any], voice: dict[str, str], cache_
         _inflight_tts.pop(key, None)
 
 
-def synthesize_scenes(manifest: dict[str, Any], output_dir: Path, *, retries: int = 3) -> list[dict[str, Any]]:
+def synthesize_scenes(
+    manifest: dict[str, Any],
+    output_dir: Path,
+    *,
+    retries: int = 3,
+    tts_config: tts_backend.TtsConfig | None = None,
+) -> list[dict[str, Any]]:
     cache_dir = output_dir / "work" / "tts-cache"
     audio_dir = output_dir / "work" / "public" / "audio"
     subtitle_dir = output_dir / "work" / "scene-subtitles"
     for directory in (cache_dir, audio_dir, subtitle_dir):
         directory.mkdir(parents=True, exist_ok=True)
+
+    config = tts_config or tts_backend.resolve_tts_config(manifest["voice"])
+    for warning in config.warnings:
+        print(f"WARNING: {warning}", file=sys.stderr)
+    suffix = config.media_suffix
 
     # 所有场景在同一个事件循环里并发合成（单场景内仍带重试），不再每场景一次 asyncio.run。
     # return_exceptions=True 防止单场景失败级联取消其余协程（CancelledError 不会被
@@ -731,7 +773,7 @@ def synthesize_scenes(manifest: dict[str, Any], output_dir: Path, *, retries: in
 
     async def _synthesize_all() -> list[BaseException | None]:
         return await asyncio.gather(
-            *[_synthesize_scene(scene, manifest["voice"], cache_dir, retries=retries) for scene in manifest["scenes"]],
+            *[_synthesize_scene(scene, config, cache_dir, retries=retries) for scene in manifest["scenes"]],
             return_exceptions=True,
         )
 
@@ -746,14 +788,14 @@ def synthesize_scenes(manifest: dict[str, Any], output_dir: Path, *, retries: in
 
     artifacts: list[dict[str, Any]] = []
     for scene in manifest["scenes"]:
-        key = _tts_cache_key(scene, manifest["voice"])
-        cached_audio = cache_dir / f"{key}.mp3"
+        key = _tts_cache_key(scene, config.cache_signature())
+        cached_audio = cache_dir / f"{key}{suffix}"
         cached_srt = cache_dir / f"{key}.srt"
-        scene_audio = audio_dir / f"{scene['id']}.mp3"
+        scene_audio = audio_dir / f"{scene['id']}{suffix}"
         scene_srt = subtitle_dir / f"{scene['id']}.srt"
         shutil.copy2(cached_audio, scene_audio)
         shutil.copy2(cached_srt, scene_srt)
-        artifacts.append({"audio": scene_audio, "srt": scene_srt})
+        artifacts.append({"audio": scene_audio, "srt": scene_srt, "audioRel": f"audio/{scene['id']}{suffix}"})
     return artifacts
 
 
@@ -775,7 +817,9 @@ def build_timeline(
         local_subtitles = paginate_subtitles(timing_subtitles, maximum=maximum_caption_length)
         timeline_scene = {
             **scene,
-            "audio": f"audio/{scene['id']}.mp3",
+            # 旧调用方（测试/手工时间线）只传 srt，此时沿用 mp3 默认命名。
+            "audio": artifact.get("audioRel")
+            or (f"audio/{Path(artifact['audio']).name}" if artifact.get("audio") else f"audio/{scene['id']}.mp3"),
             "startMs": offset,
             "durationMs": duration_ms,
         }
@@ -1023,7 +1067,7 @@ def enforce_target_duration(manifest: dict[str, Any], timeline: dict[str, Any]) 
         )
 
 
-def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
+def run_pipeline(manifest_path: Path, output_dir: Path, *, backend: str | None = None) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
     for warning in manifest.get("warnings", []):
         print(f"WARNING: {warning}", file=sys.stderr)
@@ -1031,15 +1075,21 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
     run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
     previous_outputs = _archive_published_outputs(output_dir, run_id)
     status_path = output_dir / "run-status.json"
+    tts_config = tts_backend.resolve_tts_config(manifest["voice"], backend=backend)
     _write_json_atomic(
         status_path,
-        {"status": "running", "runId": run_id, "previousOutputs": str(previous_outputs) if previous_outputs else None},
+        {
+            "status": "running",
+            "runId": run_id,
+            "tts": {"backend": tts_config.backend, "voice": tts_config.describe(), "source": tts_config.source},
+            "previousOutputs": str(previous_outputs) if previous_outputs else None,
+        },
     )
     try:
         normalized_manifest_path = output_dir / "manifest.json"
         _write_json_atomic(normalized_manifest_path, manifest)
         stage_assets(manifest, output_dir)
-        artifacts = synthesize_scenes(manifest, output_dir)
+        artifacts = synthesize_scenes(manifest, output_dir, tts_config=tts_config)
         timeline = build_timeline(manifest, artifacts)
         combined = timeline.pop("_combinedSubtitles")
         timeline_path = output_dir / "timeline.json"
@@ -1079,6 +1129,7 @@ def run_pipeline(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
 
         result = {
             "status": "ok",
+            "tts": {"backend": tts_config.backend, "voice": tts_config.describe(), "source": tts_config.source},
             "video": str((output_dir / "final.mp4").resolve()),
             "cover": str((output_dir / "cover.png").resolve()),
             "subtitles": str((output_dir / "subtitles.srt").resolve()),
@@ -1111,9 +1162,11 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     validate = subparsers.add_parser("validate", help="validate and normalize a manifest without network access")
     validate.add_argument("--manifest", type=Path, required=True)
+    validate.add_argument("--backend", choices=list(tts_backend.BACKENDS), help="预览将使用的 TTS 后端")
     run = subparsers.add_parser("run", help="synthesize speech, render, verify, and package the video")
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--output-dir", type=Path, required=True)
+    run.add_argument("--backend", choices=list(tts_backend.BACKENDS), help="覆盖 TTS 后端（默认读 config.yaml / manifest）")
     return parser
 
 
@@ -1124,16 +1177,25 @@ def main() -> int:
             manifest = load_manifest(args.manifest)
             for warning in manifest.get("warnings", []):
                 print(f"WARNING: {warning}", file=sys.stderr)
+            # validate 不联网也不要求本机装 ethan-tts：只报告会用的后端，缺命令时给 warning。
+            tts_config = tts_backend.resolve_tts_config(
+                manifest["voice"], backend=args.backend, check_command=False
+            )
+            for warning in tts_config.warnings:
+                print(f"WARNING: {warning}", file=sys.stderr)
             result = {
                 "status": "ok",
                 "title": manifest["title"],
                 "sceneCount": len(manifest["scenes"]),
                 "targetDurationSec": manifest["targetDurationSec"],
                 "durationToleranceSec": manifest["durationToleranceSec"],
-                "warnings": manifest.get("warnings", []),
+                "tts": {"backend": tts_config.backend, "voice": tts_config.describe(), "source": tts_config.source},
+                "warnings": manifest.get("warnings", []) + tts_config.warnings,
             }
         else:
-            result = run_pipeline(args.manifest.resolve(), args.output_dir.expanduser().resolve())
+            result = run_pipeline(
+                args.manifest.resolve(), args.output_dir.expanduser().resolve(), backend=args.backend
+            )
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except Exception as exc:

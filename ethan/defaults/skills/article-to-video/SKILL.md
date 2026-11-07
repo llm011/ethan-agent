@@ -82,14 +82,21 @@ python3 ~/.ethan/skills/article-to-video/scripts/video_pipeline.py \
 for cmd in uv node pnpm; do command -v "$cmd" >/dev/null || echo "MISSING: $cmd"; done
 ```
 
-使用 `uv` 临时注入 `edge-tts`，避免把可选依赖加入 Ethan 主安装包。**渲染耗时较长（5-15 分钟），必须后台运行**：
+TTS 后端默认 `edge-tts`（用 `uv` 临时注入，避免把可选依赖加入 Ethan 主安装包）；
+用户配置了本地 `ethan-tts` 时可切成本地后端（`--backend ethan` 或 `config.yaml` 的 `tts.backend`，
+见 `references/tts-backends.md`，共享实现 `~/.ethan/skills/_shared/tts_backend.py`），此时不需要注入 `edge-tts`。**渲染耗时较长（5-15 分钟），必须后台运行**：
 
 ```bash
-# 后台渲染，日志写入文件，不阻塞 agent
+# 后台渲染，日志写入文件，不阻塞 agent（默认 edge 后端）
 nohup uv run --isolated --no-project --with 'edge-tts>=7,<8' python \
   ~/.ethan/skills/article-to-video/scripts/video_pipeline.py run \
   --manifest "$PROJECT/manifest.json" \
   --output-dir "$PROJECT" \
+  > "$PROJECT/render.log" 2>&1 &
+
+# 本地 ethan-tts 后端：不需要 --with edge-tts，直接跑
+nohup python3 ~/.ethan/skills/article-to-video/scripts/video_pipeline.py run \
+  --manifest "$PROJECT/manifest.json" --output-dir "$PROJECT" --backend ethan \
   > "$PROJECT/render.log" 2>&1 &
 
 RENDER_PID=$!
@@ -111,7 +118,11 @@ tail -5 "$PROJECT/render.log"
 
 渲染进度会在日志中实时报告：`Step 1/5: TTS` → `Step 2/5: Timeline` → `Step 3/5: Frames (1200/5289, 23%)` → `Step 4/5: Encode` → `Step 5/5: Verify`。
 
-Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三次；仍失败则保留项目并报告可重跑命令。不要声称它有官方 SLA。
+Edge TTS 是第三方库连接的在线服务。网络失败时最多重试三次；仍失败则保留项目并报告可重跑命令，
+或建议切到本地 `ethan-tts` 后端。不要声称它有官方 SLA。
+
+`run-status.json` 的 `tts` 字段记录了本次实际使用的后端、音色和配置来源（`argument` / `manifest` /
+`config` / `env` / `default`）；交付前核对它符合用户预期，避免默认 edge 静默覆盖了本地配置。
 
 若实际语音时长超出 `targetDurationSec ± durationToleranceSec`，脚本会在渲染前停止。根据报告缩短或扩写旁白，保持场景 ID 不变，再执行同一命令；未变化场景的 TTS 会命中缓存。
 

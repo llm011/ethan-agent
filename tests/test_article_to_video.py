@@ -181,13 +181,14 @@ def test_corrupt_tts_cache_is_rebuilt_atomically(tmp_path, monkeypatch):
     output_dir = tmp_path / "output"
     cache_dir = output_dir / "work" / "tts-cache"
     cache_dir.mkdir(parents=True)
-    key = pipeline._tts_cache_key(manifest["scenes"][0], manifest["voice"])
+    config = pipeline.tts_backend.resolve_tts_config(manifest["voice"], backend="edge")
+    key = pipeline._tts_cache_key(manifest["scenes"][0], config.cache_signature())
     (cache_dir / f"{key}.mp3").write_bytes(b"broken")
     (cache_dir / f"{key}.srt").write_text("not an srt", encoding="utf-8")
     calls = []
 
-    async def fake_synthesize(text, voice, media_path, srt_path):
-        calls.append((text, voice["name"]))
+    async def fake_synthesize(text, config, media_path, srt_path):
+        calls.append((text, config.voice_name))
         media_path.write_bytes(b"valid-audio" * 64)
         srt_path.write_text("1\n00:00:00,000 --> 00:00:01,000\n修复后的字幕\n", encoding="utf-8")
 
@@ -215,7 +216,7 @@ def test_failed_rerun_archives_previous_published_outputs(tmp_path, monkeypatch)
     for name, content in previous.items():
         (output_dir / name).write_bytes(content)
 
-    def fail_synthesis(manifest, destination):
+    def fail_synthesis(manifest, destination, **kwargs):
         raise RuntimeError("tts offline")
 
     monkeypatch.setattr(pipeline, "synthesize_scenes", fail_synthesis)
@@ -258,6 +259,8 @@ def test_skill_metadata_and_references_are_discoverable():
         "presenter-guide.md",
         "h3-presenter-pipeline.md",
         "seedance-presenter-pipeline.md",
+        "lottie.md",
+        "tts-backends.md",
     }
 
 
