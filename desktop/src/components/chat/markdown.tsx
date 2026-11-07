@@ -7,7 +7,7 @@ import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { MermaidBlock } from "@ethan/shared/components/mermaid-block";
 import { forwardRef, useMemo, useState, useEffect } from "react";
 import { Lightbox, type LightboxImage } from "./lightbox";
-import { splitSpeakSentences } from "@/hooks/use-speaking";
+import { splitSpeakSentences } from "@ethan/shared/lib/speak";
 import { openUrl } from "@/lib/external-link";
 
 let _katex: typeof import("katex").default | undefined;

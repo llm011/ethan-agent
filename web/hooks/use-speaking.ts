@@ -18,33 +18,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { speakStream } from "@/lib/api";
+import { splitSpeakSentences } from "@ethan/shared/lib/speak";
+
+// 切句规则放在 shared（朗读与跟读高亮共用同一份，实现漂移会让高亮错位）
+export { splitSpeakSentences };
 
 const SAMPLE_RATE = 24_000;
 const WAV_HEADER_BYTES = 44;
 
 export type SpeakState = "idle" | "connecting" | "playing" | "paused";
-
-/**
- * 把正文切成朗读句（按句末标点，过长再按逗号拆，和 ethan-tts 的切句规则近似）。
- *
- * **跟读高亮必须用同一份实现**：markdown.tsx 也从这里导入。
- * 之前两处各写一份、高亮那份没做「过长再按逗号拆」，结果朗读切 5 段高亮只有 2 段，
- * 念到第 3 句还停在第 1 句上。
- */
-export function splitSpeakSentences(text: string, maxLen = 40): string[] {
-  const parts = text.split(/(?<=[。！？；!?;\n])/).filter((s) => s.trim());
-  const out: string[] = [];
-  for (const part of parts) {
-    if (part.length <= maxLen) {
-      out.push(part);
-      continue;
-    }
-    for (const seg of part.split(/(?<=[，,、])/)) {
-      if (seg.trim()) out.push(seg);
-    }
-  }
-  return out.length ? out : [text];
-}
 
 export type UseSpeakingResult = {
   state: SpeakState;
@@ -77,11 +59,20 @@ export function useSpeaking(): UseSpeakingResult {
   // 按「音频秒数」而不是 wall clock 推算进度：生成比播放慢时会出现空等，
   // 那段时间不该算进朗读进度。
   const lastTickAtRef = useRef(0);
+  // 每轮朗读的代号：延时收尾/异步回包据此判断「这一轮还算不算数」
+  const runIdRef = useRef(0);
 
   const teardown = useCallback(() => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
+    }
+    // AudioContext 必须显式关掉：浏览器对同时存活的 context 数量有上限（通常 6 个），
+    // 连续朗读几次不释放，后续就 new 不出来了。
+    if (ctxRef.current) {
+      const ctx = ctxRef.current;
+      ctxRef.current = null;
+      void ctx.close().catch(() => {});
     }
     for (const src of sourcesRef.current) {
       try {
@@ -224,13 +215,15 @@ export function useSpeaking(): UseSpeakingResult {
           if (!rafRef.current) rafRef.current = requestAnimationFrame(tick);
         }
 
-        // 流结束：等最后一块播完再回 idle
+        // 流结束：等最后一块播完再回 idle。
+        // 用 runId 判活——否则用户播完立刻又点一次朗读，上一轮的定时器回来会把
+        // 新一轮的状态打成 idle（teardown 还会停掉新一轮的 source）。
         const remain = Math.max(0, playheadRef.current - ctx.currentTime);
+        const runId = ++runIdRef.current;
         window.setTimeout(() => {
-          if (!controller.signal.aborted) {
-            teardown();
-            setState("idle");
-          }
+          if (controller.signal.aborted || runId !== runIdRef.current) return;
+          teardown();
+          setState("idle");
         }, remain * 1000 + 150);
       } catch (err) {
         if (controller.signal.aborted) return; // 用户主动停止

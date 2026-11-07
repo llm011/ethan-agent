@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 import time
 
 import anyio
@@ -31,11 +32,19 @@ from ethan.interface.routers.deps import verify_token
 
 router = APIRouter(prefix="/tts")
 
+# 并发朗读共用同一次「拉起」：用户等得不耐烦点第二下时，不该再叠一个 120 秒的
+# `serve` + 轮询，而是等同一个正在进行的拉起结果。
+_startup_lock = threading.Lock()
+_startup_done = threading.Event()
+
 DEFAULT_CLI = "ethan-tts"
 DEFAULT_BASE_URL = "http://127.0.0.1:8765"
 # 冷启动 = 拉起服务 + 加载模型，实测 6–10 秒；给足余量，慢机器也不误判。
 STARTUP_TIMEOUT_SEC = 120
 READY_POLL_SEC = 0.15
+# 单次朗读的上游读超时：流式下这是「多久没收到新数据就算断」。
+# 不设 300 秒——服务端卡死时用户要干等 5 分钟才见到错误，60 秒足够覆盖正常的长句生成。
+STREAM_READ_TIMEOUT_SEC = 60.0
 
 
 class SpeakRequest(BaseModel):
@@ -80,8 +89,19 @@ def _probe_running(command: str) -> bool:
 def _ensure_server(command: str, deadline: float) -> None:
     """确保 ethan-tts 服务在线；没在线就让 CLI 在后台拉起并等到就绪。
 
-    CLI 的 `serve` 是幂等的：已经在跑会直接返回，不会重复起进程。
+    并发去重：同一时刻只让一个线程真正拉起，其余线程等它的结果。
+    CLI 的 `serve` 本身是幂等的（已经在跑会直接返回），但「等就绪」的轮询会
+    被每个并发请求各跑一遍，白占 120 秒的协程。
     """
+    with _startup_lock:
+        if _startup_done.is_set():
+            return
+        # 失败不置位，下一个请求还可以重试（比如服务刚被 user 手动停掉）
+        _ensure_server_once(command, deadline)
+        _startup_done.set()
+
+
+def _ensure_server_once(command: str, deadline: float) -> None:
     try:
         subprocess.run(
             [command, "serve", "--json"],
@@ -129,7 +149,7 @@ async def speak(req: SpeakRequest):
     async def _emit():
         # 服务端是无限长的 WAV 流（RIFF/data 长度写 0xFFFFFFFF），按块转发即可。
         # trust_env=False：本机回环绝不能走系统代理（常见 127.0.0.1:7890 会把 ws/http 拦掉）
-        async with create_http_client(timeout=300.0) as client:
+        async with create_http_client(timeout=STREAM_READ_TIMEOUT_SEC) as client:
             async with client.stream("POST", f"{base_url}/api/tts/stream", json=payload) as upstream:
                 if upstream.status_code != 200:
                     body = (await upstream.aread()).decode(errors="replace")[:300]

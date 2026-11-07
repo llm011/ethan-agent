@@ -9,7 +9,7 @@ import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { MermaidBlock } from "@ethan/shared/components/mermaid-block";
 import { forwardRef, useMemo, useState, useEffect } from "react";
 import { Lightbox, type LightboxImage } from "./lightbox";
-import { splitSpeakSentences } from "@/hooks/use-speaking";
+import { splitSpeakSentences } from "@ethan/shared/lib/speak";
 
 let _katex: typeof import("katex").default | undefined;
 let _katexLoading: Promise<void> | undefined;
@@ -317,7 +317,7 @@ export const MarkdownContent = forwardRef<
       return;
     }
     clear();
-    // 按句末标点切段，和 use-speaking 的 splitSpeakSentences 对应
+    // 切句规则来自 shared，和朗读侧是同一份实现——不一致会让高亮错位
     const segments = splitSpeakSentences((root.textContent || "").trim());
     const ranges = locateSentenceRanges(root, segments);
     const target = ranges[speakSentence];
