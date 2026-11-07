@@ -57,8 +57,13 @@ class MCPTool(BaseTool):
         parameters: dict[str, Any],
         session: ClientSession,
         runner: LoopRunner,
+        remote_name: str | None = None,
     ):
         self._name = name
+        # 对外名字带 server 前缀（dida365_add_task），但服务端只认原始名（add_task）。
+        # 不加这个区分的话，调用时会把带前缀的名字发过去，服务端报
+        # "Unknown tool: dida365_add_task" —— 工具能列出来却永远调不通。
+        self._remote_name = remote_name or name
         self._description = description
         self._parameters = parameters
         self._session = session
@@ -77,7 +82,7 @@ class MCPTool(BaseTool):
         return self._parameters
 
     async def run(self, **kwargs) -> str:
-        result = await self._runner.run(self._session.call_tool(self._name, arguments=kwargs))
+        result = await self._runner.run(self._session.call_tool(self._remote_name, arguments=kwargs))
         if result.content:
             parts = []
             for block in result.content:
@@ -251,6 +256,7 @@ class MCPManager:
                         parameters=meta["schema"],
                         session=client.session,
                         runner=runner,
+                        remote_name=meta["name"],
                     )
                     self._tools.append(tool)
             # 至少有一个 server 连接成功才缓存为已连接；全部失败时保持 False，
