@@ -6,7 +6,7 @@ Ethan 的两个媒体技能——`article-to-video`（文章转视频）和 `boo
 | 后端 | 说明 | 依赖 |
 | --- | --- | --- |
 | `edge-tts`（默认） | 微软 Edge 在线语音，装完即用 | 首次运行自动装 `edge-tts` |
-| `ethan-tts` | 本机跑的 [ethan-tts](https://github.com/jsongo/ethan-tts)（Qwen3-TTS） | 需要自己安装，仅 Apple Silicon |
+| `ethan-tts` | 本机跑的 [ethan-tts](https://github.com/llm011/ethan-tts)（Qwen3-TTS） | 需要自己安装，仅 Apple Silicon |
 
 **默认就是 `edge-tts`，不配置也能用。** 只有想用本机音色（更自然、可克隆、不联网）时才需要改配置。
 
@@ -16,13 +16,19 @@ Ethan 的两个媒体技能——`article-to-video`（文章转视频）和 `boo
 
 ### 1. 先装好 ethan-tts
 
-Ethan 不打包它，需要单独安装（仓库：[jsongo/ethan-tts](https://github.com/jsongo/ethan-tts)）：
+Ethan 不打包它，需要单独安装（仓库：[llm011/ethan-tts](https://github.com/llm011/ethan-tts)）：
 
 ```bash
-git clone https://github.com/jsongo/ethan-tts.git
+git clone https://github.com/llm011/ethan-tts.git
 cd ethan-tts
-uv tool install --python 3.12 --editable .
+uv venv --python 3.12 .venv                      # 服务环境（要装 mlx-audio 全家桶）
+uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/python download_model.py               # 默认 4bit 模型约 1.6 GB
+uv tool install --python 3.12 --editable .       # CLI，工具环境与上面的服务环境各管各的
 ```
+
+`uv tool install` 会自己再装一份依赖，CLI 只负责跟服务说话（服务没跑时会自动在后台拉起），
+所以两个环境互不影响。首次合成要加载模型（十几到几十秒，视机器而定），之后常驻。
 
 装完确认命令可用，并看一眼有哪些音色：
 
@@ -172,6 +178,7 @@ ethan 想调整音色质感，用 `instruct` 或换一个 `voice`。
 | 字幕时间轴 | 真实词级边界，精确 | 按句比例分配 + 静音检测校正 |
 | 断网可用 | 否 | 是 |
 | 平台 | 任意 | 仅 Apple Silicon（MLX） |
+| 内存 | 无 | 常驻后 Metal 活跃约 1.8 GB |
 
 **字幕精度说明**：ethan-tts 不返回词级时间戳，所以字幕边界是按句子字数比例估算，
 再用 `ffmpeg` 的静音检测对齐到真实停顿。实测偏差在几十毫秒量级；
@@ -196,13 +203,13 @@ tts:
 
 **合成很慢 / 超时**
 
-本地模型首次调用要加载权重（几秒到十几秒）。确认服务在跑：
+本地模型首次调用要加载权重（冷启动实测约 40 秒，热态 3–5 秒合成 6 秒音频）。确认服务在跑：
 
 ```bash
 ethan-tts status
 ```
 
-长文本可以调大超时：
+首次跑完一轮后模型常驻内存（Metal 活跃内存约 1.8 GB），后续就快了。长文本可以调大超时：
 
 ```yaml
 tts:
