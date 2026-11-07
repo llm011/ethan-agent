@@ -79,6 +79,7 @@ nav:
     - 调度器: scheduler.md
     - 知识库: knowledge.md
     - 模式: modes.md
+    - 语音合成 (TTS): tts.md
   - 浏览器控制:
     - 总览与架构: browser/overview.md
     - 传输层与协议: browser/transport-protocol.md

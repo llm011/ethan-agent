@@ -65,7 +65,16 @@ nohup env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
   ~/.ethan/skills/book-audio-digest/scripts/audio_pipeline.py run \
   --manifest "$PROJECT/manifest.json" --output-dir "$PROJECT" \
   > "$PROJECT/render.log" 2>&1 &
+
+# 本地 ethan-tts 后端（不联网、不注入 edge-tts；音色用 --backend/配置里的 tts.voice）
+nohup python3 ~/.ethan/skills/book-audio-digest/scripts/audio_pipeline.py run \
+  --manifest "$PROJECT/manifest.json" --output-dir "$PROJECT" --backend ethan-tts \
+  > "$PROJECT/render.log" 2>&1 &
 ```
+
+TTS 后端默认 `edge-tts`；`~/.ethan/config.yaml` 里配了 `tts: {backend: ethan, voice: preset:Vivian}`
+就会全局走本地后端。两者差异（音频格式、字幕时间轴精度）见
+`~/.ethan/skills/article-to-video/references/tts-backends.md`（共享实现是 `~/.ethan/skills/_shared/tts_backend.py`）。
 
 合成 1–3 分钟，轮询 `render.log` 看进度：脚本按节打 `[audio-pipeline] 合成中/完成/缓存命中`，
 同时 `run-status.json` 在开工时就落 `{"status": "running", "stage": ...}`（不再是「文件不存在」），

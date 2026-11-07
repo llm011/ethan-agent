@@ -28,6 +28,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - **永久保留**：洞察不会被自动删除；`last_accessed` 仅作活跃度观察，不作为淘汰依据（memory.db 体量天然可控，每条洞察约 15KB）
 - **sessions.db 轮转**：完整消息历史增长快，sessions.db 超 10 MB 时用 `VACUUM INTO` 原子快照到 `~/.ethan/archive/sessions.{start}~{end}.db`（文件名带日期跨度），保持 active db 轻量，旧会话仍可按日期查归档
 - **手动归档（设置 → 数据管理）**：可按「1 个月 / 3 个月 / 半年前」把旧会话备份成独立文件并从主库移除，为主库瘦身；执行前先预览命中的会话数与时间范围，备份文件名自带日期跨度（`sessions.{start}~{end}.db`），设置页列出已有备份，后续将支持从备份恢复；置顶会话永不归档
+- **聊天附件落盘**：上传的文档（md / pdf / 代码等，单文件 50MB）落在 `~/.ethan/uploads/<session_id>/`，数据库只存元数据（`messages.files`：name / path / rel_path / size / media_type），不存正文；刷新后附件 chip 仍在，`.md` / `.html` 在右侧预览面板打开、图片全屏查看、其余点击下载；由 `GET /api/assets/uploads/{session_id}/{filename}` 提供访问，删会话时连带清理
 
 **陪伴倾听模式 · 苏念（《臣服实验》心理咨询师）**  *（内置技能，无需安装）*
 - 在聊天界面一键切换「苏念 · 陪伴倾听」（或 CLI 里 `/mode 苏念`），从工作助手变成一位年轻温柔的女性陪伴者，熟读《臣服实验》、深谙道法自然
@@ -44,7 +45,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 **Skill 技能系统**
 - 触发词匹配，自动注入 system prompt 引导行为
 - 语义路由器（BGE INT8 + LR 头）在关键词之上补召回，换个说法也能命中——内置，依赖随 `pip install ethan-agent` 安装；BGE 模型首次使用时自动下载（~24MB）
-- 内置 `article-to-video`：把主题、文章、本地 Markdown/TXT 文件或公开 URL 生成带 Edge TTS 配音、时间轴字幕和 Open Motion 动效的 MP4；支持分领域视觉（金融域 K线图 + 黄色关键词标注 + 可复用的虚拟人立绘角色包），并可选 MiniMax H3 动态 presenter 管线（在 `~/.ethan/skills/article-to-video/h3-comfyui.env` 配置 ComfyUI workflow 地址后启用）：小雨动作/口型作为前景，菜单和数据由确定性画面恢复；Web 与 Desktop 文件卡片均可直接播放和下载，媒体依赖首次使用时按需安装
+- 内置 `article-to-video`：把主题、文章、本地 Markdown/TXT 文件或公开 URL 生成带可配置 TTS 配音（默认 Edge TTS，也可用本地 `ethan-tts`）、时间轴字幕和 Open Motion 动效的 MP4；支持分领域视觉（金融域 K线图 + 黄色关键词标注 + 可复用的虚拟人立绘角色包），并可选 MiniMax H3 动态 presenter 管线（在 `~/.ethan/skills/article-to-video/h3-comfyui.env` 配置 ComfyUI workflow 地址后启用）：小雨动作/口型作为前景，菜单和数据由确定性画面恢复；Web 与 Desktop 文件卡片均可直接播放和下载，媒体依赖首次使用时按需安装
 - `fast_path: true` 触发后走毫秒级快速路径，适合全屋智能等高频控制
 - `channels: [lark, web]` 按渠道过滤，Skill 只在指定场景下生效
 - `modes: [法律]` 按对话模式过滤，Skill 只在指定模式下生效（空 = 所有模式）
@@ -361,7 +362,7 @@ cd app/android
 # 或使用内置命令：
 ethan server install    # 安装并启动
 ethan server status     # 查看状态（会提示多实例冲突）
-ethan server restart    # 重启
+ethan server restart    # 重启（等待 /api/health 就绪，未就绪则非零退出）
 ethan server stop       # 停止
 ethan server uninstall  # 卸载
 ```
@@ -498,7 +499,7 @@ version: "1.0"
 
 Skill 会累积命中次数和用户纠正记录。当纠正达到阈值（默认 2 条），Heartbeat 任务用廉价模型将纠正合并进 Skill 文件。
 
-内置 `article-to-video` 可将主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作为 MP4：模型生成结构化剧本和分镜，Edge TTS 逐场景生成配音与字幕，Open Motion 根据真实语音时长渲染代码生成动效。支持分领域视觉：金融域提供 K线图（含布林带与点位标注）、黄色关键词标注，以及可复用的虚拟人立绘角色包（用随技能附带的 prompt 包在 GPT image 2 出图后导入 `~/.ethan/assets/library/`）。成片通过 Web/Desktop 文件卡片直接播放或下载，制作文件另行交付；`edge-tts`、Playwright（Open Motion 渲染依赖）和 FFmpeg 均在首次使用时按需安装，不进入 Ethan 的 Python 主依赖。
+内置 `article-to-video` 可将主题、文章正文、本地 Markdown/TXT 文件或公开 URL 制作为 MP4：模型生成结构化剧本和分镜，可配置的 TTS 后端逐场景生成配音与字幕（默认 Edge TTS，可切换成本机安装的 `ethan-tts`），Open Motion 根据真实语音时长渲染代码生成动效。支持分领域视觉：金融域提供 K线图（含布林带与点位标注）、黄色关键词标注，以及可复用的虚拟人立绘角色包（用随技能附带的 prompt 包在 GPT image 2 出图后导入 `~/.ethan/assets/library/`）。成片通过 Web/Desktop 文件卡片直接播放或下载，制作文件另行交付；`edge-tts`、Playwright（Open Motion 渲染依赖）和 FFmpeg 均在首次使用时按需安装，不进入 Ethan 的 Python 主依赖；本地 `ethan-tts` 后端不联网、也不需要额外 Python 依赖。
 
 ---
 

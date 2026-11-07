@@ -57,14 +57,39 @@ async def onboarding_complete(req: OnboardingCompleteRequest, user_id: str = Dep
 
 
 @router.post("/upload", dependencies=[Depends(verify_token)])
-async def upload_file(file: UploadFile = File(...)):
-    import tempfile
-    content = await file.read()
-    suffix = Path(file.filename or "upload").suffix
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(content)
-        path = tmp.name
-    return {"path": path, "filename": file.filename, "size": len(content)}
+async def upload_file(file: UploadFile = File(...), session_id: str | None = None):
+    """聊天附件（非图片）上传，落到当前 profile 的 `uploads/` 目录。
+
+    不再用 `tempfile`：系统临时目录不在任何清理策略里、重启/系统清理后路径失效，
+    也落在 `file_jail` 允许范围之外。布局与归属逻辑见 `ethan/core/uploads.py`：
+
+    - 带 `session_id` → `uploads/<session_id>/`；
+    - 不带（新会话第一句，前端此时还没有 id）→ `uploads/_pending/`，
+      消息落库时由 `adopt_uploads()` 搬进会话目录。
+
+    返回 `{path, filename, size, rel_path}`，`rel_path` 供前端拼
+    `/api/assets/uploads/<rel_path>` 访问。
+    """
+    from ethan.core.uploads import MAX_UPLOAD_BYTES, store_upload
+
+    # 分块读，超限即停（避免把超大文件整个读进内存再判）
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件过大（上限 {MAX_UPLOAD_BYTES // 1024 // 1024}MB）",
+            )
+        chunks.append(chunk)
+    meta = store_upload(b"".join(chunks), file.filename or "upload", session_id=session_id or None)
+    return {
+        "path": meta["path"],
+        "filename": meta["name"],
+        "size": meta["size"],
+        "rel_path": meta["rel_path"],
+    }
 
 
 # ── Agent settings ────────────────────────────────────────────────

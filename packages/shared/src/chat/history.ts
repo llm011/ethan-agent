@@ -155,8 +155,9 @@ export const MESSAGE_PAGE_SIZE = 30;
  *   现象），且这份会被插到更早的历史前面，顺序也是错的。判据必须是「内容 + 次数」
  *   而非 id：这种消息没有 id 可用（与 prependOlderMessages 的约定一致），而只看
  *   page 里「无 id」的部分会漏掉有 id 的后端消息，等于永远匹配不上。
- * - `tmp:` 占位气泡（流式中的 assistant）**不保留**：它的定稿版本一定在 `page` 里
- *   （这正是本函数的使用场景——流结束/重连后拉最新一页核对），留着会变成重复气泡。
+ * - `tmp:` 占位气泡（流式中的 assistant）**无条件丢弃，且绝不参与内容对账**：它的
+ *   定稿版本一定在 `page` 里（这正是本函数的使用场景——流结束/重连后拉最新一页核对），
+ *   留着会变成重复气泡。见下方 `isTempId` 分支的注释。
  * - 重叠区间用 page 的版本（更权威，且 id 已提升为真实数字）
  * - page 为空时不改动（调用方通常也不该走到这，但保持安全）
  */
@@ -208,6 +209,20 @@ export function replaceTailKeepOlder<M extends IdentifiedMessage>(
   // 本地无 id 消息按内容累计到第几次，用来跟 page 的同内容条数对账
   const localSeen = new Map<string, number>();
   for (const m of prev) {
+    // 流式占位气泡（`tmp:`）**先**被这里拦掉，不能掉进下面的内容对账。
+    //
+    // 为什么必须前置（真实 bug：桌面端两个任务同时在跑时，点进其中一个看到两个
+    // 一模一样的气泡，刷新后消失）：
+    //  - 占位气泡的 content 在正文到达前是空串，key 是 `assistant\u0000`。会话加载
+    //    时 push 进来的不止它一条 —— 后端那条「还没定稿」的行同样是空 content，
+    //    page 里因此出现同一个 key 两次。
+    //  - 它自己又是「无 id」（`tmp:` 是字符串），会走进下面的无 id 对账分支，按
+    //    内容配额算出「page 里有 2 条、够我排号」→ 判成「已落库」而不保留 ——
+    //    这一步看起来没事，但它**吃掉了本该留给本地乐观 user 消息的配额**，
+    //    并且在 `consumeStream` 定稿时按 `liveId` 找不到对象 → 走 push 分支
+    //    **凭空多出一条**，于是同一条回复渲染成两份。
+    //  - 判据只看「有没有 id」是不够的：`tmp:` 有 id，只是这个 id 后端不认。
+    if (isTempId(m.id)) continue;
     if (m.id == null) {
       // 本地乐观插入的消息（没有 id）。调用方一般已经用 mergeMissingUserMessages
       // 把它补进了 page 末尾，此时 page 里有一份等价的，再留一份就是重复气泡。
@@ -224,7 +239,7 @@ export function replaceTailKeepOlder<M extends IdentifiedMessage>(
       continue;
     }
     if (typeof m.id === "number" && m.id < oldestPageId) carried.push(m);
-    // 其余情况（tmp: 占位气泡、比 page 更新的消息）交给 page —— page 是权威的最新一页
+    // 其余情况（比 page 更新的、或 page 里不认识的 id）交给 page —— page 是权威的最新一页
   }
   if (carried.length === 0 && localTail.length === 0) return page;
   return [...carried, ...page, ...localTail];

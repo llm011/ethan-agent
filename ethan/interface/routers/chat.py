@@ -207,12 +207,19 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
                 (m for m in reversed(req.messages) if m.get("role") == "user"), None
             )
             if _raw_user is not None:
+                # 非图片附件：从上一步的上传暂存区（uploads/_pending/）归属到本会话，
+                # 返回的是规范化后的元数据（含改写过的 path/rel_path）。
+                # 传的是前端给的原始项（dict 或裸文件名），不是 _raw_user 本身。
+                from ethan.core.uploads import adopt_uploads
+
+                _files = adopt_uploads(req.session_id, _raw_user.get("files") or [])
                 _um = Message(
                     role="user",
                     content=_raw_user.get("content", ""),
                     images=_raw_user.get("images") or [],
                     cards=_raw_user.get("cards"),
                     quote=_raw_user.get("quote"),
+                    files=_files or None,
                 )
                 # 图片持久化到本地文件，DB 只存路径
                 if _um.images:
@@ -248,6 +255,7 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
                 images=m.get("images") or [],
                 cards=m.get("cards"),
                 quote=m.get("quote"),
+                files=m.get("files") or None,
             )
             for m in req.messages
         ]

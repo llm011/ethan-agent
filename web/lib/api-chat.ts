@@ -7,6 +7,8 @@ export interface ChatMessage {
   content: string;
   created_at?: number;
   images?: { data: string; media_type: string }[];  // base64 raw (no data: prefix)
+  // 非图片附件：只传元数据（含服务端路径），正文留在 uploads/ 目录
+  files?: { name: string; path: string; rel_path?: string; size?: number; media_type?: string }[];
 }
 
 export type StreamChunk = { content?: string; done?: boolean; stopped?: boolean; error?: string; model?: string; usage?: Record<string, number>; ttfb_ms?: number; total_ms?: number; message_id?: number; title?: string; tool?: string; args?: string; intent?: string; state?: string; id?: string; duration_ms?: number; gen_ms?: number | null; result_preview?: string; result_detail?: string; entity_type?: string; entity_id?: string; injected?: string[]; injected_added?: { id: string; content: string }; injected_removed?: string; sub_steps?: Array<{ tool: string; args: string; state: string; duration_ms?: number | null; result_preview?: string }>; ui?: unknown[]; mcp_app?: { uri: string; data?: Record<string, unknown>; html?: string; csp?: Record<string, string[]> }; cards?: Array<{ type: string; [key: string]: unknown }>; consent_request?: boolean; request_id?: string; description?: string; detail?: string; thinking?: boolean; heartbeat?: boolean; elapsed?: number; skills_matched?: Array<{ name: string; is_default?: boolean }>; background_polling?: boolean; polling_message?: string; new_message?: boolean; confirm_browser_cleanup?: boolean; sessions?: Array<{ sessionId: string; title: string; tabCount: number }>; ask_user_request?: boolean; question?: string; options?: Array<{ label: string; value: string }>; default?: string; timeout?: number; wait_for_user_request?: boolean; prompt?: string; input_type?: string; placeholder?: string; confirm_label?: string; cancel_label?: string };
@@ -121,12 +123,26 @@ async function friendlyHttpError(res: Response): Promise<string> {
 }
 
 /** 重连一个仍在进行的生成：刷新页面后调此函数，回放缓冲 + 继续实时。
- *  无活跃 run 时后端返回 204，这里返回 null，调用方走普通 fetchSession。 */
+ *  无活跃 run 时后端返回 204，这里返回 null，调用方走普通 fetchSession。
+ *
+ *  传输层失败（连不上 / 超时 / 连接被掐）不能静默吞成 `null`：`null` 的语义是
+ *  「**后端明确说没有活跃 run**」，调用方据此走「拉最终结果」的收尾分支。把网络
+ *  错误也归成 `null`，调用方就会在半途既走收尾分支、又继续等一条其实没接上的流 ——
+ *  两者交错替换消息列表，是「同一条回复出现两个气泡」的来源之一（服务端仍有活跃
+ *  run 时尤其明显：DB 里那条还是空的进度行）。这里按 `streamChat` 的口径抛中文错误，
+ *  让调用方走自己的失败分支，而不是伪装成「没有 run」。 */
 export async function streamResume(sessionId: string, signal?: AbortSignal): Promise<AsyncGenerator<StreamChunk> | null> {
-  const res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stream`, {
-    headers: headers(),
-    signal,
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(`${API_URL}/chat/${encodeURIComponent(sessionId)}/stream`, {
+      headers: headers(),
+      signal,
+    });
+  } catch (e) {
+    // 用户主动中断（切会话/新发送抢占）要原样抛 AbortError，调用方据此静默收尾
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    throw new Error("连接不上 Ethan 服务，请确认后端已启动后重试。");
+  }
   if (res.status === 204 || !res.ok) return null;
   return parseSSE(res);
 }

@@ -153,6 +153,14 @@ async def lifespan(app: FastAPI):
                 ETHAN_USER_ID.reset(token)
 
     _asyncio.create_task(_migrate_and_reindex())
+
+    async def _prune_pending_uploads() -> None:
+        # 用户传了附件却没发送 → 文件永远留在 uploads/_pending/。启动时清一次 7 天前的孤儿。
+        from ethan.core.uploads import prune_pending
+
+        await _asyncio.to_thread(prune_pending)
+
+    _asyncio.create_task(_prune_pending_uploads())
     # 进程互相监控：写 server PID + 拉起 watchdog（独立进程，server 挂了它会重启）
     # worktree/开发场景设 ETHAN_NO_WATCHDOG=1 跳过，避免覆盖主 worktree 的 PID 文件被误杀
     from ethan.watchdog import ensure_watchdog_running, watchdog_disabled, write_server_pid

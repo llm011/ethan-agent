@@ -42,6 +42,8 @@ interface ChatInputProps {
   onSend: (text: string) => void;
   onStop?: () => void;
   onFilesChange: (files: PendingFile[]) => void;
+  // 当前会话 id：上传非图片附件时直接落到 uploads/<session_id>/（新会话可能还没有 id）
+  sessionId?: string | null;
   onQuoteCancel: () => void;
   modes?: ModeEntry[];
   mode?: string;
@@ -71,6 +73,7 @@ export function ChatInput({
   onSend,
   onStop,
   onFilesChange,
+  sessionId = null,
   onQuoteCancel,
   modes = [],
   mode = "",
@@ -127,8 +130,8 @@ export function ChatInput({
       if (file.type.startsWith("image/")) {
         added.push(await readImageFile(file));
       } else {
-        const result = await uploadFile(file);
-        added.push({ name: result.filename, path: result.path });
+        const result = await uploadFile(file, sessionId);
+        added.push({ name: result.filename, path: result.path, size: result.size, relPath: result.rel_path });
       }
     }
     onFilesChange([...pendingFiles, ...added]);
@@ -158,12 +161,12 @@ export function ChatInput({
       if (file.type.startsWith("image/")) {
         added.push(await readImageFile(file));
       } else {
-        const result = await uploadFile(file);
-        added.push({ name: result.filename, path: result.path });
+        const result = await uploadFile(file, sessionId);
+        added.push({ name: result.filename, path: result.path, size: result.size, relPath: result.rel_path });
       }
     }
     onFilesChange([...pendingFiles, ...added]);
-  }, [pendingFiles, onFilesChange]);
+  }, [pendingFiles, onFilesChange, sessionId]);
 
   const handleSend = () => {
     if (ambiguousLegacy) return; // 同名模型歧义未解决，先让用户选 provider
