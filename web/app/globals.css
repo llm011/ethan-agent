@@ -745,3 +745,10 @@
 .share-prose .table-wrapper th { background: #f6f8fa; font-weight: 600; }
 .share-prose img { max-width: 100%; border-radius: 8px; }
 .share-prose hr { border: none; border-top: 1px solid #eaecef; margin: 1em 0; }
+/* 朗读跟读高亮：当前朗读句的底色。
+   用半透明黄，避免盖住正文；round 一点点，贴合中文行高。 */
+.reading-speak-mark {
+  background-color: rgb(250 204 21 / 0.32);
+  border-radius: 2px;
+  transition: background-color 120ms ease;
+}

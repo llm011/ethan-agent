@@ -11,13 +11,22 @@ import {
   Check,
   AlertCircle,
   Copy,
+  Volume2,
+  Pause,
+  Play,
+  Square,
 } from "lucide-react";
-import type { Message } from "@ethan/shared/chat/types";
+import type { CardData, Message } from "@ethan/shared/chat/types";
 import type { Annotation, AnnotationColor, AnnotationType } from "@/lib/api";
-import { createAnnotation, deleteAnnotation, updateAnnotationOffset, updateMessage } from "@/lib/api";
+import { createAnnotation, deleteAnnotation, updateAnnotationOffset, updateMessage, fetchTtsStatus } from "@/lib/api";
 import { isPersistedId } from "@ethan/shared/chat/history";
 import { MarkdownContent } from "./markdown";
+import { A2uiCard } from "./a2ui-card";
+import { McpAppView } from "./mcp-app-view";
+import { ImageGallery, type ImageCard } from "./image-gallery";
+import { FileCardView, type FileCard } from "./file-card";
 import { applyHighlights, getSelectionOffsets, getSelectionRawText, getSelectionText, type HighlightSpan } from "@/lib/highlight";
+import { useSpeaking } from "@/hooks/use-speaking";
 import { copyToClipboard } from "@ethan/shared/lib/clipboard";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
 
@@ -63,6 +72,30 @@ function formatTime(ts?: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// 阅读模式的卡片区：A2UI 卡片（表格/时间轴等）、图片/文件卡片、MCP 应用。
+// 这些结构化字段不在 message.content（Markdown 正文）里，所以必须单独渲染，
+// 且放在 contentRef（可标注正文）之外——否则会打乱按文本 offset 定位的标注。
+function ReadingCards({ message, sessionId }: { message: Message; sessionId?: string }) {
+  const cards = (message.cards ?? []) as CardData[];
+  const images = cards.filter((c): c is ImageCard => c.type === "image");
+  const files = cards.filter((c): c is FileCard => c.type === "file");
+  const a2ui = message.a2ui ?? [];
+  const mcpApps = message.mcpApps ?? [];
+  if (images.length === 0 && files.length === 0 && a2ui.length === 0 && mcpApps.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-6 space-y-3 select-text">
+      {images.length > 0 && <ImageGallery cards={images} />}
+      {files.map((f, i) => (
+        <FileCardView key={`${f.path}-${i}`} card={f} sessionId={sessionId} />
+      ))}
+      {a2ui.length > 0 && <A2uiCard surfaces={a2ui} />}
+      {mcpApps.length > 0 && <McpAppView apps={mcpApps} />}
+    </div>
+  );
+}
+
 /** 正文编辑后按 quote 重定位 offset：
  * 1. 原位置仍是 quote（该处未被编辑影响）→ 保持不动；
  * 2. 重复文本歧义 → 在原位置前后就近取最近的匹配，而非从头 indexOf；
@@ -105,6 +138,35 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
   // 保存后待重定位标记：等 message.content 更新并重新渲染完成，再按 quote 重算标注 offset
   const pendingRelocateRef = useRef(false);
   const bookmarks = local.filter((a) => a.type === "bookmark");
+  // ---- 朗读 ----
+  const speaking = useSpeaking();
+  const [ttsReady, setTtsReady] = useState<boolean | null>(null);
+  // 朗读正文：有选中就读选中，否则读全篇
+  const buildSpeakText = useCallback(() => {
+    const selected = contentRef.current ? getSelectionText(contentRef.current).trim() : "";
+    if (selected) return selected;
+    return (message?.content || "").trim();
+  }, [message?.content]);
+  const onToggleSpeak = useCallback(() => {
+    if (speaking.state === "playing") { speaking.pause(); return; }
+    if (speaking.state === "paused") { speaking.resume(); return; }
+    const text = buildSpeakText();
+    if (text) void speaking.start(text);
+  }, [speaking, buildSpeakText]);
+  // 退出阅读模式 / 切换到别的消息时必须停播，否则会一直在后台念
+  useEffect(() => {
+    if (!open) speaking.stop();
+    return () => speaking.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, message?.id]);
+  // 探测本机语音后端（只查状态，不拉起）；没装就在按钮上标出来
+  useEffect(() => {
+    let alive = true;
+    fetchTtsStatus()
+      .then((s) => { if (alive) setTtsReady(s.installed); })
+      .catch(() => { if (alive) setTtsReady(false); });
+    return () => { alive = false; };
+  }, []);
   const shown = filter === "bookmark" ? bookmarks : local;
 
   // 把标注画进正文（阅读模式用全强度）。
@@ -452,9 +514,90 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
               </TooltipTrigger>
               <TooltipContent side="bottom">编辑正文</TooltipContent>
             </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    onClick={onToggleSpeak}
+                    disabled={ttsReady === false || speaking.state === "connecting"}
+                    aria-label={speaking.state === "playing" ? "暂停朗读" : "朗读"}
+                    className={`flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted disabled:opacity-40 ${
+                      speaking.state === "playing" ? "text-primary" : "text-muted-foreground"
+                    }`}
+                  />
+                }
+              >
+                {speaking.state === "connecting" ? (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-transparent" />
+                ) : speaking.state === "playing" ? (
+                  <Pause className="h-4 w-4" />
+                ) : speaking.state === "paused" ? (
+                  <Play className="h-4 w-4" />
+                ) : (
+                  <Volume2 className="h-4 w-4" />
+                )}
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {ttsReady === false
+                  ? "本机未安装 ethan-tts，无法朗读"
+                  : speaking.state === "playing"
+                    ? "暂停朗读"
+                    : "朗读（有选中读选中，否则读全篇）"}
+              </TooltipContent>
+            </Tooltip>
+            {speaking.state !== "idle" && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      onClick={speaking.stop}
+                      className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+                    />
+                  }
+                >
+                  <Square className="h-4 w-4" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">停止朗读</TooltipContent>
+              </Tooltip>
+            )}
           </>
         )}
       </div>
+
+      {/* 朗读状态条：冷启动要拉起服务并加载模型（实测 6–10 秒），
+          不给反馈用户会以为按钮没反应 */}
+      {(speaking.warmingUp || speaking.state !== "idle" || speaking.error) && (
+        <div
+          className={`flex items-center gap-2 border-b px-4 py-1.5 text-xs ${
+            speaking.error
+              ? "border-destructive/30 bg-destructive/10 text-destructive"
+              : "border-border bg-muted/50 text-muted-foreground"
+          }`}
+        >
+          {speaking.error ? (
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <Volume2 className={`h-3.5 w-3.5 shrink-0 ${speaking.state === "playing" ? "text-primary" : ""}`} />
+          )}
+          <span className="flex-1">
+            {speaking.error
+              ? speaking.error
+              : speaking.warmingUp
+                ? "正在启动本地语音，首次使用需要加载模型，请稍候…"
+                : speaking.state === "paused"
+                  ? "已暂停"
+                  : "朗读中"}
+          </span>
+          {(speaking.state !== "idle" || speaking.error) && (
+            <button
+              onClick={speaking.stop}
+              className="rounded-md border border-current/30 px-2 py-0.5 hover:bg-current/10"
+            >
+              停止
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 标注同步失败提示：本地已生效但后端未保存，不提示会在重开后表现为错位/复活 */}
       {syncFails.length > 0 && (
@@ -514,7 +657,9 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
               ref={contentRef}
               content={message.content || ""}
               className="prose reading-prose max-w-none"
+              speakSentence={speaking.currentSentence}
             />
+            <ReadingCards message={message} sessionId={sessionId} />
           </div>
         </div>
 

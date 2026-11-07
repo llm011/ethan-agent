@@ -772,3 +772,10 @@
 [data-tauri-drag-region] [tabindex] {
   -webkit-app-region: no-drag;
 }
+
+/* 朗读跟读高亮：当前朗读句的底色。 */
+.reading-speak-mark {
+  background-color: rgb(250 204 21 / 0.32);
+  border-radius: 2px;
+  transition: background-color 120ms ease;
+}

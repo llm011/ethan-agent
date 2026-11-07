@@ -9,6 +9,7 @@ import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { MermaidBlock } from "@ethan/shared/components/mermaid-block";
 import { forwardRef, useMemo, useState, useEffect } from "react";
 import { Lightbox, type LightboxImage } from "./lightbox";
+import { splitSpeakSentences } from "@ethan/shared/lib/speak";
 
 let _katex: typeof import("katex").default | undefined;
 let _katexLoading: Promise<void> | undefined;
@@ -163,12 +164,79 @@ export const markdownComponents: Components = {
   ),
 };
 
+// ---- 朗读跟读高亮 ----
+
+/** 在 DOM 文本节点里找到每段句子的字符区间（偏移相对整棵子树的纯文本）。 */
+function locateSentenceRanges(
+  root: HTMLElement,
+  segments: string[],
+): { start: number; end: number }[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: { node: Text; start: number; end: number }[] = [];
+  let offset = 0;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const value = (n as Text).data;
+    if (!value) continue;
+    nodes.push({ node: n as Text, start: offset, end: offset + value.length });
+    offset += value.length;
+  }
+  const ranges: { start: number; end: number }[] = [];
+  let cursor = 0;
+  for (const seg of segments) {
+    const start = offset >= 0 ? root.textContent!.indexOf(seg, cursor) : -1;
+    if (start < 0) continue;
+    ranges.push({ start, end: start + seg.length });
+    cursor = start + seg.length;
+  }
+  return ranges;
+}
+
+/** 把 [start, end) 区间包进 <mark data-speaking>，可跨多个文本节点。 */
+function wrapRange(start: number, end: number, root: HTMLElement): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const targets: { node: Text; from: number; to: number }[] = [];
+  let offset = 0;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const textNode = n as Text;
+    const len = textNode.data.length;
+    const nodeStart = offset;
+    const nodeEnd = offset + len;
+    offset = nodeEnd;
+    if (nodeEnd <= start || nodeStart >= end) continue;
+    targets.push({
+      node: textNode,
+      from: Math.max(0, start - nodeStart),
+      to: Math.min(len, end - nodeStart),
+    });
+  }
+  for (const { node, from, to } of targets) {
+    const range = document.createRange();
+    range.setStart(node, from);
+    range.setEnd(node, to);
+    const mark = document.createElement("mark");
+    mark.dataset.speaking = "1";
+    mark.className = "reading-speak-mark";
+    try {
+      range.surroundContents(mark);
+    } catch {
+      /* 跨元素边界时 surroundContents 会抛，跳过这一段 */
+    }
+  }
+}
+
 // 气泡与阅读模式共用同一个渲染入口，确保 DOM 文本节点序列完全一致，
 // 标注偏移（基于渲染后纯文本）在两边才能对齐。
 export const MarkdownContent = forwardRef<
   HTMLDivElement,
-  { content: string; className?: string; variant?: "bubble" | "share"; streaming?: boolean }
->(({ content, className, variant = "bubble", streaming = false }, ref) => {
+  {
+    content: string;
+    className?: string;
+    variant?: "bubble" | "share";
+    streaming?: boolean;
+    /** 朗读跟读：高亮第几段（按句末标点切分），-1 = 不高亮 */
+    speakSentence?: number;
+  }
+>(({ content, className, variant = "bubble", streaming = false, speakSentence = -1 }, ref) => {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   // 流式期间用于「延后解析」的 content 快照：见下方 parsed 的说明
@@ -226,6 +294,37 @@ export const MarkdownContent = forwardRef<
     ),
     [deferredContent, components],
   );
+
+  // 朗读跟读高亮：解析完 DOM 后给第 N 段文本包一层 <mark>。
+  // 不动 Markdown 渲染链路（只改渲染结果），所以标注偏移所依赖的文本序列不受影响——
+  // <mark> 只是包住已有文本节点，纯文本内容与顺序不变。
+  useEffect(() => {
+    const root = typeof ref === "object" && ref ? ref.current : null;
+    if (!root) return;
+    let marks = root.querySelectorAll<HTMLElement>("mark[data-speaking]");
+    const clear = () => {
+      for (const mark of Array.from(marks)) {
+        const parent = mark.parentNode;
+        if (!parent) continue;
+        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+        parent.removeChild(mark);
+        parent.normalize();
+      }
+      marks = root.querySelectorAll<HTMLElement>("mark[data-speaking]");
+    };
+    if (speakSentence < 0) {
+      clear();
+      return;
+    }
+    clear();
+    // 切句规则来自 shared，和朗读侧是同一份实现——不一致会让高亮错位
+    const segments = splitSpeakSentences((root.textContent || "").trim());
+    const ranges = locateSentenceRanges(root, segments);
+    const target = ranges[speakSentence];
+    if (!target) return;
+    wrapRange(target.start, target.end, root);
+    return clear;
+  }, [speakSentence, deferredContent, ref]);
 
   return (
     <div

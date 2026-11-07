@@ -11,3 +11,4 @@ export * from "./api-memory";
 export * from "./api-annotations";
 export * from "./api-documents";
 export * from "./api-misc";
+export * from "./api-tts";

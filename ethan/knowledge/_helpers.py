@@ -18,7 +18,7 @@ def _safe_subdir(tag: str) -> str | None:
     return name
 
 
-def _safe_subpath(tag: str) -> Path | None:
+def _safe_subpath(tag: str, scene: str = "") -> Path | None:
     """把带 `/` 的层级 tag 清洗为安全的**多级**相对路径（防穿越）。
 
     例：`work/coze/prd` → Path("work/coze/prd")，落盘成嵌套目录，与 Obsidian
@@ -27,6 +27,8 @@ def _safe_subpath(tag: str) -> Path | None:
     - 每段**保留 Unicode 字母/数字/下划线/连字符/空格**（含中文，与 Obsidian 打平），
       仅把文件系统危险字符（`/ \\ : * ? " < > | ` 及控制符）替换为 `-`，去首尾 `-`/空格
     - 空段、`.`、`..`、纯 `.` 序列跳过（防路径穿越）
+    - 传入 scene 时，循环剥掉开头的同名段（"work/coze" + scene="work" → "coze"），
+      避免 scene 被重复拼进路径（work/work/coze）
     - 所有段都为空时返回 None（落根目录）
     """
     segments: list[str] = []
@@ -37,6 +39,9 @@ def _safe_subpath(tag: str) -> Path | None:
         if not name or set(name) == {"."}:  # 空、"."、".." 等纯点段
             continue
         segments.append(name)
+    scene_head = (scene or "").strip("/")
+    while scene_head and segments and segments[0] == scene_head:
+        segments = segments[1:]
     if not segments:
         return None
     return Path(*segments)
