@@ -56,7 +56,7 @@ _PLIST_TEMPLATE = """\
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>{bin_dir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>{bin_dir}:{user_bin}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
         <!-- launchd 自己就是守护进程（KeepAlive=true）。必须关掉 serve 内置的
              watchdog，否则两个保姆同时管一个端口：谁先抢到 8989，另一个就一直
              绑定失败并重启，实测能刷出上千次 Errno 48，每次都把桌面端连接踢断
@@ -237,6 +237,7 @@ def _render_plist(exe: Path | None = None) -> str:
     return _PLIST_TEMPLATE.format(
         ethan_exe=str(exe),
         bin_dir=str(exe.parent),
+        user_bin=str(Path.home() / ".local" / "bin"),
         ethan_home=str(ethan_home),
     )
 
