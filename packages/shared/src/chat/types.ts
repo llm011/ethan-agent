@@ -12,12 +12,24 @@ export interface Quote {
   message_id?: number;  // 被引用消息的后端行 id；精简模式按此精确定位该消息以附上 tool 调用/文件路径
 }
 
+// 聊天附件（非图片，上传的文档等）。正文落在服务端 ~/.ethan/uploads/<session_id>/，
+// DB 只存这份元数据；rel_path 用于拼 /api/assets/uploads/<rel_path> 直接访问。
+export interface ChatFile {
+  name: string;
+  path: string;      // 服务端绝对路径（模型 file_read 用）
+  rel_path?: string; // 老数据没有，只有 path：此时不可直接访问
+  size?: number;
+  media_type?: string;
+}
+
 export interface PendingFile {
   name: string;
   path: string;
   isImage?: boolean;
   dataUrl?: string;  // Blob URL 或 base64 dataUrl，用于渲染预览
   file?: File;       // 原始 File 引用，发送时按需读取 base64，避免常驻内存
+  size?: number;     // 字节数（非图片附件：上传接口返回），chip 上展示
+  relPath?: string;  // uploads/ 下的相对路径（非图片附件）：拼 /api/assets/uploads/<relPath>
 }
 
 export interface SkillMatch {
@@ -78,7 +90,7 @@ export interface Message {
   // 这样气泡从第一帧起就有稳定 key；后端返回真实 id 后再提升成数字。
   id?: number | string;
   content: string;
-  files?: string[];
+  files?: ChatFile[];  // 本条消息附带的非图片附件
   toolSteps?: ToolStep[];
   toolsExpanded?: boolean;
   created_at?: number;

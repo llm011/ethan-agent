@@ -1,5 +1,5 @@
 import type { Message } from "@ethan/shared/chat/types";
-import type { PendingFile } from "@ethan/shared/chat/types";
+import type { PendingFile, ChatFile } from "@ethan/shared/chat/types";
 import { assetUrl } from "../../lib/api-base";
 
 export async function pendingFileToImagePayload(img: PendingFile): Promise<{ data: string; media_type: string }> {
@@ -19,6 +19,13 @@ export async function pendingFileToImagePayload(img: PendingFile): Promise<{ dat
     data: img.dataUrl?.split(",")[1] ?? "",
     media_type: img.dataUrl?.split(";")[0].replace("data:", "") ?? "image/png",
   };
+}
+
+/** PendingFile[] → 发给后端的附件元数据（只传元信息，正文留在服务端 uploads/）。 */
+export function toChatFiles(files: PendingFile[]): ChatFile[] {
+  return files
+    .filter((f) => !f.isImage)
+    .map((f) => ({ name: f.name, path: f.path, rel_path: f.relPath, size: f.size }));
 }
 
 // 清洗后的占位标题：去 markdown 标记 / 命令前缀，截断 40 字
@@ -50,6 +57,23 @@ export function isFirstQuerySignificant(text: string): boolean {
 }
 
 // SessionDetail.messages → 组件内 Message[]（fetchSession 初次加载 + 重连失败兜底共用）
+// 老会话（files 字段落库之前）只在正文里留了 `[Uploaded file: 名字 at 路径]` 前缀。
+// 不改库，这里解析出来回填成附件 chip——没有 rel_path 所以不可点，但至少能看见带过什么文件。
+const LEGACY_UPLOAD_RE = /^\[Uploaded file: (.+?) at (.+?)\]$/;
+
+export function legacyFilesFromContent(content: string): ChatFile[] {
+  if (!content || !content.startsWith("[Uploaded file: ")) return [];
+  const out: ChatFile[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) break; // 前缀块结束
+    const m = LEGACY_UPLOAD_RE.exec(trimmed);
+    if (!m) break;
+    out.push({ name: m[1], path: m[2] });
+  }
+  return out;
+}
+
 export function mapDetailMessages(detail: { messages: any[] }): Message[] {
   return detail.messages.map((m: any) => ({
     role: m.role,
@@ -59,6 +83,18 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
     usage: m.usage || undefined,
     intermediateBlobId: m.intermediate_blob_id || undefined,
     quote: m.quote || undefined,
+    // 非图片附件：优先用落库的 files；老会话（无该字段）从正文前缀回填，刷新后也能看到 📎
+    files: (m.files && m.files.length > 0)
+      ? m.files.map((f: any) => ({
+          name: f.name,
+          path: f.path,
+          rel_path: f.rel_path || undefined,
+          size: f.size ?? undefined,
+          media_type: f.media_type || undefined,
+        }))
+      : (m.role === "user" ? legacyFilesFromContent(m.content) : []).reduce<ChatFile[]>(
+          (acc, f) => (f.name || f.path ? [...acc, f] : acc), [],
+        ),
     images: m.images && m.images.length > 0
       ? m.images.map((img: any) => ({
           name: "",

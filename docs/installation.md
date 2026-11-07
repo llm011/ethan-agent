@@ -219,7 +219,7 @@ pnpm tauri build  # 产出 dmg/exe
 ```bash
 ethan server install     # 安装并启动
 ethan server status      # 查看运行状态（会提示多实例冲突）
-ethan server restart     # 重启
+ethan server restart     # 重启（等待 /api/health 就绪，未就绪则非零退出）
 ethan server stop        # 停止
 ethan server uninstall   # 卸载
 ```
@@ -229,6 +229,12 @@ ethan server uninstall   # 卸载
 > 两个守护者盯同一个端口时，谁先抢到端口，另一个就会一直绑定失败并重启（实测可刷出
 > 上千次 `address already in use`），每次重启都会踢断桌面端 WebSocket——表现为
 > **「桌面端反复失联」**。
+
+`ethan server restart` 会在 `launchctl load` 之后**轮询 `/api/health`**，只有服务
+真正可用才打印成功；90 秒内没起来会打印失败原因并**非零退出**。它还会比对已安装的
+plist 与当前模板，内容落后时自动按新模板重写（保留原可执行路径），所以升级后不用
+手动 `uninstall` + `install` 就能拿到新模板里的配置。注意 launchd 冷启动明显慢于
+前台运行（Python 冷 import 在 launchd 下要慢一个数量级），等几十秒属正常。
 
 ### 服务反复失联 / 起不来？先查多实例
 
@@ -297,7 +303,7 @@ launchd 服务再手动 `ethan serve`。
 
 ```
 ~/.ethan/
-├── config.yaml          # 主配置（Provider、模型、路由参数）
+├── config.yaml          # 主配置（Provider、模型、路由参数、TTS 后端等）
 ├── system/
 │   ├── identity.md      # Agent 身份设定
 │   ├── soul.md          # 行为原则
@@ -316,6 +322,9 @@ launchd 服务再手动 `ethan serve`。
 ```
 
 Docker 部署时，此目录通过 named volume `ethan-data` 挂载到容器内的 `/root/.ethan`，数据在容器重建后仍然保留。
+
+`config.yaml` 的常见可配置段：`providers`（模型 Provider）、`defaults`（默认模型等）、`tools`（工具）、
+`tts`（配音后端，默认 Edge TTS，可切本机 ethan-tts）。TTS 怎么配见 [语音合成（TTS）配置](./tts.md)。
 
 ---
 

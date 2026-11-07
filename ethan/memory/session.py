@@ -551,6 +551,7 @@ class SessionStore:
             ("reasoning", "TEXT NOT NULL DEFAULT ''"),
             ("model", "TEXT"),
             ("error", "TEXT NOT NULL DEFAULT ''"),
+            ("files", "TEXT"),  # 非图片附件元数据，见 ethan/core/uploads.py
         ]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
@@ -923,9 +924,10 @@ class SessionStore:
         images_json = json.dumps(msg.images, ensure_ascii=False) if msg.images else None
         matched_skills_json = json.dumps(msg.matched_skills, ensure_ascii=False) if msg.matched_skills else None
         cards_json = json.dumps(msg.cards, ensure_ascii=False) if msg.cards else None
+        files_json = json.dumps(msg.files, ensure_ascii=False) if msg.files else None
 
         cursor = await self._db.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning, model, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, intermediate_blob_id, status, reasoning, model, error, files) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session_id,
                 msg.role,
@@ -949,6 +951,7 @@ class SessionStore:
                 msg.reasoning or "",
                 msg.model or None,
                 msg.error or "",
+                files_json,
             ),
         )
         await self._db.commit()
@@ -1205,9 +1208,16 @@ class SessionStore:
         async with self._db.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)) as cursor:
             if not await cursor.fetchone():
                 return False
-        from ethan.core.paths import user_intermediate_dir
+        from ethan.core.paths import user_intermediate_dir, user_uploads_dir
 
         shutil.rmtree(user_intermediate_dir() / session_id, ignore_errors=True)
+        # 聊天附件随会话一起清（图片资产 assets/images/ 仍保留，属于既有行为）
+        shutil.rmtree(user_uploads_dir() / session_id, ignore_errors=True)
+        # 同 id 会话被删后重新创建时，曾归属它的附件可能还留在 _pending/（搬迁失败 / 跨端排队），
+        # 不清掉会被 adopt_uploads 重新认领到新会话上。
+        from ethan.core.uploads import discard_pending_for
+
+        discard_pending_for(session_id)
         await self._db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         await self._db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         await self._db.commit()
@@ -1305,10 +1315,12 @@ class SessionStore:
             i for i in _pending if isinstance(i, dict) and i.get("id") and i.get("content")
         ]
 
+        # 新列一律**追加到末尾**：下面的行解析按位置下标取值（r[11]…r[21]），
+        # 插在中间会把所有既有字段错位。
         _MSG_COLS = (
             "id, role, content, tool_calls, tool_call_id, created_at, usage, tool_steps, thought, "
             "quote, a2ui, images, matched_skills, ttfb_ms, total_ms, mcp_apps, cards, "
-            "intermediate_blob_id, status, reasoning, model, error"
+            "intermediate_blob_id, status, reasoning, model, error, files"
         )
         if limit is None and before is None:
             _sql = f"SELECT {_MSG_COLS} FROM messages WHERE session_id = ? ORDER BY id"
@@ -1351,6 +1363,7 @@ class SessionStore:
                 _reasoning = r[19] if len(r) > 19 and r[19] else ""
                 _model = r[20] if len(r) > 20 and r[20] else None
                 _error = r[21] if len(r) > 21 and r[21] else ""
+                files = json.loads(r[22]) if len(r) > 22 and r[22] else None
                 session.messages.append(
                     Message(
                         role=r[1],
@@ -1371,6 +1384,7 @@ class SessionStore:
                         total_ms=total_ms,
                         mcp_apps=mcp_apps,
                         cards=cards,
+                        files=files,
                         intermediate_blob_id=intermediate_blob_id,
                         status=_status,
                         model=_model,
@@ -1943,6 +1957,21 @@ async def retry_on_db_locked(
             await asyncio.sleep(delay)
             delay = min(delay * 2, 8.0)
     raise AssertionError("unreachable")
+
+
+async def session_exists(session_id: str) -> bool:
+    """会话是否存在（便宜查询，不加载消息）。
+
+    附件下载路由用它做归属校验：`store.load()` 会把整条会话的消息读出来并反序列化，
+    每次开附件都做一遍太浪费；这里只 `SELECT 1 FROM sessions`。
+    会话库不可用（还没初始化）时按「不存在」处理，路由返回 404，不抛 500。
+    """
+    try:
+        store = await get_session_store()
+        async with store._db.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)) as cursor:
+            return await cursor.fetchone() is not None
+    except Exception:  # noqa: BLE001 — 归属校验失败一律按不存在处理
+        return False
 
 
 async def get_session_store(db_path: Path | None = None) -> "SessionStore":

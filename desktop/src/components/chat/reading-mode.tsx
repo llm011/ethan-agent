@@ -18,6 +18,7 @@ import { MarkdownContent } from "./markdown";
 import { applyHighlights, getSelectionOffsets, getSelectionRawText, getSelectionText, type HighlightSpan } from "@/lib/highlight";
 import { copyToClipboard } from "@ethan/shared/lib/clipboard";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@ethan/shared/ui/tooltip";
+import { overlayTitlebarLeftInset } from "@/lib/window-chrome";
 import { annotationTypeLabel as typeLabel, annotationColorBg as colorBg } from "@ethan/shared/lib/reading";
 
 interface ReadingModeProps {
@@ -371,8 +372,12 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
   return (
     <TooltipProvider delay={0}>
     <div className="fixed inset-0 z-[60] flex flex-col bg-background">
-      {/* 顶部条 */}
-      <div className="flex items-center gap-3 border-b border-border px-4 py-2.5">
+      {/* 顶部条。桌面端覆盖整个窗口时，macOS 的系统交通灯悬浮在左上角，
+          左侧要让出它们的宽度，否则「退出阅读模式」按钮会压在关闭/最小化上 */}
+      <div
+        className="flex items-center gap-3 border-b border-border px-4 py-2.5"
+        style={{ paddingLeft: overlayTitlebarLeftInset() || undefined }}
+      >
         <Tooltip>
           <TooltipTrigger
             render={

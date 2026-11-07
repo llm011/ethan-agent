@@ -7,6 +7,9 @@ export interface PreviewFile {
   filename: string;
   kind: "md" | "html";
   sessionId?: string | null;
+  // 聊天附件专用：uploads/ 下的相对路径。给了它就走 /api/assets/uploads/<rel_path>，
+  // 不依赖 /files/download 的会话 grant。
+  assetRelPath?: string;
 }
 
 interface PreviewContextValue {
