@@ -145,7 +145,7 @@ def test_run_pipeline_failure_clears_stale_outputs_and_records_stage(tmp_path, m
     stale_srt = tmp_path / "subtitles.srt"
     stale_srt.write_text("1\n00:00:00,000 --> 00:00:01,000\n上一轮的旧字幕\n", encoding="utf-8")
 
-    def boom(manifest, output_dir):
+    def boom(manifest, output_dir, **kwargs):
         raise RuntimeError("TTS failed for section insight-1: 网络不可达")
 
     monkeypatch.setattr(pipeline, "synthesize_sections", boom)
@@ -171,7 +171,7 @@ def test_run_pipeline_marks_running_before_synthesis(tmp_path, monkeypatch):
     manifest_path = _write_manifest(tmp_path)
     seen: dict = {}
 
-    def capture(manifest, output_dir):
+    def capture(manifest, output_dir, **kwargs):
         seen.update(json.loads((output_dir / "run-status.json").read_text(encoding="utf-8")))
         raise RuntimeError("stop here")
 

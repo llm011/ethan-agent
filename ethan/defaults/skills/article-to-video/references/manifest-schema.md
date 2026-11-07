@@ -14,7 +14,7 @@
 | `durationToleranceSec` | 否 | 允许误差，默认目标时长的 10%，最少 2 秒 |
 | `language` | 否 | 默认 `zh-CN` |
 | `sourceUrl` | 否 | URL 输入的原始链接 |
-| `voice` | 否 | Edge TTS 参数；配了 `presenter` 且省略时继承角色包音色 |
+| `voice` | 否 | TTS 参数（默认 edge-tts，可切本地 ethan-tts）；配了 `presenter` 且省略时继承角色包音色 |
 | `theme` | 否 | 颜色主题 |
 | `domain` | 否 | `general`（默认）/ `finance` / `paper`，决定主题底色与可用视觉 |
 | `presenter` | 否 | 虚拟人立绘配置（引用资产库角色包） |
@@ -30,6 +30,17 @@
   "pitch": "+0Hz"
 }
 ```
+
+可选字段（切换 TTS 后端，详见 `tts-backends.md`）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `backend` | `edge-tts`（默认）/ `ethan-tts`。不填则读 `~/.ethan/config.yaml` 的 `tts.backend`，再读 `ETHAN_TTS_BACKEND` |
+| `ethan_voice` | `ethan-tts` 后端的本地音色（id 或名称，如 `preset:Vivian`、`老凌的声音`）；不填则读配置里的 `tts.voice` |
+| `instruct` | `ethan-tts` 后端的语气指令（如「轻快一点」），`edge-tts` 后端忽略 |
+
+`rate` 在两个后端都生效：edge 直接传给服务，ethan 换算成保音高的语速倍率（`+10%` → `1.1×`）。
+`volume` / `pitch` 只在 edge 后端生效；ethan 后端需要的话用 `instruct` 或后处理。
 
 `theme` 支持 `background`、`surface`、`primary`、`secondary`、`text` 以及可选的 `accent`（强调色，callout 默认底色）、`positive` / `negative`（金融域约定红涨绿跌）六位十六进制颜色，未知字段会校验失败。只需填入要覆盖的字段。合并优先级：内置默认 ← `domain` 主题 ← 用户 `theme`。
 

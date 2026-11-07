@@ -39,6 +39,17 @@
 
 语速：`rate` 默认 `+0%`；内容密度高可 `-5%` 放慢，资讯类可 `+5%`。用户有偏好时遵从用户。
 
+上表是 edge-tts 的在线音色名。切换到本地 `ethan-tts` 后端时，改用 `voice.ethan_voice`
+（如 `preset:Yunxi` 不适用，应写本地音色 id/名称，见 `ethan-tts voices list`，默认 `preset:Vivian`）：
+
+```json
+{"voice": {"backend": "ethan", "ethan_voice": "preset:Serena", "rate": "+0%"}}
+```
+
+也可以在 `~/.ethan/config.yaml` 写 `tts: {backend: ethan, voice: preset:Serena}` 全局切换，
+manifest 里就不用再写。两个后端的选择顺序、字幕差异和排查见
+`article-to-video/references/tts-backends.md`。
+
 ## manifest 校验清单
 
 - [ ] 所有 id 唯一且 kebab-case（如 `insight-1`、`closing`）
@@ -49,6 +60,7 @@
 
 ## 常见失败与处置
 
-- **Edge TTS 空音频/超时**：脚本自动重试 3 次；仍失败检查网络（代理未运行时用 `env -u HTTP_PROXY -u HTTPS_PROXY ...` 直连）
+- **Edge TTS 空音频/超时**：脚本自动重试 3 次；仍失败检查网络（代理未运行时用 `env -u HTTP_PROXY -u HTTPS_PROXY ...` 直连），或切到本地 `ethan-tts` 后端（不依赖网络）
+- **ethan-tts 找不到命令/超时**：确认本地工具已安装（`ethan-tts status`）、模型已加载；长文本调大 `tts.timeout_sec`
 - **时长超 target ±40%**：改脚本文字量重跑；章节 id 不变的部分命中缓存，秒级完成
 - **语速听起来不对**：调 `rate` 后重跑——voice 进缓存键，会自动重新合成

@@ -16,6 +16,10 @@ licenses:
 - [`edge-tts`](https://github.com/rany2/edge-tts) — LGPL-3.0 for the main
   library, with its SRT composer under MIT. It connects to Microsoft Edge's
   online text-to-speech service and is not an Azure service-level agreement.
+- `ethan-tts` (optional local backend, user-installed; not bundled or vendored
+  by Ethan) — runs the Qwen3-TTS model locally through `mlx-audio`. The pipeline
+  only shells out to its `ethan-tts` CLI and never redistributes its code or
+  model weights.
 - [`@open-motion/core`](https://github.com/jsongo/open-motion) — MIT License.
   Programmatic video engine for React developers, used to render motion graphics.
 - [`playwright`](https://github.com/microsoft/playwright) — Apache-2.0 License.
