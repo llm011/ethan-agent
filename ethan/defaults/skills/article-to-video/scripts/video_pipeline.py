@@ -416,7 +416,7 @@ def normalize_manifest(raw: Any, *, library_root: Path | None = None) -> dict[st
         backend_raw = voice_raw.get("backend")
         if backend_raw is not None:
             if not isinstance(backend_raw, str) or not backend_raw.strip():
-                raise ManifestError("voice.backend must be a non-empty string (edge or ethan)")
+                raise ManifestError("voice.backend must be a non-empty string (edge-tts or ethan-tts)")
             if backend_raw.strip().lower().replace("_", "-") not in {"edge", "edge-tts", "ethan", "ethan-tts", "local"}:
                 raise ManifestError("voice.backend must be edge or ethan")
             voice["backend"] = backend_raw.strip()

@@ -35,9 +35,9 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| `backend` | `edge`（默认）/ `ethan`。不填则读 `~/.ethan/config.yaml` 的 `tts.backend`，再读 `ETHAN_TTS_BACKEND` |
-| `ethan_voice` | `ethan` 后端的本地音色（id 或名称，如 `preset:Vivian`、`老凌的声音`）；不填则读配置里的 `tts.voice` |
-| `instruct` | `ethan` 后端的语气指令（如「轻快一点」），edge 后端忽略 |
+| `backend` | `edge-tts`（默认）/ `ethan-tts`。不填则读 `~/.ethan/config.yaml` 的 `tts.backend`，再读 `ETHAN_TTS_BACKEND` |
+| `ethan_voice` | `ethan-tts` 后端的本地音色（id 或名称，如 `preset:Vivian`、`老凌的声音`）；不填则读配置里的 `tts.voice` |
+| `instruct` | `ethan-tts` 后端的语气指令（如「轻快一点」），`edge-tts` 后端忽略 |
 
 `rate` 在两个后端都生效：edge 直接传给服务，ethan 换算成保音高的语速倍率（`+10%` → `1.1×`）。
 `volume` / `pitch` 只在 edge 后端生效；ethan 后端需要的话用 `instruct` 或后处理。

@@ -127,6 +127,9 @@ Agent Loop 本身不感知 Skill 的存在 — 它只看到一个更丰富的 sy
 | `qcc` | 企查查\|qcc\|工商信息\|股东\|实控人\|失信\|被执行\|尽调\|招投标查询\|企业画像 | 企查查智能体数据平台（agent.qcc.com）实时企业数据：工商/风险/知产/经营/董监高/法规/司法案例/标讯。`qcc.py` 零依赖直连 MCP（tools/list 发现工具、tools/call 查询），鉴权读 `~/.ethan/.secrets/qcc-api-key`；对带 searchKey 的查询自动文件缓存到 `~/.ethan/data/qcc/<公司名>/<tool>_<日期>.md`，30 天过期自动重查（接口按积分计费且同主体每自然月有上限）。企业事实类问题禁用模型记忆作答，走本技能 |
 | `tab-declutter` | 整理tab\|整理 tab\|整理标签页\|整理 标签页\|整理浏览器\|tab整理\|tab 整理\|清理tab\|清理 tab\|tab分组\|tab 分组\|标签页整理\|整理一下标签页\|declutter tab | 轻量整理本机 Chrome 的 tab：去重复 → 清无用 → 按业务主题分组。全程走浏览器扩展的 `browser_tab(action="organize")`，**通常 2 次工具调用**跑完（`user_list` 拉清单 + `organize` 打包执行）；若 `user_list` 标记 `truncated=true`，先通过返回的 `path` 用 `file_read` 按行分页读完，落盘失败则不能根据预览做全量整理。关键约定：组名带 `🦊 ` 前缀 + 真实业务名（不是类型名）、每组至少 2 个 tab（单 tab 组用 `ungroup_all` 按 groupId 解散）、飞书文档必须下沉到业务主题而非按站点归类、整理后自动折叠 TabGroup（跳过含活跃 tab 的那组）。关闭清单**执行后**随汇报呈现，不中途征询。与 `use-browser` 分工：后者只管单 tab 常规操作，批量整理/清理/分组一律走本技能（trigger「浏览器」会同时命中两者，规则不得互相打架） |
 
+> `article-to-video` 和 `book-audio-digest` 的配音后端可配置（默认 Edge TTS，可切本机 `ethan-tts`），
+> 配置项、临时切换方式和常见问题见 [语音合成（TTS）配置](./tts.md)。
+
 ### 浏览器自动化：agent-browser vs dev-browser
 
 两者都是「Skill 文档教 agent 怎么 shell 调一个外部 CLI」的模式（与 `lark-cli`、`deepwiki` 同构），**不进 `pyproject.toml` 依赖**——`pip install` 体积和启动速度不受影响。CLI 二进制由用户按需 `brew`/`npm` 安装，内置浏览器首次用时才下载（懒加载）。两个 SKILL.md 都写了「前置检查 → 缺 CLI 才装 → 缺浏览器才下载」的兜底引导。

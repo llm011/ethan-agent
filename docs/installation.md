@@ -303,7 +303,7 @@ launchd 服务再手动 `ethan serve`。
 
 ```
 ~/.ethan/
-├── config.yaml          # 主配置（Provider、模型、路由参数）
+├── config.yaml          # 主配置（Provider、模型、路由参数、TTS 后端等）
 ├── system/
 │   ├── identity.md      # Agent 身份设定
 │   ├── soul.md          # 行为原则
@@ -322,6 +322,9 @@ launchd 服务再手动 `ethan serve`。
 ```
 
 Docker 部署时，此目录通过 named volume `ethan-data` 挂载到容器内的 `/root/.ethan`，数据在容器重建后仍然保留。
+
+`config.yaml` 的常见可配置段：`providers`（模型 Provider）、`defaults`（默认模型等）、`tools`（工具）、
+`tts`（配音后端，默认 Edge TTS，可切本机 ethan-tts）。TTS 怎么配见 [语音合成（TTS）配置](./tts.md)。
 
 ---
 

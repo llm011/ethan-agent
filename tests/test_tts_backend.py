@@ -28,7 +28,7 @@ def _write_config(tmp_path, body: str) -> Path:
 def test_default_backend_is_edge():
     config = tts.resolve_tts_config({"name": "zh-CN-YunxiNeural"}, config_path=Path("/nonexistent"), env={})
 
-    assert config.backend == "edge"
+    assert config.backend == tts.BACKEND_EDGE
     assert config.source == "default"
     assert config.cache_signature()["name"] == "zh-CN-YunxiNeural"
 
@@ -42,7 +42,7 @@ def test_config_yaml_selects_ethan_and_voice(tmp_path, monkeypatch):
 
     config = tts.resolve_tts_config({"name": "zh-CN-YunxiNeural"}, config_path=path, env={})
 
-    assert config.backend == "ethan"
+    assert config.backend == tts.BACKEND_ETHAN
     assert config.source == "config"
     assert config.ethan_voice == "preset:Serena"
     assert config.ethan_instruct == "温柔一点"
@@ -56,7 +56,7 @@ def test_manifest_backend_overrides_config(tmp_path, monkeypatch):
 
     config = tts.resolve_tts_config({"backend": "edge", "name": "zh-CN-XiaoyiNeural"}, config_path=path, env={})
 
-    assert config.backend == "edge"
+    assert config.backend == tts.BACKEND_EDGE
     assert config.source == "manifest"
 
 
@@ -64,7 +64,7 @@ def test_explicit_argument_wins(tmp_path):
     path = _write_config(tmp_path, "tts:\n  backend: ethan\n")
     config = tts.resolve_tts_config({}, backend="edge", config_path=path, env={})
 
-    assert config.backend == "edge"
+    assert config.backend == tts.BACKEND_EDGE
     assert config.source == "argument"
 
 
@@ -73,7 +73,7 @@ def test_env_var_is_used_before_default(tmp_path):
         {}, config_path=tmp_path / "missing.yaml", env={"ETHAN_TTS_BACKEND": "ethan"}
     )
 
-    assert config.backend == "ethan"
+    assert config.backend == tts.BACKEND_ETHAN
     assert config.source == "env"
 
 
@@ -82,7 +82,7 @@ def test_unknown_backend_warns_and_falls_back_to_edge(tmp_path):
 
     config = tts.resolve_tts_config({}, config_path=path, env={})
 
-    assert config.backend == "edge"
+    assert config.backend == tts.BACKEND_EDGE
     assert any("azure" in warning for warning in config.warnings)
 
 
@@ -95,7 +95,7 @@ def test_missing_ethan_command_fails_fast(tmp_path, monkeypatch):
 
     # validate 路径不该因为本机没装就报错，只给 warning。
     config = tts.resolve_tts_config({}, config_path=path, env={}, check_command=False)
-    assert config.backend == "ethan"
+    assert config.backend == tts.BACKEND_ETHAN
     assert any("找不到命令" in warning for warning in config.warnings)
 
 
@@ -182,7 +182,7 @@ def test_ethan_backend_uses_wav_suffix_and_autostart_flag(tmp_path, monkeypatch)
 
     config = tts.resolve_tts_config({}, config_path=path, env={})
 
-    assert config.backend == "ethan"
+    assert config.backend == tts.BACKEND_ETHAN
     assert config.ethan_autostart is False
     assert config.media_suffix == ".wav"
 
@@ -190,7 +190,7 @@ def test_ethan_backend_uses_wav_suffix_and_autostart_flag(tmp_path, monkeypatch)
 def test_ethan_say_builds_expected_command(tmp_path, monkeypatch):
     """命令拼装回归：音色、语速、超时与 --no-autostart 都要传到位。"""
     config = tts.TtsConfig(
-        backend="ethan", ethan_voice="preset:Serena", ethan_instruct="轻快一点",
+        backend=tts.BACKEND_ETHAN, ethan_voice="preset:Serena", ethan_instruct="轻快一点",
         ethan_autostart=False, rate="+10%", ethan_timeout_sec=42.0,
     )
     captured: dict = {}
@@ -219,3 +219,26 @@ def test_ethan_say_builds_expected_command(tmp_path, monkeypatch):
     assert command[command.index("--instruct") + 1] == "轻快一点"
     assert command[command.index("--speed") + 1] == "1.10"
     assert captured["timeout"] == 42.0
+
+
+def test_short_aliases_normalize_to_canonical_names(tmp_path, monkeypatch):
+    """`edge` / `ethan` 是兼容别名，但对外一律回显规范名 `edge-tts` / `ethan-tts`。"""
+    monkeypatch.setattr(tts.shutil, "which", lambda name: "/usr/local/bin/ethan-tts")
+
+    assert tts.resolve_tts_config({}, backend="edge", config_path=tmp_path / "none.yaml", env={}).backend \
+        == tts.BACKEND_EDGE
+    assert tts.resolve_tts_config({}, backend="ethan", config_path=tmp_path / "none.yaml", env={}).backend \
+        == tts.BACKEND_ETHAN
+    # 大小写、下划线、无连字符等写法都要归一到规范名
+    for alias in ("EDGE-TTS", "Edge_TTS", "edgetts"):
+        assert tts.resolve_tts_config({}, backend=alias, config_path=tmp_path / "none.yaml", env={}).backend \
+            == tts.BACKEND_EDGE
+    for alias in ("ETHAN-TTS", "Ethan_TTS", "ethantts", "local"):
+        assert tts.resolve_tts_config({}, backend=alias, config_path=tmp_path / "none.yaml", env={}).backend \
+            == tts.BACKEND_ETHAN
+
+
+def test_canonical_names_are_the_documented_ones():
+    """规范名必须带 -tts 后缀（与包名一致），别被误改回简写。"""
+    assert tts.DEFAULT_BACKEND == "edge-tts"
+    assert set(tts.BACKENDS) == {"edge-tts", "ethan-tts"}

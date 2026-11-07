@@ -52,13 +52,13 @@ class ServerConfig(BaseModel):
 class TtsConfig(BaseModel):
     """媒体技能（article-to-video / book-audio-digest）的 TTS 后端配置。
 
-    默认 edge-tts（在线）；backend=ethan 时改用本机安装的 ethan-tts CLI。
+    默认 edge-tts（在线）；backend=ethan-tts 时改用本机安装的 ethan-tts CLI。
     加进 Config 模型是为了让 config.yaml 的 tts: 段能随 save_config 往返保存——
     pydantic 会忽略模型外的顶层字段，不加这段的话用户手写的 tts 配置会在下一次
     设置保存时被静默丢掉。
     """
 
-    backend: str = "edge"  # edge | ethan
+    backend: str = "edge-tts"  # edge-tts | ethan-tts（edge / ethan 为兼容别名）
     voice: str = ""  # ethan 后端音色（id 或名称，如 preset:Vivian）
     instruct: str = ""  # ethan 后端语气指令
     base_url: str = ""  # ethan-tts 服务地址，空=用 CLI 默认 127.0.0.1:8765

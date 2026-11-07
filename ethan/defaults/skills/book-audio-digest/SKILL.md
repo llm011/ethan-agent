@@ -68,7 +68,7 @@ nohup env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
 
 # 本地 ethan-tts 后端（不联网、不注入 edge-tts；音色用 --backend/配置里的 tts.voice）
 nohup python3 ~/.ethan/skills/book-audio-digest/scripts/audio_pipeline.py run \
-  --manifest "$PROJECT/manifest.json" --output-dir "$PROJECT" --backend ethan \
+  --manifest "$PROJECT/manifest.json" --output-dir "$PROJECT" --backend ethan-tts \
   > "$PROJECT/render.log" 2>&1 &
 ```
 

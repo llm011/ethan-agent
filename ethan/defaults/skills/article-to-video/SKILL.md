@@ -96,7 +96,7 @@ nohup uv run --isolated --no-project --with 'edge-tts>=7,<8' python \
 
 # 本地 ethan-tts 后端：不需要 --with edge-tts，直接跑
 nohup python3 ~/.ethan/skills/article-to-video/scripts/video_pipeline.py run \
-  --manifest "$PROJECT/manifest.json" --output-dir "$PROJECT" --backend ethan \
+  --manifest "$PROJECT/manifest.json" --output-dir "$PROJECT" --backend ethan-tts \
   > "$PROJECT/render.log" 2>&1 &
 
 RENDER_PID=$!

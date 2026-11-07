@@ -8,17 +8,17 @@
 
 按优先级从高到低，第一个命中的生效：
 
-1. 命令行 `--backend edge|ethan`（`run` 和 `validate` 都支持）
+1. 命令行 `--backend edge-tts|ethan-tts`（`run` 和 `validate` 都支持；`edge` / `ethan` 简写也可）
 2. manifest 里的 `voice.backend`
 3. `~/.ethan/config.yaml` 的 `tts.backend`（`ETHAN_DATA_DIR` 生效时读该目录）
 4. 环境变量 `ETHAN_TTS_BACKEND`
-5. 内置默认 `edge`
+5. 内置默认 `edge-tts`
 
 ## 配置（config.yaml）
 
 ```yaml
 tts:
-  backend: ethan          # edge | ethan
+  backend: ethan-tts      # edge-tts | ethan-tts
   voice: preset:Vivian    # ethan 音色：id 或名称，见 ethan-tts voices list
   instruct: 轻快一点       # 可选，语气指令（仅 ethan）
   base_url: ""            # 可选，ethan-tts 服务地址，空=CLI 默认 127.0.0.1:8765
@@ -28,10 +28,13 @@ tts:
 
 `tts` 段已加入 `ethan/core/config.py` 的 `Config` 模型，所以 Web/Desktop 设置页保存配置时不会把它丢掉。
 
+面向用户的完整配置说明（安装步骤、音色怎么查、常见问题）在仓库 `docs/tts.md`，
+文档站「功能模块 → 语音合成 (TTS)」。
+
 环境变量兜底（适合临时验证）：
 
 ```bash
-ETHAN_TTS_BACKEND=ethan ETHAN_TTS_VOICE=preset:Serena \
+ETHAN_TTS_BACKEND=ethan-tts ETHAN_TTS_VOICE=preset:Serena \
   python3 ~/.ethan/skills/book-audio-digest/scripts/audio_pipeline.py run ...
 ```
 
@@ -65,4 +68,4 @@ ETHAN_TTS_BACKEND=ethan ETHAN_TTS_VOICE=preset:Serena \
 | `找不到命令 'ethan-tts'` | 先装本地工具：`cd <ethan-tts 仓库> && uv tool install --python 3.12 --editable .` |
 | 合成超时 | 确认本地服务在跑（`ethan-tts status`）、模型已加载；长文本调大 `tts.timeout_sec` |
 | 字幕整体偏移 | 该段没有明显句间停顿，属于已知限制；可把长句拆成多句让静音检测有落点 |
-| 想临时切回在线 | `--backend edge` 或把 `tts.backend` 改回 `edge` |
+| 想临时切回在线 | `--backend edge-tts` 或把 `tts.backend` 改回 `edge-tts` |

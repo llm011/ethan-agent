@@ -39,8 +39,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-DEFAULT_BACKEND = "edge"
-BACKENDS = ("edge", "ethan")
+# 规范名带 -tts 后缀，与包名一致（`pip install edge-tts` / `ethan-tts` CLI）。
+# `edge` / `ethan` 作为简写别名继续接受，但落盘与回显一律用规范名。
+BACKEND_EDGE = "edge-tts"
+BACKEND_ETHAN = "ethan-tts"
+DEFAULT_BACKEND = BACKEND_EDGE
+BACKENDS = (BACKEND_EDGE, BACKEND_ETHAN)
 CONFIG_SECTION = "tts"
 ENV_BACKEND = "ETHAN_TTS_BACKEND"
 ENV_DATA_DIR = "ETHAN_DATA_DIR"
@@ -85,16 +89,16 @@ class TtsConfig:
 
     def cache_signature(self) -> dict[str, Any]:
         """进缓存键的稳定签名：换后端/换音色必须重合成，不能复用旧音频。"""
-        if self.backend == "ethan":
+        if self.backend == BACKEND_ETHAN:
             return {
-                "backend": "ethan",
+                "backend": BACKEND_ETHAN,
                 "voice": self.ethan_voice,
                 "instruct": self.ethan_instruct,
                 "rate": self.rate,
                 "base_url": self.ethan_base_url,
             }
         return {
-            "backend": "edge",
+            "backend": BACKEND_EDGE,
             "name": self.voice_name,
             "rate": self.rate,
             "volume": self.volume,
@@ -102,13 +106,13 @@ class TtsConfig:
         }
 
     def describe(self) -> str:
-        if self.backend == "ethan":
+        if self.backend == BACKEND_ETHAN:
             return f"ethan-tts（{self.ethan_voice}）"
         return f"edge-tts（{self.voice_name}）"
 
     @property
     def media_suffix(self) -> str:
-        return ".wav" if self.backend == "ethan" else ".mp3"
+        return ".wav" if self.backend == BACKEND_ETHAN else ".mp3"
 
 
 # ---------------------------------------------------------------------------
@@ -169,13 +173,15 @@ def load_tts_section(path: Path | None = None) -> dict[str, str]:
 
 
 _BACKEND_ALIASES = {
-    "edge": "edge",
-    "edge-tts": "edge",
-    "edgetts": "edge",
-    "ethan": "ethan",
-    "ethan-tts": "ethan",
-    "ethantts": "ethan",
-    "local": "ethan",
+    # 规范名
+    "edge-tts": BACKEND_EDGE,
+    "ethan-tts": BACKEND_ETHAN,
+    # 简写/历史写法，继续接受
+    "edge": BACKEND_EDGE,
+    "edgetts": BACKEND_EDGE,
+    "ethan": BACKEND_ETHAN,
+    "ethantts": BACKEND_ETHAN,
+    "local": BACKEND_ETHAN,
 }
 
 
@@ -189,7 +195,9 @@ def _normalize_backend(value: str, *, origin: str, warnings: list[str]) -> str |
     normalized = value.strip().lower().replace("_", "-")
     resolved = _BACKEND_ALIASES.get(normalized)
     if resolved is None:
-        warnings.append(f"未知的 TTS 后端 {value!r}（来自 {origin}），已忽略；可选 edge / ethan")
+        warnings.append(
+            f"未知的 TTS 后端 {value!r}（来自 {origin}），已忽略；可选 {' / '.join(BACKENDS)}"
+        )
     return resolved
 
 
@@ -272,7 +280,7 @@ def resolve_tts_config(
         warnings=warnings,
     )
 
-    if config.backend == "ethan":
+    if config.backend == BACKEND_ETHAN:
         if shutil.which(config.ethan_command) is None:
             message = (
                 f"TTS 后端配置为 ethan（来自 {source}），但本机找不到命令 {config.ethan_command!r}；"
@@ -624,7 +632,7 @@ async def synthesize(text: str, config: TtsConfig, media_path: Path, srt_path: P
 
     调用方负责重试、原子替换与并发去重；这里失败一律抛 TtsError。
     """
-    if config.backend == "ethan":
+    if config.backend == BACKEND_ETHAN:
         # CLI 是阻塞子进程，丢到线程里，保持与 edge 一致的并发语义。
         await asyncio.to_thread(_ethan_synthesize, text, config, media_path, srt_path)
         return
@@ -638,7 +646,7 @@ def synthesize_sync(text: str, config: TtsConfig, media_path: Path, srt_path: Pa
 
 def list_ethan_voices(config: TtsConfig) -> list[dict[str, Any]]:
     """列出 ethan-tts 可用音色（edge 后端返回空列表）。"""
-    if config.backend != "ethan":
+    if config.backend != BACKEND_ETHAN:
         return []
     command = [config.ethan_command, "voices", "list", "--json"]
     if not config.ethan_autostart:
@@ -676,6 +684,8 @@ def ensure_silence_file(work_dir: Path, gap_ms: int, *, suffix: str = ".mp3", sa
 
 
 __all__ = [
+    "BACKEND_EDGE",
+    "BACKEND_ETHAN",
     "BACKENDS",
     "DEFAULT_BACKEND",
     "DEFAULT_ETHAN_VOICE",

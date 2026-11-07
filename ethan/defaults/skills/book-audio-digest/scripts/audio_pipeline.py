@@ -20,8 +20,8 @@
 TTS 后端默认 edge-tts（用 uv 临时注入，不进主安装包）：
   uv run --isolated --no-project --with 'edge-tts>=7,<8' python audio_pipeline.py run ...
 本地后端 ethan-tts（Qwen3-TTS CLI，无需 edge-tts）：
-  在 ~/.ethan/config.yaml 写 tts: {backend: ethan, voice: preset:Vivian}
-  或 --backend ethan，或 ETHAN_TTS_BACKEND=ethan。
+  在 ~/.ethan/config.yaml 写 tts: {backend: ethan-tts, voice: preset:Vivian}
+  或 --backend ethan-tts，或 ETHAN_TTS_BACKEND=ethan-tts。
 系统依赖 FFmpeg（拼接、静音生成、时长探测）。
 """
 
@@ -140,9 +140,9 @@ def normalize_manifest(raw: Any) -> dict[str, Any]:
     backend_raw = voice_raw.get("backend")
     if backend_raw is not None:
         if not isinstance(backend_raw, str) or not backend_raw.strip():
-            raise ManifestError("voice.backend must be a non-empty string (edge or ethan)")
-        if backend_raw.strip().lower().replace("_", "-") not in {"edge", "edge-tts", "ethan", "ethan-tts", "local"}:
-            raise ManifestError("voice.backend must be edge or ethan")
+            raise ManifestError("voice.backend must be a non-empty string (edge-tts or ethan-tts)")
+        if backend_raw.strip().lower().replace("_", "-") not in {"edge-tts", "ethan-tts", "edge", "ethan", "local"}:
+            raise ManifestError("voice.backend must be edge-tts or ethan-tts")
         voice["backend"] = backend_raw.strip()
     ethan_voice_raw = voice_raw.get("ethan_voice")
     if ethan_voice_raw is not None:
