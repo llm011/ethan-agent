@@ -229,6 +229,7 @@ class TestServeMainForceFlag:
              patch("ethan.interface.api.run_server") as mock_run:
             result = runner.invoke(cli_mod.app, ["serve", "--port", "9999", "--force"])
 
-        # 不应因冲突而 exit 1；run_server 应被调用
+        # 不应因冲突而 exit 1；run_server 应被调用，且 force 要透传
+        # （run_server 内部还有一道同 sessions.db 守卫，不透传等于 --force 失效）
         assert result.exit_code == 0
-        mock_run.assert_called_once_with(host="0.0.0.0", port=9999)
+        mock_run.assert_called_once_with(host="0.0.0.0", port=9999, force=True)

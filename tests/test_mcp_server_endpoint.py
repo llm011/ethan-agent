@@ -50,6 +50,14 @@ def client(monkeypatch):
 
     import ethan.interface.api as api_mod
 
+    # 默认清空 mcp_api_key：这几个用例测的是「MCP 端点能通」，不是鉴权。
+    # 开发者本机 config.yaml 若配了 network.mcp_api_key，鉴权中间件会把所有请求
+    # 挡成 401，用例全部误报。鉴权本身由 test_auth_middleware_401_* 单独覆盖
+    # （那个用例自己 monkeypatch 出 key）。
+    from ethan.core.config import get_config
+
+    monkeypatch.setattr(get_config().network, "mcp_api_key", "", raising=False)
+
     # 重建 MCP 子应用：session manager 的 .run() 每实例只能调一次，跨用例复用会抛
     # "run() can only be called once per instance"。这里换成新的 app 并同步 _MCP_APP，
     # 保证「mount 出去的」与「lifespan 驱动的」仍是同一个实例 —— 这正是被测的契约。

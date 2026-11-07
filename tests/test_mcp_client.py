@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import threading
 import time
 
@@ -20,8 +21,17 @@ from mcp.server.fastmcp import FastMCP
 from ethan.core.config import MCPConfig, MCPServerConfig, ToolsConfig
 from ethan.tools.mcp_client import MCPManager
 
-PORT = 8765
-BASE = f"http://127.0.0.1:{PORT}"
+
+def _free_port() -> int:
+    """要一个空闲端口。
+
+    不要写死端口：8765 正好是本地 ethan-tts 服务的默认端口，写死会让
+    `uvicorn` 绑定失败（`[Errno 48] address already in use`），测试拿到空
+    工具列表后误报成「MCP 连接失败」。绑定 0 让内核分配，再立刻释放。
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 captured_headers: dict[str, str] = {}
 
@@ -55,8 +65,10 @@ def _build_test_server():
 
 @pytest.fixture()
 def http_server():
+    """起一个真实的 streamable-http MCP server，返回 (server, base_url)。"""
     app = _build_test_server()
-    config_ = uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="error")
+    port = _free_port()
+    config_ = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(config_)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -64,8 +76,11 @@ def http_server():
         if server.started:
             break
         time.sleep(0.05)
+    if not server.started:
+        raise RuntimeError("测试用 MCP server 启动失败（端口可能被占用）")
     try:
-        yield server
+        # FastMCP 的 streamable-http 路由挂在 /mcp 上，客户端 URL 必须带这个后缀。
+        yield server, f"http://127.0.0.1:{port}/mcp"
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -97,7 +112,8 @@ def test_no_config_returns_empty():
 
 
 def test_http_connect_and_tool_call(http_server):
-    cfg = MCPServerConfig(name="dida365", url=BASE, bearer_token="test-token")
+    _server, base = http_server
+    cfg = MCPServerConfig(name="dida365", url=base, bearer_token="test-token")
     mgr = MCPManager()
     mgr._configured_servers = lambda: [cfg]  # noqa: E731
     try:
@@ -126,14 +142,16 @@ def test_http_connect_and_tool_call(http_server):
 
 
 def test_bad_server_skipped_not_reported(http_server):
+    _server, base = http_server
     bad = MCPServerConfig(name="bad", url="http://127.0.0.1:1")
-    good = MCPServerConfig(name="dida365", url=BASE)
+    good = MCPServerConfig(name="dida365", url=base)
     mgr = MCPManager()
     mgr._configured_servers = lambda: [bad, good]  # noqa: E731
     try:
         tools = mgr.get_tools()
-        # 坏的 server 被跳过，好的 server 工具正常注册
-        assert [t.name for t in tools] == ["dida365_add_task", "dida365_get_tasks"]
+        # 坏的 server 被跳过，好的 server 工具正常注册。
+        # 顺序取决于服务端 list_tools 的返回顺序，不能断言固定次序。
+        assert sorted(t.name for t in tools) == ["dida365_add_task", "dida365_get_tasks"]
     finally:
         mgr.disconnect_all()
         _stop_loop(mgr)
