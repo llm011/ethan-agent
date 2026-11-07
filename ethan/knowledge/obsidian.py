@@ -11,9 +11,20 @@ class ObsidianKnowledgeBase(KnowledgeBase):
 
     def __init__(self, vault_path: Path, folder: str = ".", scene: str = ""):
         self._vault = vault_path
-        self._folder = folder
-        self._dir = vault_path / folder
         self._scene = scene
+        # 归一化 folder：剥掉任何重复的 scene 首段。
+        # registry 已保证 folder 只含一层 scene（"./work" → "work"），但历史配置
+        # （obsidian_folder="work" + scene="work"）会拼出 work/work，这里做最终兜底，
+        # 确保 self._dir 永远不落在 <vault>/<scene>/<scene>。
+        raw_folder = str(folder or ".").strip().strip("/")
+        parts = [p for p in raw_folder.split("/") if p]
+        scene_head = (scene or "").strip("/")
+        # 只在「剥完还能剩下内容」时剥，保证至少保留一层目录——
+        # folder="work" + scene="work" 是合法目标（vault/work），不能剥成 "."。
+        while scene_head and len(parts) > 1 and parts[0] == scene_head:
+            parts = parts[1:]
+        self._folder = "/".join(parts) if parts else "."
+        self._dir = vault_path / self._folder
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -27,7 +38,8 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         """一次性修复 scene 前缀重复导致的 double-nested 目录（如 work/work/coze → work/coze）。
 
         安全策略：
-        - 同名文件/目录跳过并告警，绝不覆盖。
+        - 绝不覆盖已有文件。同名且内容相同 → 删重复项；内容不同 → 保留两份，
+          旧文件改名为 `<stem>-重复-<mtime日期>.md` 后搬入，避免数据丢失。
         - dest 是文件而 child 是目录时跳过（避免 NotADirectoryError）。
         - 整体包 try/except，迁移失败不影响知识库初始化。
         """
@@ -36,30 +48,16 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         dup_dir = self._dir / self._scene
         if not dup_dir.is_dir():
             return
+        # 防御：若 self._dir 本身就是 <vault>/<scene>（正常情况），
+        # 绝不能在 <vault>/<scene> 下再建/搬 <scene> 子目录——那正是 bug 的产物。
         try:
-            for child in list(dup_dir.iterdir()):
-                dest = self._dir / child.name
-                if dest.exists():
-                    # dest 已是文件但 child 是目录，跳过避免 NotADirectoryError
-                    if dest.is_file() and child.is_dir():
-                        print(f"[knowledge] skip migrate {child} -> {dest}: dest is file, child is dir")
-                        continue
-                    if child.is_dir():
-                        for f in child.iterdir():
-                            target = dest / f.name
-                            if target.exists():
-                                print(f"[knowledge] skip migrate {f} -> {target}: dest exists")
-                                continue
-                            f.rename(target)
-                        # 只在子目录已空时删除
-                        try:
-                            child.rmdir()
-                        except OSError:
-                            pass
-                    else:
-                        print(f"[knowledge] skip migrate {child} -> {dest}: dest exists")
-                else:
-                    child.rename(dest)
+            if self._dir.resolve() == (self._vault / self._scene).resolve():
+                print(f"[knowledge] refuse to migrate scene-named dir under scene root: {dup_dir}")
+                return
+        except OSError:
+            pass
+        try:
+            self._migrate_children(dup_dir, self._dir)
             # 仅当 dup_dir 真正空了才删
             try:
                 if not any(dup_dir.iterdir()):
@@ -68,6 +66,51 @@ class ObsidianKnowledgeBase(KnowledgeBase):
                 pass
         except Exception as e:
             print(f"[knowledge] _migrate_double_nested failed: {e}")
+
+    def _migrate_children(self, src: Path, dest_dir: Path) -> None:
+        """把 src 下的条目搬到 dest_dir，冲突时按内容决定去重或改名保留。"""
+        for child in list(src.iterdir()):
+            dest = dest_dir / child.name
+            if not dest.exists():
+                child.rename(dest)
+                continue
+            if child.is_dir():
+                if dest.is_file():
+                    print(f"[knowledge] skip migrate {child} -> {dest}: dest is file, child is dir")
+                    continue
+                self._migrate_children(child, dest)
+                try:
+                    if not any(child.iterdir()):
+                        child.rmdir()
+                except OSError:
+                    pass
+                continue
+            # dest 是文件、child 也是文件 → 比对内容
+            if self._same_content(child, dest):
+                child.unlink()
+                print(f"[knowledge] dedup {child} (identical to {dest})")
+            else:
+                try:
+                    from datetime import datetime
+                    stamp = datetime.fromtimestamp(child.stat().st_mtime).strftime("%Y%m%d")
+                except OSError:
+                    stamp = "old"
+                renamed = dest_dir / f"{child.stem}-重复-{stamp}{child.suffix}"
+                i = 1
+                while renamed.exists():
+                    renamed = dest_dir / f"{child.stem}-重复-{stamp}-{i}{child.suffix}"
+                    i += 1
+                child.rename(renamed)
+                print(f"[knowledge] moved {child} -> {renamed} (content differs, kept both)")
+
+    @staticmethod
+    def _same_content(a: Path, b: Path) -> bool:
+        try:
+            if a.stat().st_size != b.stat().st_size:
+                return False
+            return a.read_bytes() == b.read_bytes()
+        except OSError:
+            return False
 
     def _get_vector_store(self):
         if self._vector_store is None:
@@ -78,19 +121,54 @@ class ObsidianKnowledgeBase(KnowledgeBase):
     # ── Write ──────────────────────────────────────────────────────────────
 
     def _strip_scene_prefix(self, tags: list[str] | None) -> list[str] | None:
-        """剥掉 tags[0] 开头的 scene 前缀，防止路径重复拼接。
+        """剥掉 tags[0] 开头重复的 scene 前缀，防止路径重复拼接。
 
         scene 已由 registry 拼进 self._dir，若 tags[0] 也带 scene 前缀
-        （如 scene="work" + tags=["work/coze"]），会导致多套一层 work/work/。
+        （如 scene="work" + tags=["work/coze"] → work/work/coze），会多套一层。
+        循环剥离以兼容双层重复（"work/work/coze" → "coze"）和直接等于 scene
+        （tags=["work"] → 落 scene 根目录）的情况。
         """
         if not tags or not self._scene:
             return tags
-        prefix = f"{self._scene}/"
-        if tags[0].startswith(prefix):
-            stripped = tags[0][len(prefix):]
-            if stripped:
-                return [stripped, *tags[1:]]
-        return tags
+        scene = self._scene.strip("/")
+        if not scene:
+            return tags
+        head, *rest = tags
+        changed = False
+        while True:
+            text = str(head).strip("/")
+            if text == scene:
+                head, changed = scene, True   # 纯 scene 标签 → 落到 scene 根目录
+                break
+            if text.startswith(f"{scene}/"):
+                head, changed = text[len(scene) + 1:], True
+                continue
+            head = text
+            break
+        if not changed:
+            return tags
+        # 剥没了（tags 只有 "work"）→ 返回 None 表示落 scene 根目录
+        stripped = [head, *rest] if head else rest
+        return stripped or None
+
+    def _normalize_subpath(self, tags: list[str] | None) -> Path | None:
+        """把 tags[0] 清洗为相对 self._dir 的子路径，并禁止越界到 scene 同名目录。
+
+        add() 与 update() 共用：任何情况下都不允许写入 self._dir/<scene>/，
+        否则会重新制造 work/work 嵌套。
+        """
+        if not tags:
+            return None
+        subpath = _safe_subpath(tags[0], self._scene)
+        if subpath is None:
+            return None
+        scene = (self._scene or "").strip("/")
+        # 循环剥掉所有残留的 scene 首段（兼容 "work/work/coze" 这类多层重复）
+        while scene and subpath.parts and subpath.parts[0] == scene:
+            subpath = Path(*subpath.parts[1:]) if len(subpath.parts) > 1 else None
+            if subpath is None:
+                return None
+        return subpath
 
     def add(self, title: str, content: str, tags: list[str] | None = None,
             frontmatter: dict | None = None) -> str:
@@ -100,11 +178,10 @@ class ObsidianKnowledgeBase(KnowledgeBase):
         # 按 tags[0] 分子目录，支持层级标签（如 "coze/prd" → coze/prd/）；
         # sanitize 后为空则落根目录
         target_dir = self._dir
-        if tags:
-            subpath = _safe_subpath(tags[0])
-            if subpath:
-                target_dir = self._dir / subpath
-                target_dir.mkdir(parents=True, exist_ok=True)
+        subpath = self._normalize_subpath(tags)
+        if subpath:
+            target_dir = self._dir / subpath
+            target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / f"{slug}.md"
         i = 1
         while path.exists():
