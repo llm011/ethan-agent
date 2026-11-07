@@ -202,6 +202,27 @@ def test_corrupt_tts_cache_is_rebuilt_atomically(tmp_path, monkeypatch):
     assert not list(cache_dir.glob("*.tmp"))
 
 
+def test_tts_config_error_writes_preflight_status(tmp_path, monkeypatch):
+    """配置错（如 ethan-tts 没装）也要落 run-status.json，否则轮询方看不出是配置问题。"""
+    manifest_path = tmp_path / "input.json"
+    manifest_path.write_text(json.dumps(sample_manifest(), ensure_ascii=False), encoding="utf-8")
+    output_dir = tmp_path / "output"
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("找不到命令 'ethan-tts'")
+
+    monkeypatch.setattr(pipeline.tts_backend, "resolve_tts_config", boom)
+
+    with pytest.raises(RuntimeError, match="找不到命令"):
+        pipeline.run_pipeline(manifest_path, output_dir)
+
+    status = json.loads((output_dir / "run-status.json").read_text(encoding="utf-8"))
+    assert status["status"] == "error"
+    assert status["stage"] == "preflight"
+    assert "找不到命令" in status["error"]
+    assert status["runId"]
+
+
 def test_failed_rerun_archives_previous_published_outputs(tmp_path, monkeypatch):
     manifest_path = tmp_path / "input.json"
     manifest_path.write_text(json.dumps(sample_manifest(), ensure_ascii=False), encoding="utf-8")

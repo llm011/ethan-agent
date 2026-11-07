@@ -201,6 +201,26 @@ def _normalize_backend(value: str, *, origin: str, warnings: list[str]) -> str |
     return resolved
 
 
+def _parse_timeout(value: Any, *, default: float = 300.0, warnings: list[str] | None = None) -> float:
+    """解析单次合成超时秒数；0、负数、非数字一律回落到默认值。
+
+    极简 YAML 解析器不转类型，`timeout_sec: 0` 拿到的是字符串 "0"（truthy），
+    直接 float() 会得到 0.0 —— 传给 subprocess 会让每次合成立刻 TimeoutExpired。
+    文档承诺「0 = 用内置默认」，这里兜住。
+    """
+    if value is None or value == "":
+        return default
+    try:
+        seconds = float(str(value).strip())
+    except (TypeError, ValueError):
+        if warnings is not None:
+            warnings.append(f"tts.timeout_sec={value!r} 不是数字，已按默认 {default:.0f}s 处理")
+        return default
+    if seconds <= 0:
+        return default
+    return seconds
+
+
 def _parse_percent(value: str, field_name: str, warnings: list[str]) -> int:
     if isinstance(value, str) and re.fullmatch(r"[+-]?\d+%", value.strip()):
         return int(value.strip().rstrip("%"))
@@ -266,8 +286,9 @@ def resolve_tts_config(
             section.get("base_url") or environment.get("ETHAN_TTS_URL") or ""
         ).strip(),
         ethan_instruct=str(raw_voice.get("instruct") or section.get("instruct") or "").strip(),
-        ethan_timeout_sec=float(
-            section.get("timeout_sec") or environment.get("ETHAN_TTS_TIMEOUT_SEC") or 300.0
+        ethan_timeout_sec=_parse_timeout(
+            section.get("timeout_sec") or environment.get("ETHAN_TTS_TIMEOUT_SEC"),
+            warnings=warnings,
         ),
         ethan_autostart=_parse_bool(
             section.get("autostart") or environment.get("ETHAN_TTS_AUTOSTART"), default=True

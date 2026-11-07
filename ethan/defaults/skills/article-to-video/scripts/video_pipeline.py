@@ -1075,7 +1075,22 @@ def run_pipeline(manifest_path: Path, output_dir: Path, *, backend: str | None =
     run_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
     previous_outputs = _archive_published_outputs(output_dir, run_id)
     status_path = output_dir / "run-status.json"
-    tts_config = tts_backend.resolve_tts_config(manifest["voice"], backend=backend)
+    # 配置错误也要落 run-status.json：否则后台轮询只看到文件不存在，
+    # 分不清「还没开始」和「配置写错了」。与 book 管线的 _fail(stage=preflight) 对齐。
+    try:
+        tts_config = tts_backend.resolve_tts_config(manifest["voice"], backend=backend)
+    except Exception as exc:
+        _write_json_atomic(
+            status_path,
+            {
+                "status": "error",
+                "stage": "preflight",
+                "error": str(exc),
+                "runId": run_id,
+                "previousOutputs": str(previous_outputs) if previous_outputs else None,
+            },
+        )
+        raise
     _write_json_atomic(
         status_path,
         {

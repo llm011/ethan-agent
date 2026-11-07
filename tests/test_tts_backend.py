@@ -242,3 +242,30 @@ def test_canonical_names_are_the_documented_ones():
     """规范名必须带 -tts 后缀（与包名一致），别被误改回简写。"""
     assert tts.DEFAULT_BACKEND == "edge-tts"
     assert set(tts.BACKENDS) == {"edge-tts", "ethan-tts"}
+
+
+def test_timeout_zero_falls_back_to_default(tmp_path, monkeypatch):
+    """`timeout_sec: 0` 文档承诺「用内置默认」，不能真的把 0 传给 subprocess。"""
+    monkeypatch.setattr(tts.shutil, "which", lambda name: "/usr/local/bin/ethan-tts")
+    path = _write_config(tmp_path, "tts:\n  backend: ethan-tts\n  timeout_sec: 0\n")
+
+    config = tts.resolve_tts_config({}, config_path=path, env={})
+
+    assert config.ethan_timeout_sec == 300.0
+
+
+@pytest.mark.parametrize("raw", ["0", "-5", "abc", ""])
+def test_invalid_timeout_falls_back_to_default(tmp_path, monkeypatch, raw):
+    monkeypatch.setattr(tts.shutil, "which", lambda name: "/usr/local/bin/ethan-tts")
+    path = _write_config(tmp_path, f"tts:\n  backend: ethan-tts\n  timeout_sec: {raw}\n")
+
+    config = tts.resolve_tts_config({}, config_path=path, env={})
+
+    assert config.ethan_timeout_sec == 300.0
+
+
+def test_valid_timeout_is_kept(tmp_path, monkeypatch):
+    monkeypatch.setattr(tts.shutil, "which", lambda name: "/usr/local/bin/ethan-tts")
+    path = _write_config(tmp_path, "tts:\n  backend: ethan-tts\n  timeout_sec: 900\n")
+
+    assert tts.resolve_tts_config({}, config_path=path, env={}).ethan_timeout_sec == 900.0
