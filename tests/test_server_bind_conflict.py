@@ -620,7 +620,7 @@ def test_plist_disables_builtin_watchdog():
     from ethan.interface.commands.server import _PLIST_TEMPLATE
 
     content = _PLIST_TEMPLATE.format(
-        ethan_exe="/tmp/x/ethan", bin_dir="/tmp/x", ethan_home="/tmp/x"
+        ethan_exe="/tmp/x/ethan", bin_dir="/tmp/x", user_bin="/tmp/x/bin", ethan_home="/tmp/x"
     )
     data = plistlib.loads(content.encode())
     assert data["EnvironmentVariables"]["ETHAN_NO_WATCHDOG"] == "1"
@@ -634,7 +634,7 @@ def test_plist_has_throttle_interval():
     from ethan.interface.commands.server import _PLIST_TEMPLATE
 
     content = _PLIST_TEMPLATE.format(
-        ethan_exe="/tmp/x/ethan", bin_dir="/tmp/x", ethan_home="/tmp/x"
+        ethan_exe="/tmp/x/ethan", bin_dir="/tmp/x", user_bin="/tmp/x/bin", ethan_home="/tmp/x"
     )
     data = plistlib.loads(content.encode())
     assert data["ThrottleInterval"] >= 10
@@ -651,7 +651,7 @@ def test_plist_raises_fd_limit():
     from ethan.interface.commands.server import _PLIST_TEMPLATE
 
     content = _PLIST_TEMPLATE.format(
-        ethan_exe="/tmp/x/ethan", bin_dir="/tmp/x", ethan_home="/tmp/x"
+        ethan_exe="/tmp/x/ethan", bin_dir="/tmp/x", user_bin="/tmp/x/bin", ethan_home="/tmp/x"
     )
     data = plistlib.loads(content.encode())
     assert data["SoftResourceLimits"]["NumberOfFiles"] >= 8192
