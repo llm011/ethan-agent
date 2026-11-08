@@ -85,6 +85,8 @@ class TtsConfig:
     volume: str = "+0%"
     pitch: str = "+0Hz"
     source: str = "default"
+    # rate 是否来自 config.yaml（而非 manifest）；诊断"改了配置没生效"时用得上。
+    rate_from_config: bool = False
     warnings: list[str] = field(default_factory=list)
 
     def cache_signature(self) -> dict[str, Any]:
@@ -238,6 +240,7 @@ def resolve_tts_config(
     voice: dict[str, Any] | None = None,
     *,
     backend: str | None = None,
+    rate: str | None = None,
     config_path: Path | None = None,
     env: dict[str, str] | None = None,
     check_command: bool = True,
@@ -294,7 +297,13 @@ def resolve_tts_config(
             section.get("autostart") or environment.get("ETHAN_TTS_AUTOSTART"), default=True
         ),
         voice_name=str(raw_voice.get("name") or ""),
-        rate=str(raw_voice.get("rate") or "+0%"),
+        # 语速优先级：--rate > config.yaml 的 tts.rate > manifest 的 voice.rate > +0%。
+        # config 优先是刻意的：定时任务每次由模型生成 manifest，几乎总会带上一句
+        # `"rate": "-5%"`（听书默认语速）。若让 manifest 优先，用户在 config 里
+        # 设的语速会被静默吃掉——和「配了 tts 段却没生效」是同一类坑。
+        # 想对单个项目调语速时，用 --rate 或临时清掉 tts.rate。
+        rate=str(rate or section.get("rate") or raw_voice.get("rate") or "+0%"),
+        rate_from_config=bool(section.get("rate")) and not rate,
         volume=str(raw_voice.get("volume") or "+0%"),
         pitch=str(raw_voice.get("pitch") or "+0Hz"),
         source=source,

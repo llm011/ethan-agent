@@ -97,16 +97,37 @@ python3 audio_pipeline.py validate --manifest /path/to/manifest.json
 | `base_url` | 空 | ethan-tts 服务地址，空=用 CLI 默认 `127.0.0.1:8765`；连远端实例时才需要 |
 | `command` | 空 | ethan-tts 可执行文件路径，空=用 PATH 里的 `ethan-tts` |
 | `timeout_sec` | `0` | 单次合成超时秒数，`0`=内置默认 300 秒；长文本可调大 |
+| `rate` | 空 | 默认语速，`+N%` / `-N%` 写法（如 `+10%`）。空=`跟随 manifest`。**配了会覆盖 manifest 的 `voice.rate`** |
 | `autostart` | `true` | 服务没跑时是否让 CLI 自动在后台拉起 |
 
 ```yaml
-# 完整示例：本地后端 + 指定音色 + 语气 + 放宽超时
+# 完整示例：本地后端 + 指定音色 + 语气 + 语速 + 放宽超时
 tts:
   backend: ethan-tts
-  voice: preset:Serena
+  voice: 老凌的声音
   instruct: 语速平稳，像在讲一件有意思的事
+  rate: +10%
   timeout_sec: 600
   autostart: true
+```
+
+### 语速
+
+`rate` 用 `+N%` / `-N%` 写法，两个后端都认：
+
+- `edge-tts`：直接传给在线服务
+- `ethan-tts`：换算成保音高的倍率（`+10%` → `1.1×`），底层走 ffmpeg `atempo`
+
+**优先级：`--rate` > `config.yaml` 的 `tts.rate` > manifest 的 `voice.rate` > `+0%`**
+
+`config.yaml` 优先于 manifest 是刻意的：定时任务每次由模型生成 manifest，几乎总会
+写上一句 `"rate": "-5%"`。如果让 manifest 优先，你在配置里设的语速会被静默吃掉。
+
+想给**单次任务**换语速，用命令行参数压过全局配置：
+
+```bash
+python3 ~/.ethan/skills/book-audio-digest/scripts/audio_pipeline.py run \
+  --manifest manifest.json --output-dir out --rate +20%
 ```
 
 ---

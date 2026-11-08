@@ -24,7 +24,10 @@ tts:
   base_url: ""            # 可选，ethan-tts 服务地址，空=CLI 默认 127.0.0.1:8765
   command: ""             # 可选，ethan-tts 可执行文件，空=用 PATH 里的 ethan-tts
   timeout_sec: 0          # 可选，单次合成超时，0=默认 300s
+  rate: ""                # 可选，默认语速（+10% / -5%）；配了会覆盖 manifest 的 voice.rate
 ```
+
+语速优先级：`--rate` > `tts.rate`（config.yaml）> `voice.rate`（manifest）> `+0%`。
 
 `tts` 段已加入 `ethan/core/config.py` 的 `Config` 模型，所以 Web/Desktop 设置页保存配置时不会把它丢掉。
 

@@ -1067,7 +1067,9 @@ def enforce_target_duration(manifest: dict[str, Any], timeline: dict[str, Any]) 
         )
 
 
-def run_pipeline(manifest_path: Path, output_dir: Path, *, backend: str | None = None) -> dict[str, Any]:
+def run_pipeline(
+    manifest_path: Path, output_dir: Path, *, backend: str | None = None, rate: str | None = None
+) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
     for warning in manifest.get("warnings", []):
         print(f"WARNING: {warning}", file=sys.stderr)
@@ -1078,7 +1080,7 @@ def run_pipeline(manifest_path: Path, output_dir: Path, *, backend: str | None =
     # 配置错误也要落 run-status.json：否则后台轮询只看到文件不存在，
     # 分不清「还没开始」和「配置写错了」。与 book 管线的 _fail(stage=preflight) 对齐。
     try:
-        tts_config = tts_backend.resolve_tts_config(manifest["voice"], backend=backend)
+        tts_config = tts_backend.resolve_tts_config(manifest["voice"], backend=backend, rate=rate)
     except Exception as exc:
         _write_json_atomic(
             status_path,
@@ -1182,6 +1184,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--output-dir", type=Path, required=True)
     run.add_argument("--backend", choices=list(tts_backend.BACKENDS), help="覆盖 TTS 后端（默认读 config.yaml / manifest）")
+    run.add_argument("--rate", help="覆盖语速（如 +10%% / -5%%），优先级最高")
     return parser
 
 
@@ -1209,7 +1212,8 @@ def main() -> int:
             }
         else:
             result = run_pipeline(
-                args.manifest.resolve(), args.output_dir.expanduser().resolve(), backend=args.backend
+                args.manifest.resolve(), args.output_dir.expanduser().resolve(),
+                backend=args.backend, rate=args.rate,
             )
         print(json.dumps(result, ensure_ascii=False))
         return 0

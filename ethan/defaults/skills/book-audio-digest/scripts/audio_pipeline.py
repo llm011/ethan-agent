@@ -497,7 +497,9 @@ def _clear_moot_outputs(output_dir: Path) -> None:
             leftover.unlink(missing_ok=True)
 
 
-def run_pipeline(manifest_path: Path, output_dir: Path, *, backend: str | None = None) -> dict[str, Any]:
+def run_pipeline(
+    manifest_path: Path, output_dir: Path, *, backend: str | None = None, rate: str | None = None
+) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     status_path = output_dir / "run-status.json"
@@ -540,7 +542,7 @@ def run_pipeline(manifest_path: Path, output_dir: Path, *, backend: str | None =
         return _fail("FFmpeg (ffmpeg + ffprobe) is required for audio assembly", stage)
 
     try:
-        tts_config = tts_backend.resolve_tts_config(manifest["voice"], backend=backend)
+        tts_config = tts_backend.resolve_tts_config(manifest["voice"], backend=backend, rate=rate)
     except Exception as exc:
         return _fail(str(exc), stage)
     suffix = tts_config.media_suffix
@@ -616,6 +618,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--manifest", required=True, type=Path)
     run.add_argument("--output-dir", required=True, type=Path)
     run.add_argument("--backend", choices=list(tts_backend.BACKENDS), help="覆盖 TTS 后端（默认读 config.yaml / manifest）")
+    run.add_argument("--rate", help="覆盖语速（如 +10%% / -5%%），优先级最高")
     return parser
 
 
@@ -639,7 +642,8 @@ def main() -> int:
             }
         else:
             result = run_pipeline(
-                args.manifest.resolve(), args.output_dir.expanduser().resolve(), backend=args.backend
+                args.manifest.resolve(), args.output_dir.expanduser().resolve(),
+                backend=args.backend, rate=args.rate,
             )
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result.get("status") == "ok" else 1
