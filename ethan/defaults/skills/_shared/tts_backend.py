@@ -33,6 +33,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import wave
 from dataclasses import dataclass, field
@@ -85,6 +86,8 @@ class TtsConfig:
     volume: str = "+0%"
     pitch: str = "+0Hz"
     source: str = "default"
+    # rate 是否来自 config.yaml（而非 manifest）；诊断"改了配置没生效"时用得上。
+    rate_from_config: bool = False
     warnings: list[str] = field(default_factory=list)
 
     def cache_signature(self) -> dict[str, Any]:
@@ -224,13 +227,21 @@ def _parse_timeout(value: Any, *, default: float = 300.0, warnings: list[str] | 
 def _parse_percent(value: str, field_name: str, warnings: list[str]) -> int:
     if isinstance(value, str) and re.fullmatch(r"[+-]?\d+%", value.strip()):
         return int(value.strip().rstrip("%"))
+    # field_name 由调用方传入，所以要能表达"这个值是从哪读来的"——
+    # 用户配的是 tts.rate，提示里再写 voice.rate 会让人找错地方。
     warnings.append(f"{field_name}={value!r} 不是 +N% / -N% 形式，已按 +0% 处理")
     return 0
 
 
-def rate_to_speed(rate: str, *, warnings: list[str] | None = None) -> float:
-    """edge-tts 的 +10% 语速 ≈ ethan-tts 的 1.1×（ffmpeg atempo 保音高）。"""
-    percent = _parse_percent(rate, "voice.rate", warnings if warnings is not None else [])
+def rate_to_speed(
+    rate: str, *, warnings: list[str] | None = None, source: str = "voice.rate"
+) -> float:
+    """edge-tts 的 +10% 语速 ≈ ethan-tts 的 1.1×（ffmpeg atempo 保音高）。
+
+    source 只影响告警文案：值来自 config.yaml 的 tts.rate 时传 "tts.rate"，
+    免得用户照着 "voice.rate" 去 manifest 里找。
+    """
+    percent = _parse_percent(rate, source, warnings if warnings is not None else [])
     return max(0.5, min(2.0, round(1.0 + percent / 100.0, 3)))
 
 
@@ -238,6 +249,7 @@ def resolve_tts_config(
     voice: dict[str, Any] | None = None,
     *,
     backend: str | None = None,
+    rate: str | None = None,
     config_path: Path | None = None,
     env: dict[str, str] | None = None,
     check_command: bool = True,
@@ -294,7 +306,13 @@ def resolve_tts_config(
             section.get("autostart") or environment.get("ETHAN_TTS_AUTOSTART"), default=True
         ),
         voice_name=str(raw_voice.get("name") or ""),
-        rate=str(raw_voice.get("rate") or "+0%"),
+        # 语速优先级：--rate > config.yaml 的 tts.rate > manifest 的 voice.rate > +0%。
+        # config 优先是刻意的：定时任务每次由模型生成 manifest，几乎总会带上一句
+        # `"rate": "-5%"`（听书默认语速）。若让 manifest 优先，用户在 config 里
+        # 设的语速会被静默吃掉——和「配了 tts 段却没生效」是同一类坑。
+        # 想对单个项目调语速时，用 --rate 或临时清掉 tts.rate。
+        rate=str(rate or section.get("rate") or raw_voice.get("rate") or "+0%"),
+        rate_from_config=bool(section.get("rate")) and not rate,
         volume=str(raw_voice.get("volume") or "+0%"),
         pitch=str(raw_voice.get("pitch") or "+0Hz"),
         source=source,
@@ -614,7 +632,16 @@ def _concat_wavs(parts: list[Path], target: Path, work_dir: Path) -> None:
 
 
 def _ethan_synthesize(text: str, config: TtsConfig, media_path: Path, srt_path: Path) -> None:
-    speed = rate_to_speed(config.rate, warnings=[])
+    # 非法 rate 要报出来而不是静默按 1.0× 跑：用户明明写了 +10% 却没变快，
+    # 不给提示的话只能靠猜。来源名按实际读取位置给。
+    rate_warnings: list[str] = []
+    speed = rate_to_speed(
+        config.rate,
+        warnings=rate_warnings,
+        source="tts.rate" if config.rate_from_config else "voice.rate",
+    )
+    for warning in rate_warnings:
+        print(f"WARNING: {warning}", file=sys.stderr)
     chunks = _split_for_ethan(text)
     with tempfile.TemporaryDirectory(prefix="ethan-tts-") as tmp:
         work_dir = Path(tmp)

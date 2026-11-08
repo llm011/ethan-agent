@@ -65,6 +65,9 @@ class TtsConfig(BaseModel):
     command: str = ""  # ethan-tts 可执行文件，空=用 PATH 里的 ethan-tts
     timeout_sec: float = 0.0  # 单次合成超时，0=用内置默认 300s
     autostart: bool = True  # 服务没跑时是否让 CLI 后台拉起本地 ethan-tts
+    # 默认语速，edge 的 +N% 写法；ethan 后端换算成保音高倍率（+10% → 1.1×）。
+    # 留空 = 跟随 manifest 的 voice.rate（旧行为）；设了就覆盖 manifest 默认值。
+    rate: str = ""
 
 
 class WeChatConfig(BaseModel):

@@ -269,3 +269,46 @@ def test_valid_timeout_is_kept(tmp_path, monkeypatch):
     path = _write_config(tmp_path, "tts:\n  backend: ethan-tts\n  timeout_sec: 900\n")
 
     assert tts.resolve_tts_config({}, config_path=path, env={}).ethan_timeout_sec == 900.0
+
+
+def test_config_rate_overrides_manifest(tmp_path, monkeypatch):
+    """config.yaml 的 tts.rate 要压过 manifest 的 voice.rate。
+
+    定时任务每次由模型生成 manifest，几乎总带 `"rate": "-5%"`。若让 manifest
+    优先，用户在 config 里设的语速会被静默吃掉（和「配了 tts 段没生效」同类）。
+    """
+    monkeypatch.setattr(tts.shutil, "which", lambda name: "/usr/local/bin/ethan-tts")
+    path = _write_config(tmp_path, "tts:\n  backend: ethan-tts\n  rate: +10%\n")
+
+    config = tts.resolve_tts_config({"rate": "-5%"}, config_path=path, env={})
+
+    assert config.rate == "+10%"
+    assert config.rate_from_config is True
+    assert tts.rate_to_speed(config.rate) == 1.1
+
+
+def test_manifest_rate_used_when_config_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(tts.shutil, "which", lambda name: "/usr/local/bin/ethan-tts")
+    path = _write_config(tmp_path, "tts:\n  backend: ethan-tts\n")
+
+    config = tts.resolve_tts_config({"rate": "-5%"}, config_path=path, env={})
+
+    assert config.rate == "-5%"
+    assert config.rate_from_config is False
+
+
+def test_explicit_rate_argument_wins(tmp_path, monkeypatch):
+    """--rate 是最高优先级，用于单次覆盖全局配置。"""
+    monkeypatch.setattr(tts.shutil, "which", lambda name: "/usr/local/bin/ethan-tts")
+    path = _write_config(tmp_path, "tts:\n  backend: ethan-tts\n  rate: +10%\n")
+
+    config = tts.resolve_tts_config({"rate": "-5%"}, rate="+20%", config_path=path, env={})
+
+    assert config.rate == "+20%"
+
+
+def test_rate_defaults_to_zero_percent(tmp_path, monkeypatch):
+    monkeypatch.setattr(tts.shutil, "which", lambda name: "/usr/local/bin/ethan-tts")
+    path = _write_config(tmp_path, "tts:\n  backend: ethan-tts\n")
+
+    assert tts.resolve_tts_config({}, config_path=path, env={}).rate == "+0%"
