@@ -76,6 +76,8 @@ PROSODY_RE = re.compile(r"^[+-]\d+%$")
 PITCH_RE = re.compile(r"^[+-]\d+Hz$")
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 MAX_SECTIONS = 40
+# 同时发起的合成请求上限（见 _synthesize_all 的注释）。
+ETHAN_CONCURRENCY = 3
 MAX_NARRATION_CHARS = 3000
 MIN_TOTAL_DURATION_MS = 30_000
 MAX_TOTAL_DURATION_MS = 7_200_000
@@ -353,8 +355,17 @@ def synthesize_sections(
     _inflight_tts.clear()  # 上次 run 的 Future 属于旧事件循环，必须清掉
 
     async def _synthesize_all() -> list[BaseException | None]:
+        # 并发上限：服务端是串行推理队列，一次性把 9 节全推进去没有收益——
+        # 后面的节只会干等，而且每节都占着 CLI 超时预算。限 3 并发既能让服务端
+        # 一直有活干，又不会让排队长度随节数线性增长。
+        semaphore = asyncio.Semaphore(ETHAN_CONCURRENCY)
+
+        async def _one(section: dict[str, Any]) -> None:
+            async with semaphore:
+                await _synthesize_section(section, config, cache_dir, retries=retries)
+
         return await asyncio.gather(
-            *[_synthesize_section(s, config, cache_dir, retries=retries) for s in manifest["sections"]],
+            *[_one(s) for s in manifest["sections"]],
             return_exceptions=True,
         )
 

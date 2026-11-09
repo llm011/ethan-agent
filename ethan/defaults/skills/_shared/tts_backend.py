@@ -53,9 +53,11 @@ DEFAULT_ETHAN_CLI = "ethan-tts"
 DEFAULT_ETHAN_VOICE = "preset:Vivian"
 MIN_AUDIO_BYTES = 256
 # ethan-tts 服务端单次请求上限 2000 字（settings.max_chars）；长旁白按句切块后拼接。
-# 切块不宜过大：本地推理是串行的，一次塞 1000+ 字会让单次调用跑几十秒，中途失败
-# 整段重来；按 3–4 句一块，进度可回显、重试代价也小。
-ETHAN_CHUNK_CHARS = 300
+#
+# 切块大小由「单次调用耗时必须远离超时线」倒推：本地克隆音色实测约 0.4s/字
+# （236 字 ≈ 94s），而 CLI 侧 HTTP 超时默认 300s。块太大时单次调用会顶到超时，
+# 重试又是整块重来。取 200 字 ≈ 80s，给并发排队和慢机器留足余量。
+ETHAN_CHUNK_CHARS = 200
 
 
 class TtsError(RuntimeError):
@@ -77,7 +79,10 @@ class TtsConfig:
     ethan_voice: str = DEFAULT_ETHAN_VOICE
     ethan_base_url: str = ""
     ethan_instruct: str = ""
-    ethan_timeout_sec: float = 300.0
+    # 单次 CLI 调用的硬超时。这个值覆盖的是「排队 + 生成」总时间：
+    # 管线按节并发发起，服务端却串行推理，后面的块要排队。默认 600s
+    # 对应「约 5 块排队」，足够覆盖常见批量；真卡死仍会报出来。
+    ethan_timeout_sec: float = 600.0
     # CLI 默认会在服务没跑时后台拉起；关掉它适合"我只连远端实例"的场景。
     ethan_autostart: bool = True
     # edge-tts 音色参数（ethan 后端只沿用 rate 换算成语速倍率）
@@ -300,6 +305,7 @@ def resolve_tts_config(
         ethan_instruct=str(raw_voice.get("instruct") or section.get("instruct") or "").strip(),
         ethan_timeout_sec=_parse_timeout(
             section.get("timeout_sec") or environment.get("ETHAN_TTS_TIMEOUT_SEC"),
+            default=600.0,
             warnings=warnings,
         ),
         ethan_autostart=_parse_bool(
