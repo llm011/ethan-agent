@@ -251,7 +251,7 @@ def test_timeout_zero_falls_back_to_default(tmp_path, monkeypatch):
 
     config = tts.resolve_tts_config({}, config_path=path, env={})
 
-    assert config.ethan_timeout_sec == 300.0
+    assert config.ethan_timeout_sec == tts.TtsConfig().ethan_timeout_sec
 
 
 @pytest.mark.parametrize("raw", ["0", "-5", "abc", ""])
@@ -261,7 +261,7 @@ def test_invalid_timeout_falls_back_to_default(tmp_path, monkeypatch, raw):
 
     config = tts.resolve_tts_config({}, config_path=path, env={})
 
-    assert config.ethan_timeout_sec == 300.0
+    assert config.ethan_timeout_sec == tts.TtsConfig().ethan_timeout_sec
 
 
 def test_valid_timeout_is_kept(tmp_path, monkeypatch):
@@ -345,3 +345,37 @@ def test_concat_wavs_handles_tmp_target(tmp_path):
     assert target.is_file() and target.stat().st_size > 1000
     # 拼接后应接近两段之和（0.6s）
     assert tts.probe_duration_ms(target) >= 500
+
+
+def test_chunk_size_keeps_single_call_under_timeout():
+    """分块大小 × 本地推理速度必须远离 CLI 超时线。
+
+    回归背景：块大小 300 字、克隆音色约 0.4s/字 → 单块 120s；再叠上并发排队，
+    实测单次调用顶到 300s 超时，重试整块重来，11 分钟才出 3 节。
+    """
+    config = tts.TtsConfig()
+    # 克隆音色实测约 0.4s/字（236 字 ≈ 94s），留 1.5 倍安全系数
+    estimated_seconds = tts.ETHAN_CHUNK_CHARS * 0.4 * 1.5
+    assert estimated_seconds < config.ethan_timeout_sec, (
+        f"分块 {tts.ETHAN_CHUNK_CHARS} 字预计耗时 {estimated_seconds:.0f}s，"
+        f"已逼近或超过超时 {config.ethan_timeout_sec:.0f}s"
+    )
+
+
+def test_concurrency_is_bounded():
+    """并发上限必须有限：服务端是串行队列，无限并发只会让排队无限长。"""
+    import importlib.util
+    import sys
+
+    script = (
+        Path(__file__).parents[1]
+        / "ethan" / "defaults" / "skills" / "book-audio-digest" / "scripts" / "audio_pipeline.py"
+    )
+    spec = importlib.util.spec_from_file_location("audio_pipeline_conc", script)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    assert 1 <= module.ETHAN_CONCURRENCY <= 5, (
+        "并发过高会让排队长度随节数线性增长；过低则喂不满服务端"
+    )
