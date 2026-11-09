@@ -312,3 +312,36 @@ def test_rate_defaults_to_zero_percent(tmp_path, monkeypatch):
     path = _write_config(tmp_path, "tts:\n  backend: ethan-tts\n")
 
     assert tts.resolve_tts_config({}, config_path=path, env={}).rate == "+0%"
+
+
+def test_concat_wavs_handles_tmp_target(tmp_path):
+    """拼接目标常以 .tmp 结尾（管线先写临时文件再原子 replace），必须能成功。
+
+    回归背景：ffmpeg 靠扩展名推断容器，`.tmp` 结尾直接报
+    "Unable to choose an output format"。这个 bug 只在单节文本超过
+    ETHAN_CHUNK_CHARS、需要分块拼接时触发——短文本走不到，所以测试也没覆盖，
+    结果今早定时任务（每节 400–500 字）整条降级成了 edge-tts。
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("需要 ffmpeg")
+
+    parts = []
+    for index in (1, 2):
+        part = tmp_path / f"part{index}.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+             "-i", "sine=frequency=440:duration=0.3", "-ar", "24000", "-ac", "1",
+             "-c:a", "pcm_s16le", str(part)],
+            check=True, capture_output=True,
+        )
+        parts.append(part)
+
+    target = tmp_path / "merged.wav.tmp"  # 关键：.tmp 结尾
+    tts._concat_wavs(parts, target, tmp_path)
+
+    assert target.is_file() and target.stat().st_size > 1000
+    # 拼接后应接近两段之和（0.6s）
+    assert tts.probe_duration_ms(target) >= 500
