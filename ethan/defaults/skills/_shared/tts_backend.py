@@ -611,7 +611,13 @@ def _ethan_say(config: TtsConfig, text: str, media_path: Path, *, speed: float) 
 
 
 def _concat_wavs(parts: list[Path], target: Path, work_dir: Path) -> None:
-    """把同参数的 WAV 片段拼成一个（concat demuxer，PCM16/24k/mono 直拼）。"""
+    """把同参数的 WAV 片段拼成一个（concat demuxer，PCM16/24k/mono 直拼）。
+
+    target 可能是调用方给的 `xxx.wav.tmp` 临时路径（管线先写临时文件再原子
+    replace）。ffmpeg 靠扩展名推断容器，`.tmp` 结尾会直接报
+    "Unable to choose an output format" 而失败——必须显式指定 `-f wav`。
+    这个坑只在「单节超过 ETHAN_CHUNK_CHARS 需要分块拼接」时触发，短文本走不到。
+    """
     list_path = work_dir / f".{target.stem}.concat.txt"
     list_path.write_text(
         "\n".join(f"file '{str(part).replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'" for part in parts)
@@ -622,7 +628,9 @@ def _concat_wavs(parts: list[Path], target: Path, work_dir: Path) -> None:
         [
             "ffmpeg", "-y", "-v", "error",
             "-f", "concat", "-safe", "0", "-i", str(list_path),
-            "-c:a", "pcm_s16le", str(target),
+            "-c:a", "pcm_s16le",
+            "-f", "wav",  # 显式容器：target 常以 .tmp 结尾，扩展名不可靠
+            str(target),
         ],
         check=False, capture_output=True, text=True,
     )
