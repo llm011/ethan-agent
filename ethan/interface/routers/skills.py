@@ -20,11 +20,27 @@ async def evolve_skills(user_id: str = Depends(verify_token)):
 
 
 @router.get("")
-async def list_skills(user_id: str = Depends(verify_token)):
+async def list_skills(include_content: bool = False, user_id: str = Depends(verify_token)):
+    """技能列表。
+
+    **默认不返回 content**：技能正文是 SKILL.md 全文，167 个技能合计 ~1.5 MB。
+    列表页只渲染 name/description/trigger，带上正文会让这个接口稳定慢 5–8 秒
+    （实测 1.5 MB 响应），而用户点开某个技能时才需要正文。
+
+    `include_content=true` 保留旧的完整返回，供脚本 / 兼容调用方使用。
+    需要单个技能正文请用 GET /skills/{name}。
+    """
     from ethan.skills.registry import SkillRegistry
+
     reg = SkillRegistry(user_id=user_id)
     reg.load()
-    return {"skills": [{"name": s.name, "description": s.description, "trigger": s.trigger, "content": s.content} for s in reg.all()]}
+    items = []
+    for s in reg.all():
+        item = {"name": s.name, "description": s.description, "trigger": s.trigger}
+        if include_content:
+            item["content"] = s.content
+        items.append(item)
+    return {"skills": items}
 
 
 @router.get("/{name}")
