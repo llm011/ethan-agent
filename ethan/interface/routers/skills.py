@@ -30,10 +30,22 @@ async def list_skills(include_content: bool = False, user_id: str = Depends(veri
     `include_content=true` 保留旧的完整返回，供脚本 / 兼容调用方使用。
     需要单个技能正文请用 GET /skills/{name}。
     """
+    import asyncio
+
     from ethan.skills.registry import SkillRegistry
 
-    reg = SkillRegistry(user_id=user_id)
-    reg.load()
+    def _load() -> SkillRegistry:
+        """读磁盘 + 建 embedding 路由索引，全是同步 IO/CPU。
+
+        167 个技能的 SKILL.md 要逐个读；首次（冷页缓存）实测能让**整个事件循环**
+        卡 6–8 秒——期间连 /api/health 都要 6.4s。路由是 async 的，同步 IO 直接
+        跑在事件循环线程里就是这个后果，必须丢线程池。
+        """
+        reg = SkillRegistry(user_id=user_id)
+        reg.load()
+        return reg
+
+    reg = await asyncio.to_thread(_load)
     items = []
     for s in reg.all():
         item = {"name": s.name, "description": s.description, "trigger": s.trigger}
@@ -45,9 +57,17 @@ async def list_skills(include_content: bool = False, user_id: str = Depends(veri
 
 @router.get("/{name}")
 async def get_skill(name: str, user_id: str = Depends(verify_token)):
+    import asyncio
+
     from ethan.skills.registry import SkillRegistry
-    reg = SkillRegistry(user_id=user_id)
-    reg.load()
+
+    # 同 list_skills：读盘是同步 IO，不能占着事件循环。
+    def _load() -> SkillRegistry:
+        reg = SkillRegistry(user_id=user_id)
+        reg.load()
+        return reg
+
+    reg = await asyncio.to_thread(_load)
     skill = reg.get(name)
     if not skill:
         raise HTTPException(404, "Skill not found")
