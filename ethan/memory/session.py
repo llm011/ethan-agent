@@ -566,6 +566,21 @@ class SessionStore:
             await self._db.commit()
         except Exception:
             pass
+        # sessions.updated_at 索引：会话列表/轮询按 updated_at DESC 取前 N 条。
+        # 无索引时 SQLite 要把 777 行全读出来再建临时 B-TREE 排序（EXPLAIN 实测
+        # "SCAN sessions + USE TEMP B-TREE FOR ORDER BY"）；有索引后直接倒序扫描
+        # 取前 N 行即可，数据量涨到几万会话时差距会非常明显。
+        # 同理建 created_at 索引，日记忆整理/归档按创建时间范围查。
+        try:
+            await self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC)"
+            )
+            await self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at)"
+            )
+            await self._db.commit()
+        except Exception:
+            pass
         # Migration: sessions.mode（对话模式持久化）
         try:
             await self._db.execute("ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT ''")
@@ -618,6 +633,43 @@ class SessionStore:
 
         # 存量数据迁移：把历史消息里内联的图片 base64 卡片落盘为资产文件。
         # 一次性把几十 MB 的 data URI 从 DB 里挪走，否则每次点开会话都要传/解析数 MB。
+        await self._migrate_inline_image_cards_once()
+
+    async def _migrate_inline_image_cards_once(self) -> None:
+        """启动时的内联图片迁移，每个库只跑一次。
+
+        历史 bug：这个迁移每次 init() 都全量重扫。查询条件只看「行体积大」，
+        但体积大的常见原因是 tool_steps 里的长文本（命令输出、工具结果），
+        并不含 base64 图片；这些行永远迁移不掉，于是每次启动都被重新取出、
+        反序列化、逐卡检查——用户库里有 1967 行命中、86.8 MB，单次 init 卡 93 秒，
+        而且 init 发生在每个新会话/重连，实测「点一个对话半天才出内容」。
+
+        现在用库内标记表记住「已迁移过」，正常情况下只跑一次；
+        需要重跑时删掉 meta 里对应的行即可。
+        """
+        await self._db.execute(
+            "CREATE TABLE IF NOT EXISTS schema_meta ("
+            "  key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at REAL NOT NULL)"
+        )
+        await self._db.commit()
+        # 判断要不要跑，用「库里还有没有待迁移数据」而不是单纯的时间点标记。
+        #
+        # 只用标记会漏掉一种真实情况：标记写入之后，旧数据才被写进来
+        # （升级前创建的会话 / 从备份恢复 / 另一个旧版本进程并发写入）。
+        # 这里先做一次极轻量的存在性探测（COUNT + LIMIT 1，走索引，微秒级），
+        # 有活才进迁移函数；没有就立刻返回。
+        #
+        # 注意必须同时带 instr('data:')，否则「体积大但只是长文本」的行会让
+        # 这个探测永远为真（历史上正是这样每次启动重扫 1967 行 / 86 MB / 93 秒）。
+        async with self._db.execute(
+            "SELECT 1 FROM messages "
+            "WHERE (cards IS NOT NULL AND LENGTH(cards) > 2048 AND instr(cards, 'data:') > 0) "
+            "   OR (tool_steps IS NOT NULL AND LENGTH(tool_steps) > 8192 AND instr(tool_steps, 'data:') > 0) "
+            "LIMIT 1"
+        ) as cursor:
+            if await cursor.fetchone() is None:
+                return  # 没有待迁移数据：绝大多数启动走这里
+
         await self._migrate_inline_image_cards()
 
     async def _migrate_inline_image_cards(self) -> None:
@@ -631,9 +683,12 @@ class SessionStore:
 
         try:
             async with self._db.execute(
+                # 必须同时满足「够大」和「真含 data:」：只看体积会把命令输出、
+                # 长工具结果这类纯文本行也捞进来（实测 1967 行里只有 314 行真含图片），
+                # 白读几十 MB、白白反序列化，还永远迁移不掉。
                 "SELECT id, session_id, cards, tool_steps FROM messages "
-                "WHERE (cards IS NOT NULL AND LENGTH(cards) > 2048) "
-                "   OR (tool_steps IS NOT NULL AND LENGTH(tool_steps) > 8192)"
+                "WHERE (cards IS NOT NULL AND LENGTH(cards) > 2048 AND instr(cards, 'data:') > 0) "
+                "   OR (tool_steps IS NOT NULL AND LENGTH(tool_steps) > 8192 AND instr(tool_steps, 'data:') > 0)"
             ) as cursor:
                 rows = await cursor.fetchall()
         except Exception:
@@ -645,6 +700,23 @@ class SessionStore:
         try:
             from ethan.core.assets import save_image
         except Exception:
+            return
+
+        # 已判定为「扫过、但没有可迁移结构」的行要记下来，否则它们会永远留在
+        # 待迁移集合里被反复拉取。历史上库里有一批 tool_steps 内含 base64、
+        # 但不在 step["cards"] 结构下的老数据（当前解析逻辑覆盖不到），
+        # 每次启动都白读 86 MB、白做 JSON 反序列化。
+        await self._db.execute(
+            "CREATE TABLE IF NOT EXISTS inline_image_migration_skipped ("
+            "  message_id INTEGER PRIMARY KEY, skipped_at REAL NOT NULL)"
+        )
+        async with self._db.execute(
+            "SELECT message_id FROM inline_image_migration_skipped"
+        ) as cursor:
+            skipped_before = {row[0] for row in await cursor.fetchall()}
+        rows = [r for r in rows if r[0] not in skipped_before]
+        if not rows:
+            await self._db.commit()
             return
 
         migrated_msgs = 0
@@ -741,6 +813,16 @@ class SessionStore:
                     pass
 
             if not changed:
+                # 结构上迁移不了（base64 藏在当前解析不支持的字段里）：
+                # 记下来，下次启动直接跳过，别再为它读几十 MB。
+                try:
+                    await self._db.execute(
+                        "INSERT OR IGNORE INTO inline_image_migration_skipped(message_id, skipped_at) "
+                        "VALUES(?, ?)",
+                        (msg_id, time.time()),
+                    )
+                except Exception:
+                    pass
                 continue
             try:
                 await self._db.execute(
