@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { SkillInfo, fetchSkills, saveSkill, deleteSkill } from "@/lib/api";
+import { SkillInfo, fetchSkills, fetchSkill, saveSkill, deleteSkill } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@ethan/shared/ui/card";
 import { Button } from "@ethan/shared/ui/button";
 import { Input } from "@ethan/shared/ui/input";
@@ -44,7 +44,12 @@ export function SkillsView() {
     setName(skill.name);
     setDescription(skill.description || "");
     setTriggers(skill.trigger?.join(", ") || "");
-    setContent(skill.content || "");
+    // 列表接口不再返回正文（1.5 MB 让接口慢 5–8 秒），选中时才按需拉取。
+    // 先清空，避免残留上一个技能的内容；拉取失败时保持空而不是显示错的内容。
+    setContent("");
+    fetchSkill(skill.name)
+      .then(full => setContent(full.content || ""))
+      .catch(e => console.error(e));
   }
 
   const filteredSkills = skills.filter(skill => {
