@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 
-import pytest
 
 
 def _call_list(monkeypatch, *, include_content: bool):
