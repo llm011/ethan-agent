@@ -63,10 +63,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-14
+          # macos-14 已于 2026-11-02 退役（GitHub 官方 changelog），
+          # 继续使用会让 job 在 1 秒内被取消：
+          #   "The configuration 'macos-14-arm64-us-default' is not supported"
+          # 后果是 macOS 产物根本没被打包，latest.json 里只剩 Windows 条目，
+          # 桌面端自动更新报 "None of the fallback platforms were found"。
+          - platform: macos-15
             target: aarch64-apple-darwin
             args: '--target aarch64-apple-darwin'
-          - platform: macos-14
+          - platform: macos-15
             target: x86_64-apple-darwin
             args: '--target x86_64-apple-darwin'
           - platform: windows-latest
@@ -301,6 +306,27 @@ jobs:
                       print(f"{plat}: {asset_id} -> {name}")
                   else:
                       print(f"WARNING: {plat}: asset id {asset_id} not in release, left as-is")
+
+          # 3.5 平台完整性校验：latest.json 必须覆盖所有要支持的平台。
+          #
+          # 背景：2026-11-02 macos-14 退役后，两个 macOS build job 在 1 秒内被取消，
+          # 但 fail-fast: false + needs.build.result=='success'（windows 那个 job 成功
+          # 就算 success）让后面的步骤照常跑，于是发布了一份**只有 Windows 的**
+          # latest.json。桌面端 updater 随即报：
+          #   None of the fallback platforms ["darwin-aarch64-app", "darwin-aarch64"]
+          #   were found in the response "platforms" object
+          # 用户看到的是"更新坏了"，而不是"构建失败"，排查成本很高。
+          # 这里显式校验，缺平台就让 workflow 失败（红），不再静默发布残档。
+          REQUIRED = ["darwin-aarch64", "darwin-x86_64", "windows-x86_64"]
+          platforms = data.get("platforms", {})
+          missing = [p for p in REQUIRED if p not in platforms]
+          if missing:
+              print(f"::error::latest.json 缺少平台 {missing}；"
+                    f"实际只有 {sorted(platforms)}。"
+                    "很可能是对应 runner 的 build job 失败/被取消。"
+                    "拒绝发布残缺的更新清单。")
+              raise SystemExit(1)
+          print(f"平台完整性 OK: {sorted(platforms)}")
 
           if changed == 0:
               print("All URLs already direct links, skipping upload")
