@@ -10,7 +10,6 @@ import asyncio
 import json
 
 
-
 def _call_list(monkeypatch, *, include_content: bool):
     """直接调路由函数，绕开 HTTP 层（鉴权/依赖注入与本次改动无关）。"""
     from ethan.interface.routers import skills as skills_mod
