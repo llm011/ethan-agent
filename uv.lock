@@ -521,7 +521,7 @@ wheels = [
 
 [[package]]
 name = "ethan-agent"
-version = "0.5.394"
+version = "0.5.395"
 source = { editable = "." }
 dependencies = [
     { name = "agent-client-protocol" },
