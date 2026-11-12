@@ -43,6 +43,11 @@ class Skill:
     category: str = "default"  # default = 全量注入简表+命中注入全文；discoverable = 列 trigger+命中只注入简表
 
 
+# 全局加载缓存：{user_id: (mtime, skills_list)}
+# 避免重复扫描目录和读取文件
+_SKILL_LOAD_CACHE: dict[str, tuple[float, list[Skill]]] = {}
+
+
 def _default_skill_names() -> set[str]:
     """读取打包的默认 Skill 名集合（ethan/defaults/skills/ 下的目录名）。
 
@@ -157,9 +162,24 @@ def load_all_skills(user_id: str = "") -> list[Skill]:
 
     user_id 参数保留兼容签名，实际 profile 由 context 的 ContextVar 决定
     （verify_token 已设好），user_skills_dir() 据此解析。
+    
+    性能优化：使用进程级缓存，避免重复扫描目录和读取文件。
     """
     from ethan.core.context import get_user_id
     from ethan.core.paths import user_skills_dir
+    
+    # 检查缓存
+    cached = _SKILL_LOAD_CACHE.get(user_id)
+    if cached is not None:
+        skills_dir = user_skills_dir()
+        try:
+            current_mtime = skills_dir.stat().st_mtime if skills_dir.exists() else 0.0
+        except OSError:
+            current_mtime = 0.0
+        
+        if cached[0] == current_mtime:
+            return cached[1]
+    
     skills: dict[str, Skill] = {}
     default_names = _default_skill_names()
 
@@ -170,5 +190,16 @@ def load_all_skills(user_id: str = "") -> list[Skill]:
         _load_skills_into(packaged, skills, default_names)
 
     _load_skills_into(user_skills_dir(), skills, default_names)
-
-    return list(skills.values())
+    
+    skill_list = list(skills.values())
+    
+    # 更新缓存
+    try:
+        skills_dir = user_skills_dir()
+        current_mtime = skills_dir.stat().st_mtime if skills_dir.exists() else 0.0
+    except OSError:
+        current_mtime = 0.0
+    
+    _SKILL_LOAD_CACHE[user_id] = (current_mtime, skill_list)
+    
+    return skill_list

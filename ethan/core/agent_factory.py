@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from ethan.core.agent import Agent
 from ethan.core.context import set_user_id
+from ethan.core.perf_monitor import get_perf_monitor
 from ethan.skills.registry import SkillRegistry
 from ethan.tools.builtin.acp import DelegateCodingTool
 from ethan.tools.builtin.ask_user import AskUserTool
@@ -67,28 +68,50 @@ from ethan.tools.registry import ToolRegistry
 # skills_dir mtime 变了（安装/删除 skill）才重建，避免每请求读 100+ 文件。
 _SKILL_CACHE: dict[str, tuple[float, SkillRegistry]] = {}
 
+# 进程级 ToolRegistry 缓存：{(toolset, channel, mode): registry}
+# 同一配置下复用 registry，避免重复实例化工具
+_TOOL_CACHE: dict[tuple[str, str, str], ToolRegistry] = {}
+
 
 def _get_cached_skill_registry(user_id: str) -> SkillRegistry:
+    """获取缓存的 SkillRegistry，使用增量 mtime 检测优化。
+    
+    性能优化：只检查目录本身的 mtime，不递归扫描所有文件。
+    理由：技能文件很少频繁修改，目录 mtime 在新增/删除技能时也会更新。
+    """
     from ethan.core.paths import user_skills_dir
-    skills_dir = user_skills_dir()
-    try:
-        if skills_dir.exists():
-            mtimes = [skills_dir.stat().st_mtime]
-            mtimes.extend(p.stat().st_mtime for p in skills_dir.rglob("*") if p.is_file())
-            mtime = max(mtimes)
-        else:
-            mtime = 0.0
-    except OSError:
-        mtime = 0.0
+    
+    monitor = get_perf_monitor()
+    with monitor.section("SkillRegistry.load"):
+        # 快速路径：只检查目录 mtime，不遍历所有文件（原代码遍历 rglob("*") 很慢）
+        skills_dir = user_skills_dir()
+        try:
+            current_mtime = skills_dir.stat().st_mtime if skills_dir.exists() else 0.0
+        except OSError:
+            current_mtime = 0.0
 
-    cached = _SKILL_CACHE.get(user_id)
-    if cached is not None and cached[0] == mtime:
-        return cached[1]
+        cached = _SKILL_CACHE.get(user_id)
+        if cached is not None and cached[0] == current_mtime:
+            return cached[1]
 
-    registry = SkillRegistry(user_id=user_id)
-    registry.load()
-    _SKILL_CACHE[user_id] = (mtime, registry)
-    return registry
+        registry = SkillRegistry(user_id=user_id)
+        registry.load()
+        _SKILL_CACHE[user_id] = (current_mtime, registry)
+        return registry
+
+
+def _get_cached_tool_registry(toolset: str = "full", channel: str = "web", mode: str = "") -> ToolRegistry:
+    """获取缓存的 ToolRegistry，避免重复构建。"""
+    cache_key = (toolset, channel, mode)
+    
+    monitor = get_perf_monitor()
+    with monitor.section("ToolRegistry.build"):
+        if cache_key in _TOOL_CACHE:
+            return _TOOL_CACHE[cache_key]
+        
+        registry = build_tool_registry(user_id="", toolset=toolset, channel=channel, mode=mode)
+        _TOOL_CACHE[cache_key] = registry
+        return registry
 
 
 def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str = "web", mode: str = "") -> ToolRegistry:
@@ -287,11 +310,18 @@ def create_agent(
     toolset: str = "full",
     mode: str = "",
 ) -> Agent:
-    """统一 Agent 创建入口。"""
+    """统一 Agent 创建入口。使用缓存避免重复构建 ToolRegistry。"""
     from ethan.core.paths import ensure_user_dirs
     if user_id:
         set_user_id(user_id)
     ensure_user_dirs()
-    registry = build_tool_registry(user_id=user_id, toolset=toolset, channel=channel, mode=mode)
+    
+    # 优先使用缓存的 ToolRegistry（除非有 user_id 需要透传）
+    if not user_id or toolset == "full":
+        registry = _get_cached_tool_registry(toolset=toolset, channel=channel, mode=mode)
+    else:
+        # user_id 非空时，部分工具需要 user_id，必须重新构建
+        registry = build_tool_registry(user_id=user_id, toolset=toolset, channel=channel, mode=mode)
+    
     skills = _get_cached_skill_registry(user_id)
     return Agent(tool_registry=registry, skill_registry=skills, model=model, channel=channel, user_id=user_id, mode=mode)
