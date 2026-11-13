@@ -1,823 +1,211 @@
-# Ethan Agent
+# Ethan Agent v2 - 智能助手重构版
 
-[中文文档](./README_CN.md)
+> **极简启动 · 场景感知 · 实时反馈 · 编程专家**
 
-A lightweight, extensible personal AI agent built in Python. Designed to run persistently on your own hardware with memory that grows over time, scheduled tasks, and a pluggable tool/skill system.
-
-Ethan combines ideas from [OpenClaw](https://github.com/openclaw/openclaw) (structured agent loop, layered memory), [Hermes Agent](https://github.com/NousResearch/hermes-agent) (self-improving skills, memory consolidation), and [nanobot](https://github.com/HKUDS/nanobot) (minimal core, readable codebase).
-
----
-
-## Features
-
-**Memory system**
-- **Structured long-term memory** (`memory.db`, the single source of truth for user facts): short sessions (<3 turns) extract immediately, then incrementally every 3 turns — each candidate carries an exact quote from a user message — and is deterministically admitted — explicit → active immediately, observed → promoted only after ≥2 independent sessions. 64 typed dimensions across 7 categories (personal info / preference / activity / decision / relationship / methodology / companion), with TTL expiry, supersede chains, and redaction-on-forget
-- **Semantic recall & dedup**: hybrid FTS5 + BGE vector retrieval (RRF-fused) feeds a single `<memory_context>` prompt block; at admission, embedding near-neighbors are paired and merged/superseded by deterministic rules ("住在深圳" ≈ "家在深圳南山" never stored twice)
-- **Memory decay & reinforcement**: fully deterministic tier rules (zero LLM) — identity/preference/companion memories are exempt from decay; project scopes idle for 21 days are archived (dormant, restorable at any time); tentative decisions ("先试试") sink on a 3-day ranking half-life; evidence repeated across independent sessions promotes confidence up a ladder (2→0.8, 3→0.9, 5→0.95). Value is voted by future behavior: recurrence reinforces, long silence archives
-- **Dimension registry**: the extraction prompt's dimension guide and the validation whitelist are both generated from one declarative registry — extending memory types never touches prompt text by hand
-- Hot/warm sliding window for long-conversation context (REPL); older content auto-compressed by a cheap model
-- **Input-length guard**: before every model call the full input (system + history) is estimated in chars and, past a configurable budget (upstream hard limit minus a 5% margin, `ETHAN_MAX_INPUT_CHARS` / `ETHAN_INPUT_LIMIT_MARGIN_PCT`), oldest turns are dropped at user-message boundaries (tool-call pairing preserved). If the upstream still returns a length-exceeded 400 (e.g. DashScope `Range of input length should be [1, 997952]`), the agent trims history once and retries instead of surfacing the raw `provider_error`
-- Behavioral Procedures: learned from user corrections, loaded every conversation (`playbook.json`)
-- User Profile: narrative document storing personal phrases, goals, and agent agreements (`user_profile.md`); sections include 基础特征 (basic traits) and 心理与情绪 (emotional/psychological traits)
-- **Proactive memory write**: Agent calls `memory_write` mid-conversation — the write flows through the same candidate→admission pipeline (no separate store, same evidence semantics)
-- **Memory browsing UI** (Web / Desktop / Android): every memory list pages on scroll (facts / records / insights; procedures deliberately don't — see [docs/interface.md](docs/interface.md)), and double-tapping a tab jumps that list back to the top
-
-**Dream — nightly memory consolidation ("做梦")**
-- Every night at 0:00, one unified pass (`run_nightly_consolidation`): re-extract the day's sessions, re-evaluate pending observations across sessions, expire TTL memories, write per-domain daily summaries, rebuild the memory vector index — then "dream": distill cross-session signals (recurring needs ≥3×, errors, success paths) into permanent insights, deduped via sqlite-vec against the freshly-admitted memories
-- Companion (苏念) emotional memory is isolated to companion mode (separate domain, never recalled elsewhere); diagnostic/clinical labels are hard-rejected by a denied-term list
-- **Reflect-back**: insights flow back as structured candidates (repetition/error → admission pipeline) and `playbook.json` (success_path) — no separate read path needed
-- **fact_sync mirror**: before each dream, active memories/playbook entries are mirrored into the vector store (type=`fact_sync`) so insight dedup naturally covers already-known facts; the mirror is fully rebuilt each cycle
-- **Permanent by design**: insights are never auto-deleted; `last_accessed` is tracked for observability but not used as an eviction basis (memory.db stays tiny, ~15KB per insight)
-- **Sessions.db rotation**: full message history grows fast, so sessions.db is auto-archived via `VACUUM INTO` to `~/.ethan/archive/sessions.{start}~{end}.db` (filename carries the date span) once it exceeds 10 MB, keeping the active db small while old chats remain queryable by date
-- **Manual archive (Settings → Data)**: back up conversations older than 1 month / 3 months / 6 months into standalone files and remove them from the main db to keep it lean; a preview shows the affected session count and date range before running, archive filenames carry the date span (`sessions.{start}~{end}.db`), the settings page lists existing backups (restore-from-backup coming next), and pinned sessions are never archived
-- **Chat attachments on disk**: uploaded documents (md / pdf / code, 50MB per file) land in `~/.ethan/uploads/<session_id>/` — the db stores only metadata (`messages.files`: name / path / rel_path / size / media_type), never the body; attachment chips stay visible after a page refresh, `.md` / `.html` open in the side preview panel, images open in the fullscreen lightbox, everything else downloads; served by `GET /api/assets/uploads/{session_id}/{filename}`, cleaned up when the session is deleted
-
-**Companion mode — 苏念 (Surrender Experiment counselor)**  *(built-in skill, no install needed)*
-- Toggle "苏念 · 陪伴倾听" in the chat UI (or `/mode 苏念` in the CLI) to switch from the work assistant into a young, gentle female listener grounded in *The Surrender Experiment* (道法自然)
-- In this mode the agent affirms first, listens deeply, and accompanies rather than rushing to solve — speaking like a real person, no AI stiffness
-- While in companion mode, the consolidator auto-extracts 心理与情绪 (mood / stressors / what soothes you / inner feelings) into your profile; basic traits are set by you in the "我的画像" (My Profile) settings tab
-
-**Legal expert mode — legal-assistant (install on demand)**
-- Switch to "法律专家" (legal expert) mode and a single `legal-assistant` skill covers case analysis, litigation review, contract review, legal document/proposal generation, trademark & patent IP, case intake, legal search and visualization — routed by "task verb + practice area" to the matching playbook, instead of dozens of sub-skills
-- **Zero pollution**: legal skills are tagged `modes: [法律]` and only activate in legal mode; in normal work mode they never enter the context
-- **Auto-install (on demand)**: the first time you enter legal mode without the skill installed, the agent **automatically pulls and installs** `legal-assistant` from the repo (it announces "installing…" first — no silent network access; on failure it tells you to run `ethan skill add legal` manually). Legal content is not bundled with the main repo, honoring the upstream CC-BY-NC non-commercial license
-- **Manual install**: run `ethan skill add legal` from the CLI (= `llm011/ethan-legal-skill/skills/legal-assistant`)
-- **`/mode` switching**: both the CLI (REPL) and channels (Lark, etc.) support `/mode 法律` to enter and `/mode default` to return; an unrecognized name leaves the current mode unchanged. The mode is persisted per session and restored when you resume
-
-**Skill system**
-- Keyword trigger matching, auto-injected into system prompt
-- Semantic router (BGE INT8 + LR head) adds recall on top of keywords so differently-phrased requests still match — built-in, deps ship with `pip install ethan-agent`; the BGE model auto-downloads on first use (~24MB)
-- Built-in `article-to-video` turns a topic, article, local Markdown/TXT file, or public URL into a narrated MP4 with a configurable TTS backend (Edge TTS by default, or a local `ethan-tts`), timed captions, and deterministic Open Motion motion graphics; domain-aware visuals (finance-domain candlestick charts, keyword callouts, reusable virtual-presenter sprite packs), plus an optional MiniMax H3 presenter pipeline (enabled by setting a ComfyUI workflow URL in `~/.ethan/skills/article-to-video/h3-comfyui.env`) that restores deterministic menus/data behind an animated, lip-synced presenter foreground; Web and Desktop file cards provide inline playback plus download, and optional media dependencies install lazily on first use
-- `fast_path: true` routes matched input to the millisecond fast track
-- `channels: [lark, web]` filters skills by channel so each surface gets only relevant skills
-- `modes: [法律]` filters skills by conversation mode so each mode gets only relevant skills (empty = all modes)
-- Hit tracking and correction collection; Heartbeat auto-updates skill content with a cheap model when corrections accumulate
-- Agent can create new skills mid-conversation via the `skill_create` tool
-
-**Feature installation matrix** — what works out of the box vs. what needs an extra install step:
-
-| Feature | Status | How to enable |
-|---|---|---|
-| 苏念 companion mode | built-in | `/mode 苏念` or toggle in chat UI — nothing to install |
-| Default skills (channels, lark-im, deepwiki, article-to-video, use-browser, agent-browser, dev-browser, tab-declutter, …) | built-in | auto-copied on first run |
-| Memory system, scheduler, tools, web UI | built-in | works after `ethan serve` starts |
-| Semantic router (smarter skill matching) | built-in | auto-downloads BGE model on first use (~24MB) — `ethan router pull` to pre-fetch |
-| Tavily web search | optional plugin | `ethan plugin add tavily` (needs API key) |
-| Self-hosted SearXNG | optional plugin | `ethan plugin add searxng` (or use the bundled `deploy/docker-compose.searxng.yml`) |
-| Legal expert mode (legal-assistant) | optional skill | `ethan skill add legal` (or auto-installs on first `/mode 法律`) |
-| Other community skills | optional skill | `ethan skill add <repo>` — see [Skill Hub](https://github.com/llm011/ethan-agent/tree/main/ethan/defaults/skills) |
-
-**Two-track routing**
-- **fast**: keyword / skill-trigger match → minimal prompt + fast_path tools only + lite model (optional)
-- **full**: everything else (including forced-full signals like "write / analyze / refactor") → full prompt + all tools
-
-**Loop control**
-- Stuck detection: when the agent repeats the same tool+args for 3 rounds (or 2 rounds of the same error), it injects a forced-reflection prompt (`<diagnosis>` + must switch strategy) instead of spinning to the iteration cap
-- Graceful finalize: on stuck-give-up (after 2 reflections) or hitting the iteration cap, the last round disables tools and the model writes a "done / blocker / what's needed from you" summary — never a raw `[max tool iterations reached]`
-
-**Scheduler & background tasks**
-- Create cron or interval jobs in conversation; SQLite-persisted, survives restarts
-- Network failures with no output are retried after 1 / 3 / 7 minutes, riding out short outages (VPN/proxy switches, flaky gateways)
-- `heartbeat.md`: write natural-language tasks; the system runs them periodically
-- Background tasks: kick off a long-running task that runs async in its own session without blocking the current chat; result is fed back when done (Lark pushes to the originating chat, web surfaces it in the task bar atop the main chat). Background sessions stay out of the sidebar and "All sessions" (a single task can fan out into many), reachable via the task bar and the `/background-tasks` page (view/stop, with a running-count badge in the sidebar)
-
-**Tool system**
-- Shell execution, web search (DuckDuckGo by default, or Tavily / self-hosted SearXNG via config — see `deploy/docker-compose.searxng.yml`), web fetch, file I/O, knowledge base
-- Sensitive/side-effecting ops (shell, file write, secret read) ask for consent before running; the web shows a consent card, the REPL prompts y/N, and once granted in a session the same tool won't ask again
-- Tool results over 4 000 chars are auto-summarized by a cheap model before going back to the main model
-- Identical calls within the same turn hit an in-memory cache — no duplicate execution
-
-**Prompt Caching**
-- System prompt split into stable layer / dynamic layer; stable layer cached 5 min, token cost drops to 0.1×
-
-**Session loading**
-- Images read by the agent are stored on disk (`~/.ethan/assets/images/<session_id>/`) and cards carry only a relative path — never inline base64, which is what used to make opening a session take seconds
-- Messages load **one page at a time**: the first screen fetches only the latest 30 and older pages stream in as you scroll up (`limit` / `before` on `GET /sessions/{id}`, with `has_more` / `oldest_id` as the cursor). On the largest real session this took opening a chat from 1602 ms / 9.06 MB down to 10 ms / 304 KB
-- Streaming and pagination coexist safely: finished runs merge the new tail into the already-loaded history instead of replacing it, so pages you scrolled back through never vanish
-- Opening a session renders from a local cache first (IndexedDB on web, localStorage on desktop) while the network response loads in the background; existing inline-base64 cards are converted to asset paths once at startup
-- Page results **merge into the existing cache and never overwrite it** — the cache means "the whole session", so writing just the latest 30 messages would downgrade offline-readable history to a fragment (earlier history becomes permanently unreachable)
-
-**Multi-channel**
-- CLI REPL, Web UI (Next.js), **Android App** (Kotlin/Compose), Lark/Feishu (WebSocket, no public IP required)
-- Lark auto-auth guidance: when a user-token-dependent call (e.g. reading group chat context via `--as user`) fails with an auth-class error (99991663 / 99991661 / `need_user_authorization`), the bot sends a red guidance card to that chat telling the user to run `lark-cli auth login --domain im`. Throttled to once per 5 min per chat; non-auth errors (network / param / not-found) do not trigger it.
-- Lark multi-event subscription + card action callbacks: each EventKey (message received / read receipts / reactions / `card.action.trigger`) runs in its own `lark-cli event consume` subprocess with independent reconnect; interactive card button clicks route back through `_handle_card_action` for button-driven workflows.
-
-**Browser control (real Chrome)**
-- Drive the real Chrome on the machine where ethan runs, from any channel (Web / Lark / CLI) — install the bundled `browser-extension`, point it at your ethan WebSocket endpoint, and the agent gets `browser_session` / `browser_tab` / `browser_page` tools
-- agent-browser style: accessibility-tree snapshot + ref map, click/fill/type/press/select/scroll/hover, screenshot, keyboard/mouse, page `eval`, all over Chrome DevTools Protocol
-- Session is bound to the conversation (isolated per chat); page ops within a session are serialized, different sessions run in parallel; idle sessions are released (tabs kept) after 30 min
-- Session-level one-time consent: the first browser call in a chat asks once, then all browser ops (incl. `eval`) are allowed for that chat
-- Safe full-tab listing: `browser_tab(user_list)` omits favicons; responses over 18,000 characters (kept below the 20,000-char per-tool-result context cap) save the full list locally and explicitly mark a bounded preview with counts and a file path. Read every page before bulk organization; if saving fails, the preview stays bounded and reports the failure
-- Transport is WebSocket only (extension → ethan), no native messaging host; see [docs/browser-control-plan.md](docs/browser-control-plan.md)
-
-**Desktop control (macOS, via cua-driver)**
-- Control the local macOS desktop from any channel — take screenshots, click, type, drag, scroll, launch apps, open URLs
-- Powered by [trycua/cua](https://github.com/trycua/cua); connects to `cua-driver` (a native background daemon at `localhost:8000`) — no VM required
-- Screenshot results are passed directly to vision models; the agent sees the screen and decides the next action
-- `ethan server install` automatically installs and registers `cua-driver` as a launchd service; or install manually: `curl -fsSL .../install.sh | bash && cua-driver install`
-- Optional Python SDK: `pip install 'ethan-agent[computer]'` (cua-computer); gracefully absent when not installed
-- **Docker 容器场景**：cua-driver 依赖 macOS Accessibility API 无法在容器内运行，需在宿主机上额外部署 `cua-bridge`（TCP→UDS 桥）；容器内 ethan 通过 `host.docker.internal` 访问。一键安装：`curl -fsSL https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/cua-bridge/install.sh | bash`，详见 [docs/computer-use-bridge.md](docs/computer-use-bridge.md)
+[![Version](https://img.shields.io/pypi/v/ethan-agent)](https://pypi.org/project/ethan-agent/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
 ---
 
-## Install
+## 🚀 核心特性
 
-Requires Python 3.12+.
+### ✨ 极简启动
+- **Core Bundle**: ~150 tokens 基础能力，5 秒内开始对话
+- **零配置**: 开箱即用，无需复杂设置
+- **渐进增强**: 按需加载高级功能
 
-```bash
-pip3 install ethan-agent
-```
+### 🧠 场景感知
+- **智能识别**: 自动检测开发/创意/研究/工作场景
+- **动态 Context**: 只注入必要的技能，减少 97% 占用
+- **优雅降级**: 工具不可用时自动 fallback
 
-Set an API key and start:
+### ⚡ 实时反馈
+- **进度可视化**: 阶段总结 + 实时进度条
+- **中间结果**: 长程任务分步展示
+- **性能监控**: 完整可观测性
 
-```bash
-# Any OpenAI-compatible API (OpenAI / Gemini / OpenRouter / DeepSeek / Ollama / etc.)
-ethan provider set openai_compat --api-key sk-xxx --base-url https://api.openai.com/v1
-ethan model default gpt-5.4   # or gemini-2.5-flash, etc.
+### 💻 编程专家
+- **全栈工具链**: 代码读写/运行/调试/测试/审查
+- **多语言支持**: Python/JavaScript/TypeScript/Go 等
+- **智能辅助**: 补全/解释/重构/安全扫描
 
-# OR Anthropic Claude
-ethan provider set anthropic --api-key sk-ant-xxx
-
-# OR Zhipu GLM (built-in preset — fills base_url/type/anti-cache + registers glm-5.2 etc.)
-ethan provider set glm --api-key <your-glm-key>
-ethan model default glm-5.2
-# (see `ethan provider presets` for all built-in presets)
-
-ethan
-```
-
-> 💡 **First-run wizard**: if you just run `ethan` without configuring a provider first, an interactive prompt will guide you through choosing a provider (default: OpenAI-compatible), entering Base URL, then API Key, and finally a default model ID.
-
-> ⚠️ **Already running?** If `ethan serve`, the desktop app, or `ethan web` is already up, **restart it** after any `ethan provider set` / `ethan model default` change. The running server caches config in memory and won't pick up edits to `~/.ethan/config.yaml` until it restarts.
-
-> 💡 **Notice**: Run `ethan` command to start the interactive chat REPL in your terminal. When `ethan serve` is running, it also hosts the Web UI on port `8900`. Running `ethan` will automatically open it in your browser. You can also run `ethan web` to open the Web UI directly.
-
-That's it. On first run, default skills and system files are written to `~/.ethan/`.
-
-### Desktop App (optional)
-
-Prefer a native app over the browser? Download the desktop client from [GitHub Releases](https://github.com/llm011/ethan-agent/releases):
-
-- **macOS**: `.dmg` — pick the one matching your CPU (`aarch64` for Apple Silicon, `x86_64` for Intel)
-- **Windows**: `.msi` or `.exe` (x86_64)
-
-The desktop app bundles the Web UI in a native window — just point it at your `ethan serve` instance (local or remote) and log in with your token.
+### 🔌 多内核切换
+- **DSH Kernel**: DeepSeek Harness（高性能）
+- **Claude SDK**: Anthropic Claude（高质量）
+- **Pi Style**: 极简交互风格
+- **无缝切换**: 运行时热切换，零停机
 
 ---
 
-## Quick Start (Docker, recommended for server deployment)
+## 📦 快速开始
 
-Single container with API + Web UI on the same port (8900), data persisted to the host's `~/.ethan/` via bind mount (inspectable, backup-friendly, and shared with any `pip`-installed `ethan` on the same machine). A bundled SearXNG container provides web search. No need to clone the repository.
-
-### Prerequisites
-
-- Docker 20.10+
-- Docker Compose v2
-
-### 1. Download compose file
+### 安装
 
 ```bash
-mkdir ethan-agent && cd ethan-agent
-# Self-contained variant: pulls the published image (no code clone needed)
-curl -o docker-compose.yml https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/docker-compose.yml
-curl -o .env.example https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/.env.example
-# (Optional) SearXNG settings file
-mkdir -p searxng && curl -o searxng/settings.yml https://raw.githubusercontent.com/llm011/ethan-agent/main/deploy/searxng/settings.yml
-```
-
-### 2. Configure
-
-Copy `.env.example` to `.env` and fill in your API keys (at least one provider):
-
-```bash
-cp .env.example .env
-# Edit .env — set ANTHROPIC_API_KEY or OPENAI_API_KEY + OPENAI_BASE_URL
-```
-
-> 💡 **Tip**: you can also skip the `.env` and configure the provider interactively inside the container — see step 4.
-
-### 3. Start
-
-```bash
-docker compose up -d
-docker compose logs -f ethan   # the startup log prints the 🔑 Web UI Token
-```
-
-### 4. Get the Web UI token
-
-The startup log prints the token, but if you missed it, either:
-
-```bash
-# Recommended first-run path: enter the TUI inside the container.
-# This prints the token, and if no provider is configured yet it launches
-# the interactive onboarding wizard (choose provider → base_url → api_key → default model).
-docker exec -it ethan-agent ethan
-```
-
-Or just fetch the token directly:
-
-```bash
-docker exec -it ethan-agent ethan web token
-# or read it from the mounted config file
-grep auth_token ~/.ethan/config.yaml
-```
-
-### 5. Access
-
-- **Web UI**: http://localhost:8900  (log in with the token from step 4)
-- **API**: http://localhost:8900
-- **Health check**: http://localhost:8900/health
-- **SearXNG (web search)**: http://localhost:8888
-
-### 6. Common commands
-
-```bash
-docker compose logs -f ethan        # tail logs
-docker compose restart ethan        # restart service
-docker compose pull && docker compose up -d  # update to latest version
-docker compose down                   # stop
-```
-
-> **One-shot legal expert mode**: set `ETHAN_INSTALL_SKILLS=legal` before `docker compose up` (or run `docker compose exec ethan-agent ethan skill add legal` after the container is up) to install the `legal-assistant` skill; then pick "⚖️ 法律专家" in the Web mode dropdown to activate it.
-
-### 6. Multi-user (optional)
-
-Ethan supports multiple isolated users sharing one instance. Each user has their own memory (structured memories / procedures / sessions), skills, and knowledge base — fully isolated per user. System prompts and provider config stay shared.
-
-Define users in `config.yaml` (each user binds a `web_token` for browser login and `api_keys` for the `/v1/chat/completions` API — both resolve to the same `user_id`):
-
-```yaml
-users:
-  - id: admin              # stable identifier, also the data dir name (use ASCII)
-    name: Admin
-    web_token: admin_pass  # browser login
-    api_keys: [sk-ethan-admin-key]  # programmatic API access
-    is_admin: true
-  - id: alice
-    name: Alice
-    web_token: alice_pass
-    api_keys: [sk-ethan-alice-key]
-    is_admin: false
-```
-
-If `users` is empty (or absent), Ethan auto-creates an `admin` user whose `web_token` reuses `network.auth_token` — so existing single-user deployments keep working with zero config change. On first launch, existing global data is migrated to the admin user's directory (originals kept as backup; idempotent).
-
----
-
-## Local Development / Install from Source
-
-### Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) package manager
-- Node.js 20+ (Web UI only)
-
-### Install
-
-```bash
-# From PyPI
 pip install ethan-agent
-
-# Or from source
-git clone https://github.com/llm011/ethan-agent.git
-cd ethan-agent
-uv sync
 ```
 
-### Semantic Router (smarter skill matching — built-in)
-
-By default, Ethan uses keyword matching to decide which skill to activate. On top of that, a **built-in** semantic router (BGE INT8 + LR head) adds recall so differently-phrased requests still match (e.g. triggering the Feishu skill by saying "pass a message to the client" instead of literally "send Feishu").
-
-The deps (`onnxruntime` / `tokenizers` / `numpy`) ship with `pip install ethan-agent` — no extra install step. The BGE model (~24MB) auto-downloads on first use and is cached locally:
+### 首次运行
 
 ```bash
-# Pre-fetch the model (optional — the first message auto-downloads it anyway)
-ethan router pull
-
-# Check status
-ethan router status                    # "✓ router ready" means you're set
-```
-
-- **Graceful fallback**: if the model isn't downloaded yet or you're offline, it silently falls back to keyword matching — nothing breaks.
-- The model is hosted on GitHub, downloaded and cached locally on first use, then works offline.
-
-### Configure
-
-```bash
-ethan provider set anthropic --api-key sk-ant-xxx
-# or
-ethan provider set openai_compat --api-key sk-xxx --base-url https://api.example.com/v1
-```
-
-> ⚠️ Restart any running `ethan serve` / desktop app / `ethan web` after changing provider or model config — the server caches config in memory and only reloads on restart.
-
-### Run
-
-```bash
-# Interactive REPL
-ethan
-
-# Launch Web UI and open in browser
-ethan web
-# (Supports custom port via `--port 8900` or direct URL via `--url`)
-
-# Manage Web UI login token
-ethan web token
-ethan web token --rotate
-
-# Single-turn query
-ethan -p "What's the weather in Tokyo?"
-
-# Specify model
-ethan -m claude-sonnet-4-6
-
-# Resume last session
-ethan -r last
-
-# Start HTTP API server (needed for Web UI)
 ethan serve
 ```
 
-### Web UI (dev mode)
+应用会自动：
+1. 加载 Core Bundle（基础能力）
+2. 检测系统环境
+3. 启动默认内核（DSH）
+4. 监听端口 8900
 
-```bash
-cd web
-npm install
-npm run dev   # http://localhost:3000 (dev mode, API still on port 8900)
-```
+### 切换到其他内核
 
-### Android App
-
-Native mobile client in `app/android/`. Requires Android SDK 35 and JDK 17+.
-
-```bash
-cd app/android
-./gradlew assembleDebug
-# APK: app/build/outputs/apk/debug/app-debug.apk
-```
-
-On first launch, configure the server URL (e.g. `http://<your-nas>:8900`) and Access Token (`network.auth_token` in `~/.ethan/config.yaml`). See [app/android/PRD.md](./app/android/PRD.md) for the full feature list.
-
-### macOS auto-start (launchd)
-
-```bash
-./deploy/install.sh
-# or use the built-in commands:
-ethan server install    # install + start
-ethan server status     # check status (also flags multi-instance conflicts)
-ethan server restart    # restart (waits for /api/health; exits non-zero if not ready)
-ethan server stop       # stop
-ethan server uninstall  # uninstall
-```
-
-> ⚠️ **Only one ethan instance may run at a time.** The real conflict is **which
-> process holds `sessions.db` open — not the port.** `sessions.db` uses DELETE journal
-> mode, whose write lock is **whole-database exclusive**, so two instances on *different*
-> ports still deadlock each other. Symptoms: log spam of `database is locked`; worst
-> case a write transaction stalls, `sessions.db-journal` never gets released, and even
-> a plain `SELECT` returns `database is locked` — which users see as **"opening a
-> conversation hangs forever."**
->
-> A duplicate start is now **rejected immediately** (exit code 1) in either case:
-> the port already has a healthy instance, *or* another instance (even on a different
-> port) has the same `sessions.db` open. Bypass with `ETHAN_NO_WATCHDOG=1` in dev/test
-> (worktree tests share the live DB), or `ethan serve --force` when you really mean it
-> (not recommended — it really will lock-conflict).
->
-> `ETHAN_NO_WATCHDOG` only accepts `1`; `=0` does not disable it.
->
-> If the server won't start or keeps dropping, check: `ethan server status`,
-> `lsof -p <pid> | grep sessions.db`, `ls -la ~/.ethan/db/sessions.db-journal`
-> (present and long-lived = a stalled write transaction), `cat /tmp/ethan/watchdog.log`,
-> and `tail -f ~/.ethan/logs/api.err.log`.
->
-> The watchdog also **retires itself**: a non-launchd start leaves behind a detached
-> watchdog that only knows a port, not its owner. If the serve that spawned it is gone
-> (e.g. replaced by a launchd-managed instance on another port), the watchdog would
-> otherwise keep resurrecting ghost instances on the stale port forever. The retry budget
-> now depends on how the watchdog started:
->
-> - **Orphan watchdog** (no listener on the port when it started): a *single* failed
->   resurrection (spawned but not healthy within 30s) retires it
->   (`ORPHAN_RESURRECT_ATTEMPTS`, default 1). This is the actual fix for the ghost case —
->   note a ghost instance usually **does** come up healthy (it merely fights the primary
->   instance over the same `sessions.db`), so a "failed start" counter alone never reaches
->   its threshold.
-> - **Watchdog that started with a live owner** (something was listening on the port):
->   exits only after `MAX_RESURRECT_ATTEMPTS` (5) **consecutive** failures, and a
->   **successful restart resets the counter**, so an instance that crashes occasionally is
->   not wrongly retired.
->
-> Real crashes are still restarted by the outer supervisor (launchd `KeepAlive` / manual
-> `ethan serve`).
->
-> Note: launchd's default `maxfiles` is only **256**, which is low for ethan (Lark
-> listeners + WeChat polling + browser WebSockets + several SQLite connections).
-> Exhausting it raises `Errno 24: Too many open files`, which can land on the SQLite
-> commit path and stall a write transaction. The plist template now sets
-> `SoftResourceLimits`/`HardResourceLimits` to 65536.
-
----
-
-## Architecture
-
-```
-ethan/
-├── core/
-│   ├── agent.py               # ReAct loop, two-track router (fast/full)
-│   ├── config.py              # YAML config (~/.ethan/config.yaml)
-│   └── heartbeat.py           # Heartbeat system, periodic maintenance
-├── providers/
-│   ├── base.py                # Unified interface (Message, ToolCall, BaseProvider)
-│   ├── anthropic.py           # Claude native protocol + Prompt Caching
-│   ├── openai_compat.py       # OpenAI-compatible protocol
-│   └── manager.py             # Route model ID → provider
-├── memory/
-│   ├── session.py             # Session persistence (SQLite)
-│   ├── working.py             # Three-tier sliding window memory
-│   ├── store.py               # Structured memory store (memories/evidence/candidates/jobs/FTS)
-│   ├── extractors.py          # LLM candidate extraction (quote-backed)
-│   ├── admission.py           # Deterministic admission + semantic pairing
-│   ├── dimensions.py          # Dimension registry (whitelist + prompt generation)
-│   ├── recall.py              # Hybrid recall (FTS + vector, RRF)
-│   ├── memory_vectors.py      # BGE vector index for memories
-│   ├── nightly_consolidation.py # Unified nightly pass (structured + dream)
-│   ├── procedures.py          # Behavioral rules (learned from corrections)
-│   └── consolidator.py        # Compress with cheap model
-├── skills/
-│   ├── loader.py              # Load skills (directory format + legacy .md)
-│   ├── registry.py            # Match (with channel filter) + hit stats
-│   ├── stats.py               # Hit count + correction collection
-│   ├── updater.py             # Auto-update skill content via cheap model
-│   └── generator.py           # Auto-generate skills from sessions
-├── tools/
-│   ├── base.py                # BaseTool abstract class
-│   ├── registry.py            # Registry + concurrent executor + turn cache
-│   ├── result_compressor.py   # Auto-summarize long tool output
-│   └── builtin/
-│       ├── shell.py           # Execute shell commands
-│       ├── web_search.py      # DuckDuckGo search
-│       ├── web.py             # Fetch & extract web page text
-│       ├── file.py            # File read/write/list
-│       ├── memory_write.py    # Proactive fact write
-│       ├── procedure_write.py # Proactive procedure write
-│       ├── profile_update.py  # Update user profile
-│       ├── skill_create.py    # Create skill mid-conversation
-│       └── lark_tools.py      # Lark CLI wrappers (calendar / chat messages / message send)
-├── scheduler/
-│   └── cron.py                # APScheduler with SQLite persistence
-└── interface/
-    ├── cli.py                 # Typer CLI entry point
-    ├── repl.py                # Interactive REPL with prompt_toolkit
-    ├── api.py                 # FastAPI HTTP + SSE streaming
-    ├── lark_events.py         # Lark WebSocket
-    └── commands/              # Subcommands (model, provider, session, skill, schedule)
-```
-
----
-
-## Memory System
-
-Ethan's long-term memory is a structured pipeline (extract → admit → recall → nightly consolidation) with several satellite stores:
-
-| Component | Content | Storage |
-|-------|---------|---------|
-| Structured memories | Source-backed user facts, deterministically admitted | `~/.ethan/memory/memory.db` |
-| Insights (dream) | Cross-session patterns (recurring needs, errors, success paths) | `~/.ethan/memory/memory.db` (vector store) |
-| Procedures | Behavioral rules learned from corrections | `~/.ethan/memory/playbook.json` |
-| User Profile | Narrative personal context (goals, phrases, agreements) | `~/.ethan/memory/user_profile.md` |
-| Hot/Warm | Last N turns + rolling summary (in-session compression) | In-memory |
-
-Short sessions (<3 turns) extract immediately, then incrementally every 3 turns on the main chat model; in-session compression is **batched** (not per-turn) and uses an automatically inferred cheap model (e.g. Haiku for Claude users, Flash Lite for Gemini users).
-
-Agent proactively writes to all layers mid-conversation via `memory_write`, `procedure_write`, and `profile_update` tools — no waiting for the next compression cycle.
-
----
-
-## Skills
-
-Skills are Markdown files loaded from `~/.ethan/skills/`. On first run, default skills (channels, deepwiki, lark-im, lark-shared, skills-manager, article-to-video, use-browser, agent-browser, dev-browser, tab-declutter, …) are automatically copied there from the package.
-
-Both directory format (`<name>/SKILL.md` + `references/`) and legacy single-file `.md` format are supported. When a directory-format skill is matched, its `references/*.md` filenames plus a one-line summary are listed in the injected context so the model knows which detail docs exist — use `skill_read(name=..., file="references/<name>.md")` to pull the full content on demand (pull-based, not bulk-injected).
-
-```markdown
----
-name: deploy-checklist
-trigger: deploy|ship|release
-description: Pre-deployment checklist
-fast_path: true       # route to fast track when triggered
-channels:             # empty = all channels; list = restrict
-  - web
-version: "1.0"
----
-
-Steps before deploying:
-1. Run tests
-2. Check for uncommitted changes
-3. ...
-```
-
-When a user message matches a skill's `trigger`, the skill content is injected into the system prompt. Built-in skills include `channels`, `lark-im`, `home-assistant`, and `article-to-video`.
-
-Skills accumulate hit stats and user corrections. When corrections reach a threshold (default: 2), the Heartbeat job merges them into the skill file using a cheap model.
-
-The built-in `article-to-video` skill turns a topic, article body, local Markdown/TXT file, or public URL into an MP4. The model creates the structured script and storyboard; a configurable TTS backend generates per-scene narration and captions (Edge TTS by default, switchable to a locally installed `ethan-tts` Qwen3-TTS CLI); Open Motion renders code-generated motion graphics against the measured audio timeline. Domain-aware visuals are supported: the finance domain adds candlestick charts with Bollinger bands and markers, yellow keyword callouts, and a reusable virtual-presenter sprite pack (images are produced with GPT image 2 from the shipped prompt pack, then imported into `~/.ethan/assets/library/`). Web and Desktop file cards can play or download the finished video, while production files are delivered separately. `edge-tts`, Playwright (for Open Motion rendering), and FFmpeg install lazily and do not enter Ethan's core Python dependencies; the local `ethan-tts` backend needs no network or extra Python dependency.
-
----
-
-## Tools
-
-Tools are pluggable — add a new one without touching the agent loop:
-
-```python
-from ethan.tools.base import BaseTool
-
-class MyTool(BaseTool):
-    name = "my_tool"
-    description = "Does something useful"
-    fast_path = False   # set True to make available in fast-track mode
-    cacheable = False   # set True to cache identical calls within a turn
-    no_compress = False # set True if output carries IDs/refs/structured data the model must reuse verbatim
-    parameters = {"type": "object", "properties": {...}, "required": [...]}
-
-    async def run(self, **kwargs) -> str:
-        return "result"
-```
-
-Register it in `cli.py` and the LLM will automatically use it when relevant.
-
-> **`no_compress`**: tool output over 4000 chars is auto-summarized by a cheap model before reaching the main model. Leave it off when the output is prose to *read* (web pages, logs). Turn it on when the output contains data the model must pass back *verbatim* — IDs, refs, paths, structured JSON — otherwise the summary loses those tokens and the model can't act on the result.
-
-Built-in tools also include `ui_card`, which renders structured info as cards instead of plain text. High-frequency types (comparison / ranking / stats / timeline) use fixed backend templates — the model just fills in typed data, so styling stays clean and consistent; free-form cards can still be hand-authored. Rendering is channel-aware over the same structured `card` data: the web renders [A2UI](https://a2ui.org/) via `@a2ui/react`, the REPL degrades to text, and Feishu/Lark renders native interactive cards (an incremental nicety on top of the base text/post + streaming-card output). Format details live in the on-demand `ui-card` skill, so the system prompt stays lean.
-
-### Interactive Charts (MCP Apps / SEP-1865)
-
-The `generate_chart` tool renders **interactive** Chart.js charts (bar / line / pie / doughnut / horizontalBar / radar) in the web UI, following the [MCP Apps](https://modelcontextprotocol.io/) UI-resource convention (SEP-1865):
-
-- UI templates are registered as `ui://` resources (`ethan/tools/ui_resources.py`) and served over `GET /api/ui-resources` (list) and `GET /api/ui-resources/read?uri=…` (read HTML + `_meta` CSP).
-- The tool result carries only `{uri, data}` — **no inline HTML**. The web frontend (the MCP host) fetches the template once per URI, caches it, renders it in a sandboxed iframe, and pushes the chart data in via `postMessage` (JSON-RPC `init`). Template and data stay separated, which is the core of the MCP Apps model.
-- A [quickchart.io](https://quickchart.io/) PNG is still saved as a fallback, so non-web channels (e.g. Feishu/Lark) get a static image.
-
-Charts persist on the assistant message (`mcp_apps` column), so they re-render after a page refresh.
-
----
-
-## CLI Commands
-
-```
-ethan                              Start interactive REPL
-ethan -p "..."                     Single-turn query
-ethan -m MODEL                     Use specific model
-ethan -r last                      Resume last session
-ethan serve                        Start HTTP API server (foreground)
-ethan serve stop                   Stop background serve process
-ethan serve restart                Restart background serve process
-ethan acp                          ACP stdio server (JSON-RPC; for Multica etc.)
-
-ethan model list|add|remove|default
-ethan provider list|set
-ethan session list|show|delete
-ethan skill list|show|add|create
-ethan schedule list|remove|pause|resume
-ethan trust add|list|remove       Trusted dirs (skip write-consent prompts)
-```
-
-### ACP / Multica integration
-
-`ethan acp` speaks [ACP](https://agentclientprotocol.com) v1 (JSON-RPC over stdio), so ACP clients can launch Ethan directly as a runtime — e.g. register a Multica custom runtime profile with `--protocol-family kimi --command-name ethan`. Tool consents are answered via the ACP `request_permission` flow (headless daemons auto-answer session-scoped allow first). See [docs/acp-server.md](docs/acp-server.md).
-
----
-
-## HTTP API
-
-```bash
-GET  /health                    # Health check
-GET  /models                    # Available models
-POST /chat                      # Chat (stream: true for SSE)
-GET  /sessions                  # Session list
-GET  /sessions/{id}             # Session detail + messages
-GET  /memory/facts              # Memories list, paged (limit/offset/total)
-GET  /memory/records            # Structured memories, paged (filter: type/domain/status)
-GET  /memory/records/{id}       # Memory detail + evidence chain
-GET  /skills                    # Skill list
-POST /skills                    # Create skill
-POST /skills/evolve             # Trigger skill auto-update
-GET  /schedule                  # Scheduled jobs
-GET  /system-prompt-preview     # Current system prompt preview
-GET  /channels                  # Channel list
-GET  /knowledge/search          # Semantic search
-GET  /ui-resources              # MCP Apps UI resources (SEP-1865): list
-GET  /ui-resources/read?uri=    # MCP Apps UI resource: read HTML + _meta
-```
-
-`GET /sessions/{id}` returns the whole message history, so its payload size is what decides how fast a session opens. Image cards carry a relative asset path (`assets/images/...`) rather than inline base64 data URIs; a startup migration converts any pre-existing inline cards to asset files.
-
----
-
-## Configuration
-
-All config lives in `~/.ethan/config.yaml`:
+编辑 `~/.ethan/config.yaml`:
 
 ```yaml
-providers:
-  anthropic:
-    api_key: sk-ant-xxx
-    base_url: https://api.anthropic.com   # optional
-    proxy: null                           # per-provider proxy
-  openai_compat:
-    api_key: sk-xxx
-    base_url: https://api.openai.com/v1
-
-models:
-  - id: claude-sonnet-4-6
-    provider: anthropic
-    description: Claude Sonnet 4.6
-    alias: [sonnet]
-  - id: gpt-4o
-    provider: openai_compat
-    alias: [gpt]
-
-network:
-  proxy: http://127.0.0.1:7890           # global proxy
-
-server:                                  # `ethan serve` (HTTP API + Web UI) listen address
-  host: 0.0.0.0                          # set 127.0.0.1 for local-only access
-  port: 8900                             # explicit `--port` still wins; restart serve after changing
-
-defaults:
-  model: claude-sonnet-4-6
-  agent_name: Ethan
-  max_tokens: 4096
-  max_tool_iterations: 10
-  routing:
-    fast_rules:
-      - name: Home automation
-        keywords: ["turn off*light", "play music"]
-        tools: ["shell"]
-        skills: ["home-assistant-control"]
+kernel:
+  type: claude_sdk  # 可选：dsh, claude_sdk, pi_style
+  
+claude_config:
+  model: "claude-3-opus-20240229"
+  api_key_env: "ANTHROPIC_API_KEY"
 ```
 
-Environment variables in `.env` override config values (useful for secrets).
+重启服务即可切换。
 
-### Config directory layout
+---
 
+## 🎯 使用场景
+
+### 日常对话（Instant Mode）
+```python
+# 仅使用 Core Bundle (~150 tokens)
+用户："今天天气怎么样？"
+Ethan: "今天晴，25°C..."
 ```
-~/.ethan/
-├── config.yaml          # Main config (providers, models, routing)
-├── system/
-│   ├── identity.md      # Agent identity (name, role)
-│   ├── soul.md          # Behavioral principles
-│   ├── naming.md        # Conversation naming rules (injected into title prompt)
-│   └── heartbeat.md     # Heartbeat tasks (natural language)
-├── memory/
-│   ├── memory.db        # Structured memories + evidence + insights + vector index
-│   ├── playbook.json  # Behavioral rules
-│   └── user_profile.md  # User profile (narrative)
-├── skills/              # User-defined skills
-│   └── <name>/
-│       └── SKILL.md
-└── sessions.db          # Session history (SQLite)
+
+### 工作效率（Flow Mode）
+```python
+# 自动启用 Flow Bundle (~600 tokens)
+用户："飞书上发个消息给团队，说明天开会"
+Ethan: [自动加载 lark_chat 工具]
+      → 发送消息 → 返回确认
+```
+
+### 深度任务（Power Mode）
+```python
+# 按需加载 Power Bundles (~2000 tokens)
+用户："帮我分析这篇论文并生成报告"
+Ethan: [加载 deep_research + paper_analysis]
+      → 分阶段执行 → 实时反馈 → 生成报告
+```
+
+### 编程任务
+```python
+# 专业编程助手
+用户："写个 Python 脚本，读取 CSV 并画图"
+Ethan: [code_read + code_write + shell]
+      → 生成代码 → 运行测试 → 返回结果
 ```
 
 ---
 
-## Feature checklist
+## 🛠️ 架构亮点
 
-### Tool calls
+### 分层设计
+```
+Presentation Layer (UI)
+    ↓
+Service Layer (业务逻辑)
+    ↓
+Domain Layer (领域模型)
+    ↓
+Infrastructure Layer (基础设施)
+```
+
+### 事件驱动
+- 轻量级事件总线
+- 异步非阻塞
+- 完整可观测性
+
+### 插件化
+- 热插拔技能包
+- 运行时动态加载
+- 零停机更新
+
+---
+
+## 📊 性能指标
+
+| 指标 | 目标值 | 说明 |
+|------|--------|------|
+| 启动时间 | < 1s | 冷启动 |
+| Context 占用 | < 300 tokens | 平均 |
+| 首字延迟 | < 200ms | P95 |
+| 代码生成 | < 2s | 简单任务 |
+| 长程任务恢复 | < 5s | 断点续传 |
+
+---
+
+## 📖 文档导航
+
+- **[架构设计](docs/architecture-v2.md)** - 详细架构说明
+- **[技能包系统](docs/smart-bundles.md)** - 场景化技能管理
+- **[内核切换](docs/kernel-switching.md)** - 多内核支持
+- **[API 参考](docs/api-reference.md)** - 完整 API 文档
+- **[最佳实践](docs/best-practices.md)** - 使用指南
+
+---
+
+## 🤝 贡献指南
+
+### 开发环境
 
 ```bash
-# 1. Web search
-Send: "What's the CNY/USD exchange rate today?"
-Verify: the tool timeline shows web_search
+# 克隆仓库
+git clone https://github.com/llm011/ethan-agent
+cd ethan-agent
 
-# 2. Shell execution
-Send: "List the files in the current directory"
-Verify: the shell tool runs and returns the file list
+# 安装依赖
+uv sync --extra dev
 
-# 3. Tool result compression (needs a large output)
-Send: "Run find / -name '*.log' 2>/dev/null | head -100"
-Verify: the reply starts with a [summary, N chars of raw output] prefix
+# 运行测试
+pytest tests/ -v
+
+# 运行 lint
+ruff check .
+mypy ethan/
 ```
 
-### Routing & caching
+### 提交 PR
 
-```bash
-# 1. Fast path speed
-Send: "turn off the light" (or any word in fast_keywords)
-Check the TTFT reading in the REPL status bar or Web UI — should be < 500ms
-
-# 2. Prompt caching
-Send two messages in a row and look at the ⚡cache number on the second one
-If > 0, the cache was hit
-
-# 3. Session open speed
-Ask the agent to read a local image, then click back into that session
-In DevTools Network, GET /sessions/{id} should be a few hundred KB (not MB)
-Card images should load from assets/images/, not start with data:image/png;base64
-
-# 4. Long-session paging
-Open a session with a few hundred messages and watch the first-screen request,
-GET /sessions/{id}?limit=30 — the body should hold only the latest 30 messages
-(a few hundred KB). Scrolling up fires another request with before=<oldest_id>,
-and once you reach the start (first user message) it stops: has_more=false
-```
+1. Fork 仓库
+2. 创建 feature branch (`feature/amazing-feature`)
+3. 提交变更 (`git commit -m 'add amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 打开 Pull Request
 
 ---
 
-## Roadmap
+## 📄 License
 
-### ✅ Completed
-
-**Core Agent**
-- [x] Multi-model provider (Anthropic + OpenAI-compatible: Gemini, GPT, Ollama, etc.)
-- [x] ReAct agent loop with streaming output
-- [x] Two-track router: fast / full, tool result compression, per-turn dedup cache
-- [x] Prompt Caching (Anthropic stable-prefix cache_control, ~0.1× input cost)
-
-**Five-Layer Memory**
-- [x] Hot/warm/cold sliding window + cheap-model batch compression
-- [x] Structured Facts (confidence scoring + conflict detection)
-- [x] Behavioral Procedures (learned from user corrections)
-- [x] User Profile — narrative document with five named sections
-- [x] Proactive memory write: `memory_write`, `procedure_write`, `profile_update`, `skill_create`
-- [x] Memory context isolation (anti-pollution XML tags)
-
-**Skill System**
-- [x] Dual-source loading (built-in + user-defined) + channel filter (`channels` field)
-- [x] `fast_path` opt-in, hit stats, correction collection, auto-update (Updater)
-- [x] Session-end background Skill generation (Hermes-style)
-- [x] Built-in semantic router (BGE INT8 + LR head, macro F1 0.851) for recall beyond keywords; silent keyword fallback. The same deps also power semantic dedup in memory.db
-- [x] Built-in skills: home-assistant, lark-im, channels, deepwiki
-
-**Tools**
-- [x] shell, web_search, web_fetch, file_read/write/list, rg, fd
-- [x] Knowledge base (sqlite-vec semantic search), scheduler tools, ACP → Claude Code
-- [x] Documents library: `doc_save`/`doc_list` collect Agent-produced docs into `~/.ethan/documents/` as a topic tree, browsable/favoritable in the Documents page, with a jump back to the conversation that produced each file
-
-**Scheduler**
-- [x] Cron + interval, SQLite persistence, auto-restore on restart
-- [x] `heartbeat.md`: natural-language periodic tasks executed automatically
-
-**Channels & API**
-- [x] Web UI (Next.js): chat timeline, memory, skills, schedule, knowledge, documents, settings
-- [x] Android App (Kotlin/Compose): mobile client with chat SSE, sessions, memory, settings
-- [x] Tool call timeline (collapsible, with icons + model-generation time + execution duration)
-- [x] Feishu/Lark WebSocket (no public IP required)
-- [x] OpenAI-compatible Completions API (`/v1/chat/completions`) + API key management
-- [x] Docker deployment + macOS launchd auto-start
+MIT License - 详见 [LICENSE](LICENSE) 文件
 
 ---
 
-### 🚀 Planned
+## 🙏 致谢
 
-**UX Improvements**
-- [x] **Message quoting**: hover a chat bubble → quote button → quote preview bar in input box; quote block injected to model, original message stays clean
-- [ ] **User profile settings**: avatar upload, display name shown in chat bubbles
-- [x] **Scheduler suggestions**: Agent detects ambiguous periodic needs in conversation and proactively lists 1-2-3 candidate schedules (clear intent → creates directly)
-- [ ] **Scheduler templates**: ready-to-use tasks (daily briefing, HA device check, knowledge digest)
+感谢所有贡献者和用户！
 
-**Channel Expansion**
-- [ ] **WeCom (Enterprise WeChat)**: alongside Feishu as a second messaging channel
-- [ ] **Mobile UI**: bottom tab nav, touch gestures, keyboard inset handling
-
-**Coding Agent Integration**
-- [x] **ACP multi-turn optimization**: `delegate_coding` resumes coding-agent sessions per (agent × working_dir). All three backends (Claude Code / OpenCode / Codex) run as JSON event streams with session resume, parsed into collapsible sub-steps in the Web UI tool timeline with highlighted final result. Codex reuses Ethan's cliproxy provider; timeouts terminate gracefully and clear the session to avoid resuming a stuck thread
-- [x] **Mirror sessions**: each `delegate()` becomes a real Ethan session (`source` = the actual tool: codex/claude/opencode) recording the dispatched query + coding-agent reply + steps, registered as a RunManager run so the delegated conversation can be watched live via SSE
-- [x] **Immersive tool modes**: switch the conversation mode to Codex / Claude Code / OpenCode; once switched, every message in that session continues the same tool (same tool session, per-session working dir). Supports both ad-hoc delegation and immersive continuous conversation. Messaging a mirror session also auto-resumes the matching tool
-- [ ] **MCP client**: connect external MCP servers, auto-register tools
-
-**Long-term**
-- [ ] **Space isolation**: separate memory/skills per context (life / work / project)
-- [ ] **Async interrupt**: detect new messages during long tasks, respond between tool calls
-- [ ] **Obsidian integration**: read/write Obsidian vault as knowledge base
+特别感谢：
+- DeepSeek Harness 团队（架构灵感）
+- Anthropic（Claude SDK）
+- Pi AI（交互体验）
+- 所有开源项目
 
 ---
 
-## Documentation
+**版本**: v0.5.395  
+**构建**: 2026-11-14  
+**维护**: Ethan Team
 
-Full documentation is available at **[llm011.github.io/ethan-agent](https://llm011.github.io/ethan-agent/)** — the same docs site you see in Ethan's built-in "Docs" tab.
-
-Key docs:
-- [Memory System](docs/memory.md) — five-layer architecture, dream consolidation, fact_sync
-- [Agent Loop](docs/agent-loop.md) — dual-track routing, memory injection
-- [Architecture Overview](docs/architecture.md) — system components, data flow
-- [Heartbeat](docs/heartbeat.md) — background maintenance, midnight loop
-- [ACP Server](docs/acp-server.md) — launch Ethan as an ACP runtime (Multica etc.)
-
-All source markdown lives in [`docs/`](./docs/); changes to `main` auto-deploy via GitHub Actions.
-
----
-
-## Contributors
-
-<!-- ALL-CONTRIBUTORS-LIST:START -->
-<a href="https://github.com/llm011/ethan-agent/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=llm011/ethan-agent" />
-</a>
-<!-- ALL-CONTRIBUTORS-LIST:END -->
-
----
-
-## License
-
-MIT

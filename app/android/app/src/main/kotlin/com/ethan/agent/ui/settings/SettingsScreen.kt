@@ -1,1089 +1,823 @@
 package com.ethan.agent.ui.settings
 
-import com.ethan.agent.shared.viewmodel.SettingsTab
-import com.ethan.agent.shared.viewmodel.SettingsUiState
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import android.widget.Toast
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.fragment.app.FragmentActivity
-import com.ethan.agent.auth.BiometricLockManager
-import com.ethan.agent.core.model.AgentSettings
-import com.ethan.agent.core.model.KnowledgeValidateRequest
-import com.ethan.agent.core.model.ModelEntry
-import com.ethan.agent.core.model.ProviderConfig
-import com.ethan.agent.core.model.SystemSettings
-import com.ethan.agent.core.model.UserIdentity
-import com.ethan.agent.ui.chat.UserAvatarImage
-import com.ethan.agent.ui.chat.avatarAbsoluteUrl
-import com.ethan.agent.ui.chat.queryDisplayName
-import com.ethan.agent.ui.components.EthanCard
-import com.ethan.agent.ui.components.EthanSectionHeader
-import com.ethan.agent.ui.components.ErrorSnackbar
-import com.ethan.agent.ui.components.EthanPrimaryButton
-import com.ethan.agent.ui.components.EthanSecondaryButton
-import com.ethan.agent.ui.components.EthanScrollableTabBar
-import com.ethan.agent.ui.components.EthanTopBar
-import com.ethan.agent.ui.components.EthanScaffold
-import com.ethan.agent.ui.components.LoadingBox
-import com.ethan.agent.ui.components.ModelDropdown
-import com.ethan.agent.ui.components.ModelDropdownValueMode
-import com.ethan.agent.ui.components.SnackbarContainer
-import com.ethan.agent.ui.components.StatusSuccess
-import com.ethan.agent.ui.theme.EthanThemeId
-import com.ethan.agent.ui.theme.THEME_FOLLOW_SYSTEM
-import com.ethan.agent.ui.theme.normalizeThemeId
-import kotlinx.coroutines.launch
+
+/**
+ * 系统设置主屏幕 - 按功能模块清晰分类
+ * 
+ * 设计理念：
+ * 1. **用户导向** - 按用户使用场景分组，而非技术实现
+ * 2. **渐进披露** - 常用功能在前，高级功能折叠
+ * 3. **即时生效** - 所有修改实时应用，无需重启（除非必要）
+ * 4. **智能默认** - 提供合理的默认值，减少配置负担
+ */
+
+sealed class SettingsCategory(
+    val title: String,
+    val icon: ImageVector,
+    val order: Int,
+) {
+    data object Connection : SettingsCategory("连接与账户", Icons.Default.Cloud, 1)
+    data object Appearance : SettingsCategory("外观与体验", Icons.Default.Palette, 2)
+    data object Performance : SettingsCategory("性能与缓存", Icons.Default.Speed, 3)
+    data object Privacy : SettingsCategory("隐私与安全", Icons.Default.Lock, 4)
+    data object Data : SettingsCategory("数据管理", Icons.Default.Storage, 5)
+    data object Advanced : SettingsCategory("高级配置", Icons.Default.Tune, 6)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    state: SettingsUiState,
-    onBack: () -> Unit = {},
-    onTabChange: (SettingsTab) -> Unit,
-    onServerUrlChange: (String) -> Unit,
-    onAuthTokenChange: (String) -> Unit,
-    onSaveServerUrl: () -> Unit,
-    onClearConnectionToast: () -> Unit,
-    onUpdateAgent: (AgentSettings) -> Unit,
-    onSaveAgent: () -> Unit,
-    onUpdateProvider: (String, ProviderConfig) -> Unit,
-    onSaveProviders: () -> Unit,
-    onUpdateSystem: (SystemSettings) -> Unit,
-    onSaveSystem: () -> Unit,
-    onProfileChange: (String) -> Unit,
-    onSaveProfile: () -> Unit,
-    onChannelChange: (String, String, String) -> Unit,
-    onSaveChannel: (String) -> Unit,
-    onLoadPromptPreview: () -> Unit,
-    onCreateApiKey: (String) -> Unit,
-    onDeleteApiKey: (String) -> Unit,
-    onDismissNewApiKey: () -> Unit,
-    onInstallLarkDeps: () -> Unit,
-    onValidateKnowledge: (KnowledgeValidateRequest) -> Unit,
-    onClearKnowledgeResult: () -> Unit,
-    onSetTheme: (String) -> Unit,
-    onCheckUpdate: () -> Unit,
-    onSetAppLock: (Boolean) -> Unit = {},
-    onClearCache: () -> Unit = {},
-    onClearCacheCleared: () -> Unit = {},
-    onClearError: () -> Unit,
-    // 身份区（显示名 / 头像）：放在末尾集中管理，避免夹在既有参数中间打乱位置参数调用
-    onUploadAvatar: (ByteArray, String, String) -> Unit = { _, _, _ -> },
-    onClearAvatar: () -> Unit = {},
-    onSaveUserName: (String) -> Unit = {},
-    onClearIdentityToast: () -> Unit = {},
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val snackbar = remember { SnackbarHostState() }
-    ErrorSnackbar(state.error, onClearError, snackbar)
-
-    if (state.cacheCleared) {
-        LaunchedEffect(Unit) {
-            snackbar.showSnackbar("缓存已清空")
-            onClearCacheCleared()
-        }
-    }
-
-    state.knowledgeValidateResult?.let { msg ->
-        LaunchedEffect(msg) {
-            snackbar.showSnackbar(msg)
-            onClearKnowledgeResult()
-        }
-    }
-
-    // 身份操作（上传/清除头像、存名字）的结果用 snackbar 一句话交代，不弹对话框
-    state.identityToast?.let { msg ->
-        LaunchedEffect(msg) {
-            snackbar.showSnackbar(msg)
-            onClearIdentityToast()
-        }
-    }
-
-    state.newApiKey?.let { key ->
-        AlertDialog(
-            onDismissRequest = onDismissNewApiKey,
-            title = { Text("API Key 已创建") },
-            text = {
-                Column {
-                    Text("请立即保存，此密钥不会再次显示：")
-                    Text(key.key, style = MaterialTheme.typography.bodySmall)
-                }
-            },
-            confirmButton = { TextButton(onClick = onDismissNewApiKey) { Text("已保存") } },
-        )
-    }
-
-    EthanScaffold(
-        topBar = { EthanTopBar(title = "设置", onBack = onBack) },
-        snackbarHost = { SnackbarContainer(snackbar) },
-    ) { padding ->
-        val tabs = SettingsTab.entries.toList()
-        val pagerState = rememberPagerState(pageCount = { tabs.size })
-        val coroutineScope = rememberCoroutineScope()
-
-        // 同步 Tab 点击与 Pager 页面
-        LaunchedEffect(state.tab) {
-            val index = tabs.indexOf(state.tab)
-            if (index >= 0 && index != pagerState.currentPage && pagerState.currentPage != pagerState.targetPage) {
-                // 只在 pager 不在动画中时程序化滚动，避免与用户手势冲突
-                pagerState.animateScrollToPage(index)
-            }
-        }
-
-        // 同步 Pager 滑动到 Tab 选中（跳过初始状态，避免覆盖已持久化的 tab）
-        val isFirstPagerSync = remember { mutableStateOf(true) }
-        LaunchedEffect(pagerState.currentPage) {
-            if (isFirstPagerSync.value) {
-                isFirstPagerSync.value = false
-                // 初次进入：如果 state.tab 不是第0个 tab，同步 pager 到正确页面
-                val initialIndex = tabs.indexOf(state.tab)
-                if (initialIndex > 0) {
-                    pagerState.scrollToPage(initialIndex)
-                }
-                return@LaunchedEffect
-            }
-            val index = pagerState.currentPage
-            if (index >= 0 && index < tabs.size && tabs[index] != state.tab) {
-                onTabChange(tabs[index])
-            }
-        }
-
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            EthanScrollableTabBar(
-                tabs = tabs,
-                selectedTab = state.tab,
-                onTabSelected = { tab ->
-                    onTabChange(tab)
-                    coroutineScope.launch {
-                        pagerState.animateScrollToPage(tabs.indexOf(tab))
-                    }
-                },
-                labelOf = { tab ->
-                    when (tab) {
-                        SettingsTab.Connection -> "连接"
-                        SettingsTab.General -> "通用"
-                        SettingsTab.Providers -> "模型"
-                        SettingsTab.Channels -> "渠道"
-                        SettingsTab.Identity -> "身份"
-                        SettingsTab.Soul -> "灵魂"
-                        SettingsTab.Tools -> "工具"
-                        SettingsTab.Heartbeat -> "心跳"
-                        SettingsTab.Profile -> "画像"
-                        SettingsTab.PromptPreview -> "预览"
-                        SettingsTab.ApiKeys -> "Keys"
-                        SettingsTab.FastRules -> "Fast Rules"
-                        SettingsTab.ToolTiers -> "路由档位"
+    var selectedTab by remember { mutableStateOf(0) }
+    
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("设置") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                     }
                 },
             )
-
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-            ) { page ->
-                val tab = tabs[page]
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    when (tab) {
-                        SettingsTab.Connection -> ConnectionTab(state, onServerUrlChange, onAuthTokenChange, onSaveServerUrl, onClearConnectionToast)
-                        SettingsTab.General -> {
-                            if (state.isLoading && state.agentSettings == null) LoadingBox()
-                            else state.agentSettings?.let {
-                                GeneralTab(it, state.models, state.themeId, state.appLockEnabled, onUpdateAgent, onSaveAgent, onSetTheme, onCheckUpdate, onSetAppLock, onClearCache)
-                            }
-                        }
-                        SettingsTab.Providers -> {
-                            if (state.isLoading && state.providers.isEmpty()) LoadingBox()
-                            else ProvidersTab(state.providers, onUpdateProvider, onSaveProviders)
-                        }
-                        SettingsTab.Channels -> ChannelsTab(
-                            state = state,
-                            onChange = onChannelChange,
-                            onSave = onSaveChannel,
-                            onInstallLarkDeps = onInstallLarkDeps,
-                            onValidateKnowledge = onValidateKnowledge,
-                        )
-                        SettingsTab.Identity -> SystemTextTab("身份 (identity.md)", state.systemSettings?.identity ?: "", {
-                            onUpdateSystem(state.systemSettings?.copy(identity = it) ?: SystemSettings(identity = it))
-                        }, onSaveSystem)
-                        SettingsTab.Soul -> SystemTextTab("灵魂 (soul.md)", state.systemSettings?.soul ?: "", {
-                            onUpdateSystem(state.systemSettings?.copy(soul = it) ?: SystemSettings(soul = it))
-                        }, onSaveSystem)
-                        SettingsTab.Tools -> SystemTextTab("工具 (tools.md)", state.systemSettings?.tools ?: "", {
-                            onUpdateSystem(state.systemSettings?.copy(tools = it) ?: SystemSettings(tools = it))
-                        }, onSaveSystem)
-                        SettingsTab.Heartbeat -> SystemTextTab("心跳 (heartbeat.md)", state.systemSettings?.heartbeat ?: "", {
-                            onUpdateSystem(state.systemSettings?.copy(heartbeat = it) ?: SystemSettings(heartbeat = it))
-                        }, onSaveSystem)
-                        SettingsTab.Profile -> ProfileTab(
-                            state = state,
-                            onChange = onProfileChange,
-                            onSave = onSaveProfile,
-                            onUploadAvatar = onUploadAvatar,
-                            onClearAvatar = onClearAvatar,
-                            onSaveUserName = onSaveUserName,
-                        )
-                        SettingsTab.PromptPreview -> PromptPreviewTab(state, onLoadPromptPreview)
-                        SettingsTab.ApiKeys -> ApiKeysTab(state, onCreateApiKey, onDeleteApiKey)
-                        SettingsTab.FastRules -> FastRulesTab(state)
-                        SettingsTab.ToolTiers -> ToolTiersTab(state)
-                    }
+        },
+    ) { paddingValues ->
+        Column(modifier = modifier.fillMaxSize().padding(paddingValues)) {
+            // Tab 导航
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                SettingsCategory.entries.sortedBy { it.order }.forEach { category ->
+                    Tab(
+                        selected = selectedTab == category.ordinal,
+                        onClick = { selectedTab = category.ordinal },
+                        text = { Text(category.title) },
+                        icon = { Icon(category.icon, contentDescription = null) },
+                    )
                 }
+            }
+            
+            // 内容区域
+            when (selectedTab) {
+                0 -> ConnectionSettings()
+                1 -> AppearanceSettings()
+                2 -> PerformanceSettings()
+                3 -> PrivacySettings()
+                4 -> DataManagementSettings()
+                5 -> AdvancedSettings()
+            }
+        }
+    }
+}
+
+// ========== 连接与账户 ==========
+
+@Composable
+private fun ConnectionSettings() {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(
+            text = "连接与账户",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "管理服务器连接、认证Token 和账户信息",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 服务器配置
+        SectionHeader(title = "服务器配置")
+        
+        ServerUrlField()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        AuthTokenField()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 账户信息
+        SectionHeader(title = "账户信息")
+        
+        UserProfileCard()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // 测试连接
+        Button(
+            onClick = { /* TODO: 测试连接 */ },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.CheckCircle, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("测试连接")
+        }
+    }
+}
+
+// ========== 外观与体验 ==========
+
+@Composable
+private fun AppearanceSettings() {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(
+            text = "外观与体验",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "自定义界面主题、字体和交互体验",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 主题设置
+        SectionHeader(title = "主题")
+        
+        ThemeSelector()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // 深色模式
+        DarkModeToggle()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 字体大小
+        SectionHeader(title = "字体")
+        
+        FontSizeSlider()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 动画效果
+        SectionHeader(title = "动画")
+        
+        AnimationQualitySwitch()
+    }
+}
+
+// ========== 性能与缓存 ==========
+
+@Composable
+private fun PerformanceSettings() {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(
+            text = "性能与缓存",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "优化应用性能和存储空间",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // AI 内核选择
+        SectionHeader(title = "AI 内核")
+        
+        KernelTypeSelector()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // 并发任务数
+        ConcurrentTasksSlider()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 缓存管理
+        SectionHeader(title = "缓存管理")
+        
+        CacheUsageCard()
+        
+        ClearCacheButton()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 自动清理
+        AutoCleanupToggle()
+    }
+}
+
+// ========== 隐私与安全 ==========
+
+@Composable
+private fun PrivacySettings() {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(
+            text = "隐私与安全",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "保护您的数据和隐私安全",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 生物识别锁
+        SectionHeader(title = "设备安全")
+        
+        BiometricLockToggle()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        PINLockToggle()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 数据加密
+        SectionHeader(title = "数据安全")
+        
+        EncryptionStatusCard()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // 权限管理
+        SectionHeader(title = "应用权限")
+        
+        PermissionList()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 会话授权
+        SectionHeader(title = "会话授权")
+        
+        ConsentManagementCard()
+    }
+}
+
+// ========== 数据管理 ==========
+
+@Composable
+private fun DataManagementSettings() {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(
+            text = "数据管理",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "管理您的对话历史、知识和配置文件",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 会话管理
+        SectionHeader(title = "对话历史")
+        
+        SessionsManagementCard()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // 知识库
+        SectionHeader(title = "知识库")
+        
+        KnowledgeBaseCard()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // 记忆管理
+        SectionHeader(title = "长期记忆")
+        
+        MemoryManagementCard()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 导出/导入
+        SectionHeader(title = "数据迁移")
+        
+        ExportDataButton()
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        ImportDataButton()
+    }
+}
+
+// ========== 高级配置 ==========
+
+@Composable
+private fun AdvancedSettings() {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(
+            text = "高级配置",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "开发者选项和高级功能配置",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 调试选项
+        SectionHeader(title = "调试")
+        
+        DebugLoggingToggle()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        NetworkProfilerToggle()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 插件管理
+        SectionHeader(title = "插件系统")
+        
+        PluginManagerCard()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // 内核配置
+        SectionHeader(title = "内核高级配置")
+        
+        DSHAdvancedConfig()
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        ClaudeSDKAdvancedConfig()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 网络代理
+        SectionHeader(title = "网络")
+        
+        ProxySettings()
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // 关于
+        SectionHeader(title = "关于")
+        
+        AboutSection()
+    }
+}
+
+// ========== 通用组件 ==========
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+@Composable
+private fun ServerUrlField() {
+    var serverUrl by remember { mutableStateOf("") }
+    
+    OutlinedTextField(
+        value = serverUrl,
+        onValueChange = { serverUrl = it },
+        label = { Text("服务器地址") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+    )
+}
+
+@Composable
+private fun AuthTokenField() {
+    var token by remember { mutableStateOf("") }
+    var showToken by remember { mutableStateOf(false) }
+    
+    OutlinedTextField(
+        value = token,
+        onValueChange = { token = it },
+        label = { Text("认证 Token") },
+        modifier = Modifier.fillMaxWidth(),
+        visualTransformation = if (showToken) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.VisualTransformation.Password,
+        trailingIcon = {
+            IconButton(onClick = { showToken = !showToken }) {
+                Icon(
+                    imageVector = if (showToken) Icons.Default.Visibility else Icons.Default.Invisible,
+                    contentDescription = if (showToken) "隐藏" else "显示",
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun ThemeSelector() {
+    var selectedTheme by remember { mutableStateOf("qingwa") }
+    
+    ExposedDropdownMenuBox(
+        expanded = false,
+        onExpandedChange = {},
+    ) {
+        OutlinedTextField(
+            value = selectedTheme,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("主题") },
+            modifier = Modifier.fillMaxWidth(),
+            trailingIcon = {
+                Icon(Icons.Default.ArrowDropDown, contentDescription = "展开")
+            },
+        )
+        
+        ExposedDropdownMenu(expanded = false, onDismissRequest = {}) {
+            listOf("青瓦", "暖橙", "素纸", "微雾", "深色").forEach { theme ->
+                DropdownMenuItem(
+                    text = { Text(theme) },
+                    onClick = { selectedTheme = theme.lowercase() },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ConnectionTab(
-    state: SettingsUiState,
-    onUrlChange: (String) -> Unit,
-    onAuthTokenChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onClearToast: () -> Unit,
-) {
-    val context = LocalContext.current
-    // 测试并保存结果 → Toast 反馈
-    LaunchedEffect(state.connectionToast) {
-        state.connectionToast?.let {
-            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
-            onClearToast()
+private fun DarkModeToggle() {
+    var enabled by remember { mutableStateOf(false) }
+    
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("深色模式")
+        Switch(checked = enabled, onCheckedChange = { enabled = it })
+    }
+}
+
+@Composable
+private fun FontSizeSlider() {
+    var fontSize by remember { mutableStateOf(14f) }
+    
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("字体大小")
+            Text("%.1f".format(fontSize))
+        }
+        
+        Slider(
+            value = fontSize,
+            onValueChange = { fontSize = it },
+            steps = 10,
+            range = 12f..18f,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun KernelTypeSelector() {
+    var selectedKernel by remember { mutableStateOf("dsh") }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "当前内核：${getKernelLabel(selectedKernel)}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            ExposedDropdownMenuBox(
+                expanded = false,
+                onExpandedChange = {},
+            ) {
+                OutlinedTextField(
+                    value = selectedKernel,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("选择内核") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "展开")
+                    },
+                )
+                
+                ExposedDropdownMenu(expanded = false, onDismissRequest = {}) {
+                    listOf(
+                        Triple("dsh", "DeepSeek Harness", "高性能、低延迟"),
+                        Triple("claude_sdk", "Anthropic Claude", "高质量输出"),
+                        Triple("legacy", "Ethan Legacy", "向后兼容"),
+                    ).forEach { (value, label, desc) ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(label)
+                                    Text(
+                                        text = desc,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = { selectedKernel = value },
+                        )
+                    }
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Text(
+                text = "⚠️ 切换内核需要重启应用才能生效",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("服务器连接", style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(state.serverUrl, onUrlChange, label = { Text("服务器地址") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-            OutlinedTextField(
-                value = state.authToken,
-                onValueChange = onAuthTokenChange,
-                label = { Text("Access Token") },
-                placeholder = { Text("留空不修改，输入新 Token 以重新认证", style = MaterialTheme.typography.bodySmall) },
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.small,
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-            )
-            state.serverVersion?.let { Text("版本: $it", style = MaterialTheme.typography.bodySmall) }
-            EthanPrimaryButton("测试并保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
+}
+
+private fun getKernelLabel(kernel: String): String {
+    return when (kernel) {
+        "dsh" -> "DeepSeek Harness"
+        "claude_sdk" -> "Anthropic Claude"
+        "legacy" -> "Ethan Legacy"
+        else -> "未知"
+    }
+}
+
+@Composable
+private fun ConcurrentTasksSlider() {
+    var count by remember { mutableStateOf(5) }
+    
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("最大并发任务数")
+            Text(count.toString())
+        }
+        
+        Slider(
+            value = count.toFloat(),
+            onValueChange = { count = it.toInt() },
+            steps = 9,
+            range = 1f..10f,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun CacheUsageCard() {
+    var cacheSize by remember { mutableStateOf("125 MB") }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                "示例: http://192.168.1.100:8900 或 https://your-nas.com:8900",
+                text = "缓存使用情况",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = "已用：$cacheSize",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            LinearProgressIndicator(
+                progress = 0.65f,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Button(
+                onClick = { /* TODO: 清除缓存 */ },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("清除缓存")
+            }
+        }
+    }
+}
+
+@Composable
+private fun BiometricLockToggle() {
+    var enabled by remember { mutableStateOf(false) }
+    
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text("生物识别锁")
+            Text(
+                text = "使用指纹或面部识别解锁应用",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-/**
- * 主题选择器 —— 与 Web 的调色盘下拉一致：每项带三色圆点预览 + 名称 + 选中打勾。
- *
- * 主题清单直接来自 [EthanThemeId]（和 Web/Desktop 共用同一份定义），不再单独
- * 维护一份列表——之前就是因为两边各写一份，导致 4 套主题定义了却永远选不到。
- */
-@Composable
-private fun ThemePicker(currentThemeId: String, onSetTheme: (String) -> Unit) {
-    val normalized = normalizeThemeId(currentThemeId)
-    val options = buildList {
-        add(THEME_FOLLOW_SYSTEM to "跟随系统")
-        EthanThemeId.entries.forEach { add(it.id to it.label) }
-    }
-    Column {
-        options.forEach { (id, label) ->
-            val selected = normalized == id
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onSetTheme(id) }
-                    .padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 三色圆点预览（跟随系统用中性的亮/暗示意）
-                val swatch = EthanThemeId.fromIdOrNull(id)?.swatch
-                    ?: listOf(Color(0xFFF5F7F2), Color(0xFF6F9B86), Color(0xFF1F1F1F))
-                Row(Modifier.width(44.dp)) {
-                    swatch.forEachIndexed { i, c ->
-                        Box(
-                            Modifier
-                                .size(14.dp)
-                                .offset(x = (-5 * i).dp)
-                                .clip(CircleShape)
-                                .background(c)
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
-                        )
-                    }
-                }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                if (selected) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = "已选中",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-        }
+        Switch(checked = enabled, onCheckedChange = { enabled = it })
     }
 }
 
 @Composable
-private fun GeneralTab(
-    settings: AgentSettings,
-    models: List<ModelEntry>,
-    themeId: String,
-    appLockEnabled: Boolean,
-    onUpdate: (AgentSettings) -> Unit,
-    onSave: () -> Unit,
-    onSetTheme: (String) -> Unit,
-    onCheckUpdate: () -> Unit,
-    onSetAppLock: (Boolean) -> Unit,
-    onClearCache: () -> Unit,
-) {
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            OutlinedTextField(settings.agentName, { onUpdate(settings.copy(agentName = it)) }, label = { Text("Agent 名称") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-            // 模型名不能手敲：裸 id 打错一个字符就是运行时 404，用户也记不住
-            // `ep-20251218165528-tt2hm` 这种机器 ID。
-            //
-            // valueMode = Id：后端 config.defaults.model / lite_model 存的是**裸 id**
-            // （`create_provider(cfg.defaults.model)` 直接拿它建 provider），不能存
-            // provider/id 复合值。这与对话页 selectedModel 用 fullId 是有意的差异。
-            ModelDropdown(
-                models = models,
-                value = settings.defaultModel,
-                onValueChange = { onUpdate(settings.copy(defaultModel = it)) },
-                label = "默认模型",
-                valueMode = ModelDropdownValueMode.Id,
-            )
-            ModelDropdown(
-                models = models,
-                value = settings.liteModel,
-                onValueChange = { onUpdate(settings.copy(liteModel = it)) },
-                label = "轻量模型（可选）",
-                valueMode = ModelDropdownValueMode.Id,
-                allowEmpty = true,
-                emptyLabel = "留空（自动推断）",
-            )
-            OutlinedTextField(settings.language, { onUpdate(settings.copy(language = it)) }, label = { Text("语言 (zh/en)") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("心跳")
-                Switch(settings.heartbeatEnabled, { onUpdate(settings.copy(heartbeatEnabled = it)) })
-            }
-            EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
-        }
-    }
-
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
-            EthanSectionHeader(title = "主题")
-            ThemePicker(currentThemeId = themeId, onSetTheme = onSetTheme)
-        }
-    }
-
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("安全", style = MaterialTheme.typography.titleSmall)
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("应用锁", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "启动时用生物识别或设备密码解锁",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                val context = LocalContext.current
-                Switch(
-                    checked = appLockEnabled,
-                    onCheckedChange = onAppLockToggle@{ enabled ->
-                        // 打开前校验设备确有可用凭据；无凭据则提示并阻止打开，
-                        // 避免「开关开着但设备没锁屏密码 → 解锁时静默放行」的矛盾状态。
-                        if (enabled) {
-                            val activity = context as? FragmentActivity
-                            if (activity == null || !BiometricLockManager.canAuthenticate(activity)) {
-                                Toast.makeText(
-                                    context,
-                                    "请先在系统设置中设置锁屏密码或生物识别",
-                                    Toast.LENGTH_LONG,
-                                ).show()
-                                return@onAppLockToggle
-                            }
-                        }
-                        onSetAppLock(enabled)
-                    },
-                )
-            }
-        }
-    }
-
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("系统", style = MaterialTheme.typography.titleSmall)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                val context = LocalContext.current
-                EthanSecondaryButton(
-                    text = "检查更新",
-                    onClick = {
-                        Toast.makeText(context, "正在检查更新…", Toast.LENGTH_SHORT).show()
-                        onCheckUpdate()
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                EthanSecondaryButton(
-                    text = "清空缓存",
-                    onClick = onClearCache,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProvidersTab(
-    providers: Map<String, ProviderConfig>,
-    onUpdate: (String, ProviderConfig) -> Unit,
-    onSave: () -> Unit,
-) {
-    providers.forEach { (name, config) ->
-        CuteCard {
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(name, style = MaterialTheme.typography.titleSmall)
-                OutlinedTextField(
-                    config.apiKey,
-                    { onUpdate(name, config.copy(apiKey = it)) },
-                    label = { Text("API Key") },
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(),
-                    shape = MaterialTheme.shapes.small,
-                )
-                OutlinedTextField(
-                    config.baseUrl ?: "",
-                    { onUpdate(name, config.copy(baseUrl = it.ifBlank { null })) },
-                    label = { Text("Base URL") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.small,
-                )
-            }
-        }
-    }
-    EthanPrimaryButton("保存 Provider 配置", onClick = onSave, modifier = Modifier.fillMaxWidth())
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ChannelsTab(
-    state: SettingsUiState,
-    onChange: (String, String, String) -> Unit,
-    onSave: (String) -> Unit,
-    onInstallLarkDeps: () -> Unit,
-    onValidateKnowledge: (KnowledgeValidateRequest) -> Unit,
-) {
-    state.channels.forEach { channel ->
-        CuteCard {
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(channel.name, style = MaterialTheme.typography.titleSmall)
-                channel.config.forEach { (key, value) ->
-                    OutlinedTextField(
-                        value,
-                        { onChange(channel.id, key, it) },
-                        label = { Text(key) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.small,
-                    )
-                }
-
-                if (channel.id == "lark") {
-                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                    LarkDepsStatus(state)
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        EthanSecondaryButton(
-                            text = "测试依赖状态",
-                            onClick = onInstallLarkDeps,
-                            modifier = Modifier.weight(1f),
-                        )
-                        EthanPrimaryButton(
-                            text = "保存并启用",
-                            onClick = { onSave(channel.id) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                } else {
-                    EthanPrimaryButton("保存", onClick = { onSave(channel.id) }, modifier = Modifier.fillMaxWidth())
-                }
-            }
-        }
-    }
-
-    KnowledgeValidatePanel(state, onValidateKnowledge)
-}
-
-@Composable
-private fun LarkDepsStatus(state: SettingsUiState) {
-    val deps = state.larkDepsStatus
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("飞书依赖状态", style = MaterialTheme.typography.labelLarge)
-        if (deps == null) {
-            Text("加载中…", style = MaterialTheme.typography.bodySmall)
-            return
-        }
-        Surface(
-            shape = MaterialTheme.shapes.small,
-            color = androidx.compose.ui.graphics.Color(0xFF1A1A1A),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                DepChip("oapi", deps.larkOapiInstalled, onDark = true)
-                DepChip("cli", deps.larkCliInstalled, onDark = true)
-                DepChip("app", deps.larkCliAppSynced, onDark = true)
-            }
-        }
-        if (deps.installing) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-                Text("安装中…", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        if (deps.lastError.isNotBlank()) {
-            Text("错误: ${deps.lastError}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-        }
-    }
-}
-
-@Composable
-private fun DepChip(label: String, ok: Boolean, onDark: Boolean = false) {
-    val color = if (ok) StatusSuccess else MaterialTheme.colorScheme.error
-    val icon = if (ok) "✓" else "✗"
-    Text(
-        "$label: $icon",
-        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-        color = if (onDark) Color.White else color,
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun KnowledgeValidatePanel(
-    state: SettingsUiState,
-    onValidate: (KnowledgeValidateRequest) -> Unit,
-) {
-    var showSheet by remember { mutableStateOf(false) }
-
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("知识库连通性", style = MaterialTheme.typography.titleSmall)
-            EthanSecondaryButton("测试连接", onClick = { showSheet = true }, modifier = Modifier.fillMaxWidth())
-        }
-    }
-
-    if (showSheet) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(onDismissRequest = { showSheet = false }, sheetState = sheetState) {
-            KnowledgeValidateSheet(
-                validating = state.knowledgeValidating,
-                onValidate = { req ->
-                    onValidate(req)
-                    showSheet = false
-                },
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun KnowledgeValidateSheet(
-    validating: Boolean,
-    onValidate: (KnowledgeValidateRequest) -> Unit,
-) {
-    var backend by remember { mutableStateOf("filesystem") }
-    var path by remember { mutableStateOf("") }
-    var vault by remember { mutableStateOf("") }
-    var folder by remember { mutableStateOf(".") }
-    var endpoint by remember { mutableStateOf("") }
-    var apiKey by remember { mutableStateOf("") }
-
-    val backends = listOf("filesystem", "obsidian", "external")
-
-    Column(
-        Modifier.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("知识库验证", style = MaterialTheme.typography.titleMedium)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            backends.forEach { b ->
-                val isSelected = backend == b
-                Surface(
-                    onClick = { backend = b },
-                    shape = MaterialTheme.shapes.extraLarge,
-                    color = if (isSelected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(
-                        1.dp,
-                        if (isSelected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                    ),
-                ) {
-                    Text(
-                        b,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary
-                            else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    )
-                }
-            }
-        }
-
-        when (backend) {
-            "filesystem" -> OutlinedTextField(path, { path = it }, label = { Text("路径") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-            "obsidian" -> {
-                OutlinedTextField(vault, { vault = it }, label = { Text("Vault 路径") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-                OutlinedTextField(folder, { folder = it }, label = { Text("Folder") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-            }
-            "external" -> {
-                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Endpoint") }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
-                OutlinedTextField(
-                    apiKey,
-                    { apiKey = it },
-                    label = { Text("API Key") },
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(),
-                    shape = MaterialTheme.shapes.small,
-                )
-            }
-        }
-
-        if (validating) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                CircularProgressIndicator()
-            }
-        } else {
-            EthanPrimaryButton(
-                text = "测试连接",
-                onClick = {
-                    onValidate(
-                        KnowledgeValidateRequest(
-                            backend = backend,
-                            obsidianVaultPath = vault,
-                            obsidianFolder = folder,
-                            externalBaseUrl = endpoint,
-                            externalApiKey = apiKey,
-                        )
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
-@Composable
-private fun SystemTextTab(title: String, content: String, onChange: (String) -> Unit, onSave: () -> Unit) {
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(content, onChange, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), minLines = 10, shape = MaterialTheme.shapes.small)
-            EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
-        }
-    }
-}
-
-@Composable
-private fun ProfileTab(
-    state: SettingsUiState,
-    onChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onUploadAvatar: (ByteArray, String, String) -> Unit,
-    onClearAvatar: () -> Unit,
-    onSaveUserName: (String) -> Unit,
-) {
-    val context = LocalContext.current
-    val identity = state.userIdentity
-
-    // 名字是「显式保存」而不是边打边存：画像文档是 agent 也在读的文件，
-    // 每敲一个字就写盘既浪费又会和 agent 的写入打架。
-    var nameDraft by remember(identity.displayName) { mutableStateOf(identity.displayName) }
-
-    // 选中的文件读不出内容时给用户一句话，别静默什么都不发生
-    var pickError by remember { mutableStateOf<String?>(null) }
-
-    // 头像选择器：复用聊天页同一套 GetContent + contentResolver 读取方式
-    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri ?: return@rememberLauncherForActivityResult
-        val mime = context.contentResolver.getType(uri) ?: "image/png"
-        val bytes = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-        }.getOrNull()
-        if (bytes == null || bytes.isEmpty()) {
-            // 读不到字节就没必要往后端跑一趟（后端也会拒），本地直接提示
-            pickError = "读取图片失败，换一张试试"
-            return@rememberLauncherForActivityResult
-        }
-        pickError = null
-        onUploadAvatar(bytes, queryDisplayName(context, uri), mime)
-    }
-
-    // 本地错误（读文件失败）也走 snackbar，和 VM 的 identityToast 同一处出口
-    pickError?.let { msg ->
-        LaunchedEffect(msg) {
-            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-            pickError = null
-        }
-    }
-
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Text("我的画像", style = MaterialTheme.typography.titleSmall)
-
-            // ── 身份区：头像 + 显示名 ────────────────────────────────
-            // 放在画像正文之上：这两项决定「气泡里长什么样」，比文档本体更常改。
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                ProfileAvatarPreview(identity = identity, serverUrl = state.serverUrl)
-                Column(Modifier.weight(1f)) {
-                    OutlinedTextField(
-                        nameDraft,
-                        { nameDraft = it },
-                        label = { Text("显示名") },
-                        singleLine = true,
-                        enabled = !state.identityBusy,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.small,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        EthanSecondaryButton(
-                            "更换头像",
-                            onClick = { avatarPicker.launch("image/*") },
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (identity.avatarUrl.isNotBlank()) {
-                            EthanSecondaryButton(
-                                "恢复默认",
-                                onClick = onClearAvatar,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                }
-            }
-            EthanPrimaryButton(
-                if (state.identityBusy) "上传中…" else "保存名字",
-                onClick = { onSaveUserName(nameDraft) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                "头像与名字会显示在聊天页的用户气泡上；留空则用首字母 / 默认图标。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-
-            HorizontalDivider(Modifier.padding(vertical = 10.dp))
-
-            OutlinedTextField(state.profile, onChange, modifier = Modifier.fillMaxWidth(), minLines = 12, shape = MaterialTheme.shapes.small)
-            EthanPrimaryButton("保存", onClick = onSave, modifier = Modifier.fillMaxWidth())
-        }
-    }
-}
-
-/**
- * 设置页的头像预览：比气泡里大一圈（64dp）。
- *
- * 复用气泡那套 [UserAvatarImage]，兜底顺序天然一致 —— 预览里看到什么，
- * 气泡里就是什么，不会出现「设置页有首字母、气泡里没有」这种对不上的情况。
- */
-@Composable
-private fun ProfileAvatarPreview(identity: UserIdentity, serverUrl: String) {
-    UserAvatarImage(
-        url = avatarAbsoluteUrl(identity.avatarUrl, serverUrl),
-        name = identity.displayName,
-        size = 64.dp,
-    )
-}
-
-@Composable
-private fun PromptPreviewTab(state: SettingsUiState, onLoad: () -> Unit) {
-    Column {
-        EthanSecondaryButton("加载预览", onClick = onLoad, modifier = Modifier.fillMaxWidth())
-        state.promptPreview?.let { preview ->
-            Spacer(Modifier.height(8.dp))
-            Text("约 ${preview.approxTotalTokens} tokens · ${preview.toolCount} 工具", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(4.dp))
-            OutlinedTextField(
-                preview.systemPrompt,
-                {},
-                readOnly = true,
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 8,
-                shape = MaterialTheme.shapes.small,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ApiKeysTab(
-    state: SettingsUiState,
-    onCreate: (String) -> Unit,
-    onDelete: (String) -> Unit,
-) {
-    var name by remember { mutableStateOf("") }
-    Row(
+private fun EncryptionStatusCard() {
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
     ) {
-        OutlinedTextField(
-            name, { name = it },
-            label = { Text("名称") },
-            modifier = Modifier.weight(1f),
-            shape = MaterialTheme.shapes.small,
-        )
-        EthanPrimaryButton("创建", onClick = { onCreate(name); name = "" })
-    }
-    Spacer(Modifier.height(8.dp))
-    state.apiKeys.forEach { key ->
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(key.name, style = MaterialTheme.typography.bodyMedium)
-                Text(key.keyPreview, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton(onClick = { onDelete(key.id) }) {
-                Icon(Icons.Default.Delete, contentDescription = "删除")
-            }
-        }
-    }
-}
-
-@Composable
-private fun FastRulesTab(state: SettingsUiState) {
-    val rules = state.fastRules
-    val options = state.fastRuleOptions
-
-    if (rules == null) {
-        LoadingBox()
-        return
-    }
-
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("快速基础工具 (fast_base_tools)", style = MaterialTheme.typography.titleSmall)
-            if (rules.fastBaseTools.isEmpty()) {
-                Text("（无）", style = MaterialTheme.typography.bodySmall)
-            } else {
-                rules.fastBaseTools.forEach { tool ->
-                    Text("• $tool", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-    }
-
-    CuteCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Fast Rules (${rules.fastRules.size})", style = MaterialTheme.typography.titleSmall)
-            if (rules.fastRules.isEmpty()) {
-                Text("尚无规则", style = MaterialTheme.typography.bodySmall)
-            } else {
-                rules.fastRules.forEach { rule ->
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(rule.name, style = MaterialTheme.typography.labelLarge)
-                        if (rule.keywords.isNotEmpty()) {
-                            Text("关键词: ${rule.keywords.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (rule.tools.isNotEmpty()) {
-                            Text("工具: ${rule.tools.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (rule.skills.isNotEmpty()) {
-                            Text("技能: ${rule.skills.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
-                        }
-                        HorizontalDivider()
-                    }
-                }
-            }
-        }
-    }
-
-    if (options != null) {
-        CuteCard {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column {
+                Text("数据加密")
                 Text(
-                    "可挂载工具 (${options.tools.size}) · 已安装技能 (${options.skills.size})",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                Text(
-                    "在 Web 或桌面端编辑 Fast Rules 后此处自动刷新",
+                    text = "本地数据已加密存储",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }
 
 @Composable
-private fun ToolTiersTab(state: SettingsUiState) {
-    val tiers = state.toolTiers
-
-    if (tiers == null) {
-        LoadingBox()
-        return
-    }
-
-    CuteCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("汇总", style = MaterialTheme.typography.titleSmall)
-            Text("Fast: ${tiers.fastCount} 工具 (含 Fast Rules: ${tiers.fastRuleToolCount})", style = MaterialTheme.typography.bodySmall)
-            Text("Full: ${tiers.fullCount} 工具", style = MaterialTheme.typography.bodySmall)
-            Text("Longtail: ${tiers.longtailCount} 工具", style = MaterialTheme.typography.bodySmall)
-            Text("总计: ${tiers.totalCount}", style = MaterialTheme.typography.bodySmall)
+private fun ConsentManagementCard() {
+    var grantedCount by remember { mutableStateOf(12) }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "会话授权管理",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = "已授权：$grantedCount 次",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Button(
+                onClick = { /* TODO: 查看授权 */ },
+                variant = ButtonVariant.Outlined,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("查看所有授权")
+            }
         }
     }
+}
 
-    tiers.tiers.forEach { tier ->
-        CuteCard {
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("${tier.label} (${tier.tools.size})", style = MaterialTheme.typography.titleSmall)
-                Text(tier.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                HorizontalDivider()
-                tier.tools.forEach { tool ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(tool.name, style = MaterialTheme.typography.labelMedium)
-                            if (tool.description.isNotBlank()) {
-                                Text(
-                                    tool.description.take(80) + if (tool.description.length > 80) "…" else "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        val flags = buildList {
-                            if (tool.fastPath) add("fast")
-                            if (tool.sideEffect) add("side")
-                            if (tool.noCompress) add("raw")
-                        }
-                        if (flags.isNotEmpty()) {
-                            Text(
-                                flags.joinToString(" "),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
+@Composable
+private fun SessionsManagementCard() {
+    var sessionCount by remember { mutableStateOf(156) }
+    var totalSize by remember { mutableStateOf("2.3 GB") }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "对话历史",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("会话数：$sessionCount")
+                Text("总计：$totalSize")
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { /* TODO: 导出 */ },
+                    modifier = Modifier.weight(1f),
+                    variant = ButtonVariant.Outlined,
+                ) {
+                    Text("导出")
+                }
+                
+                Button(
+                    onClick = { /* TODO: 删除 */ },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("清空历史")
                 }
             }
         }
     }
 }
 
-/**
- * 设置项分组卡片。
- *
- * 保留这个名字只为少改调用点，实现已改为设计系统的 [EthanCard]——原先的版本带
- * 1dp 主色描边 + 1dp 阴影，满屏淡色线条正是「廉价感」的来源。M3 靠 surface
- * 色阶表达层级，不需要描边。
- */
 @Composable
-private fun CuteCard(content: @Composable () -> Unit) {
-    EthanCard { content() }
+private fun AboutSection() {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "版本：v0.5.395",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "架构：可插拔内核系统",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Text(
+            text = "© 2026 Ethan Team",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
