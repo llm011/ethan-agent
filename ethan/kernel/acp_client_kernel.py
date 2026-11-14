@@ -165,9 +165,28 @@ class AcpClientKernel(KernelRuntime):
 
         queue: asyncio.Queue = asyncio.Queue()
         driver = asyncio.create_task(self._drive(prompt, request, queue))
+        # 活性检测：外部内核**不走 Ethan 的 LoopMonitor**——那个熔断器在
+        # Agent.stream_chat 内部，内核模式下根本不会执行。所以 DSH/Claude 卡住时
+        # Ethan 侧完全无感知，只能等整轮 timeout（180-300s）才报错。
+        #
+        # 这里补一层：超过 IDLE_TIMEOUT 秒没收到任何事件，就主动判定卡死。
+        # 阈值取 120s 而不是 30s——外部 CLI 在"思考 + 跑工具"期间本来就可能长时间
+        # 安静（比如跑一个 60 秒的构建），误判比晚报更糟。
+        idle_timeout = self._idle_timeout(request)
         try:
             while True:
-                item = await queue.get()
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=idle_timeout)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "%s 内核 %ds 无任何事件，判定卡死", self.display_name, idle_timeout
+                    )
+                    yield (
+                        f"[{self.display_name} 已 {idle_timeout} 秒没有任何输出，"
+                        "已中止本轮。外部内核不受 Ethan 的循环熔断保护，"
+                        "长时间无响应通常是它自己的 CLI 卡住了（可看后端日志确认）。]"
+                    )
+                    break
                 if item is _DONE:
                     break
                 if isinstance(item, tuple) and item[0] == "__error__":
@@ -483,6 +502,14 @@ class AcpClientKernel(KernelRuntime):
     # tool_call_id → (工具名, 起始时间)。ToolCallProgress 不带 title，
     # 必须在 start 时记下来，否则 done 事件只能报 "tool"，前端时间线就没名字了。
     _tool_names: dict[str, str] = {}
+
+    def _idle_timeout(self, request: KernelRequest) -> int:
+        """多久没事件算卡死（秒）。
+
+        外部内核不走 Ethan 的 LoopMonitor，这是唯一的活性兜底。
+        coding 任务放宽到 300s：跑构建/测试时长时间无输出是正常的。
+        """
+        return 300 if (request.task_kind or "") == "coding" else 120
 
     def _build_prompt(self, request: KernelRequest) -> str:
         msgs = request.messages or []

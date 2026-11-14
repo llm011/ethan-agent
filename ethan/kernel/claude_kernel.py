@@ -226,8 +226,22 @@ class ACPKernelBase(KernelRuntime):
 
         driver = asyncio.create_task(_drive())
         try:
+            # 活性检测：外部内核不走 Ethan 的 LoopMonitor（那个熔断器在
+            # Agent.stream_chat 内部，内核模式下不执行）。超过阈值无事件就判定卡死，
+            # 而不是干等到整轮 timeout。
+            idle_timeout = self._idle_timeout(request)
             while True:
-                item = await queue.get()
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=idle_timeout)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "%s 内核 %ds 无任何事件，判定卡死", self.display_name, idle_timeout
+                    )
+                    yield (
+                        f"[{self.display_name} 已 {idle_timeout} 秒没有任何输出，已中止本轮。"
+                        "外部内核不受 Ethan 的循环熔断保护，长时间无响应通常是它自己卡住了。]"
+                    )
+                    break
                 if item is _DONE:
                     break
                 if isinstance(item, tuple):
@@ -348,6 +362,10 @@ class ACPKernelBase(KernelRuntime):
         if len(turns) == 1:
             return turns[0]
         return "以下是对话历史，请接着回答最后一条用户消息：\n\n" + "\n\n".join(turns)
+
+    def _idle_timeout(self, request: KernelRequest) -> int:
+        """多久没事件算卡死（秒）。coding 任务放宽，跑构建时静默是常态。"""
+        return 300 if (request.task_kind or "") == "coding" else 120
 
     def _timeout(self, request: KernelRequest) -> int:
         # coding 任务本来就慢，给足时间；普通对话也别短到秒退

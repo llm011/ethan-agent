@@ -953,3 +953,61 @@ def test_real_model_matches_model_for_ethan_kernel():
     rt.kind = KernelKind.ETHAN
     runner = KernelRunner(rt, None, model="buddy-proxy/deepseek-v4.1-flash")
     assert runner.model == runner.real_model
+
+
+# ── 活性检测：外部内核不走 Ethan 的 LoopMonitor ──────────────
+
+
+def test_acp_kernel_idle_timeout_values():
+    """coding 任务放宽到 300s：跑构建/测试时长时间静默是正常的。
+
+    误判比晚报更糟——用户正在等一个 60 秒的构建，被中途掐断会非常恼火。
+    """
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+
+    k = DshAcpKernel()
+    assert k._idle_timeout(KernelRequest(task_kind="chat")) == 120
+    assert k._idle_timeout(KernelRequest(task_kind="coding")) == 300
+
+
+def test_claude_kernel_has_idle_timeout():
+    from ethan.kernel.claude_kernel import ClaudeCodeKernel
+
+    k = ClaudeCodeKernel()
+    assert k._idle_timeout(KernelRequest(task_kind="chat")) == 120
+    assert k._idle_timeout(KernelRequest(task_kind="coding")) == 300
+
+
+def test_idle_timeout_aborts_stalled_kernel(monkeypatch):
+    """内核长时间不产事件时必须中止并给出可读提示。
+
+    背景：外部内核**完全绕开 Ethan 的 LoopMonitor**（那套熔断在
+    Agent.stream_chat 内部，内核模式下根本不执行）。没有这层兜底，
+    DSH 卡住时 Ethan 只能干等到整轮 timeout（180-300s）才报错。
+    """
+    import ethan.acp as acp_mod
+    from ethan.acp.models import ACPResult
+    from ethan.kernel.claude_kernel import ClaudeCodeKernel
+
+    async def hangs_forever(prompt, cwd=None, prefer="auto", timeout=180, resume=True,
+                            reset_session=False, user_id="", mirror=True, on_event=None,
+                            mcp_config_path=None):
+        # 永远不返回：模拟 CLI 卡死
+        await asyncio.sleep(9999)
+        return ACPResult(success=False, output="", agent="claude")
+
+    monkeypatch.setattr(acp_mod, "delegate", hangs_forever)
+
+    # 把阈值压到 0.2s，避免测试等 120 秒
+    k = ClaudeCodeKernel()
+    monkeypatch.setattr(k, "_idle_timeout", lambda req: 0.2)
+
+    async def collect():
+        out = []
+        async for e in k.run(KernelRequest(messages=[Message(role="user", content="hi")])):
+            out.append(e)
+        return out
+
+    events = asyncio.run(collect())
+    text = "".join(e for e in events if isinstance(e, str))
+    assert "没有任何输出" in text, f"没有给出卡死提示：{text!r}"

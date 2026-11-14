@@ -133,6 +133,11 @@ fun SettingsScreen(
     onClearAvatar: () -> Unit = {},
     onSaveUserName: (String) -> Unit = {},
     onClearIdentityToast: () -> Unit = {},
+    // 多内核 / 语音后端：放在末尾，用默认值兜住既有调用方
+    onSelectKernel: (String) -> Unit = {},
+    onRefreshKernels: () -> Unit = {},
+    onSelectVoice: (String, String) -> Unit = { _, _ -> },
+    onRefreshVoice: () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     ErrorSnackbar(state.error, onClearError, snackbar)
@@ -233,6 +238,8 @@ fun SettingsScreen(
                         SettingsTab.ApiKeys -> "Keys"
                         SettingsTab.FastRules -> "Fast Rules"
                         SettingsTab.ToolTiers -> "路由档位"
+                        SettingsTab.Kernel -> "AI 内核"
+                        SettingsTab.Voice -> "语音"
                     }
                 },
             )
@@ -292,6 +299,18 @@ fun SettingsScreen(
                         SettingsTab.ApiKeys -> ApiKeysTab(state, onCreateApiKey, onDeleteApiKey)
                         SettingsTab.FastRules -> FastRulesTab(state)
                         SettingsTab.ToolTiers -> ToolTiersTab(state)
+                        SettingsTab.Kernel -> KernelSettings(
+                            data = state.kernels,
+                            busyKind = state.kernelBusy,
+                            onSelect = onSelectKernel,
+                            onRefresh = onRefreshKernels,
+                        )
+                        SettingsTab.Voice -> VoiceSettings(
+                            data = state.voiceBackends,
+                            busyKind = state.kernelBusy,
+                            onSelect = onSelectVoice,
+                            onRefresh = onRefreshVoice,
+                        )
                     }
                 }
             }
