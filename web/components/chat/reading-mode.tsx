@@ -176,7 +176,8 @@ export function ReadingMode({ open, message, annotations, sessionId, onClose, on
   // 新文本上画出错位高亮，等重定位完成后由 local 变化触发重画。
   useEffect(() => {
     if (open && contentRef.current && !pendingRelocateRef.current) {
-      const spans: HighlightSpan[] = local.map((a) => ({
+      // 同 message-bubble：过滤空元素，避免 a.color 抛异常整页崩
+      const spans: HighlightSpan[] = local.filter(Boolean).map((a) => ({
         id: a.id,
         type: a.type,
         color: a.color,

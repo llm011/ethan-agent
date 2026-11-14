@@ -3,17 +3,35 @@ import { useState } from "react";
 import { ArrowRight, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import type { ToolStep } from "./tool-timeline";
 
+/**
+ * entity_type → 展示配置。
+ *
+ * ⚠️ `builtin` 是**必需的兜底项**：第 73 行会写
+ * `ENTITY_CONFIG[et] ?? ENTITY_CONFIG.builtin`，如果这里没有 `builtin`，
+ * 遇到未知 entity_type 时 `cfg` 是 undefined → `cfg.color` 抛
+ * `Cannot read properties of undefined (reading 'color')`，整页白屏。
+ * 实测踩到：多内核接入后 ToolEvent 带 `entity_type="acp"/"pi"/"dsh"`，
+ * 这三种不在表里，一进有工具调用的会话就崩。
+ *
+ * 新增内核类型时记得也加进来（或用 builtin 兜底，至少不会崩）。
+ */
 const ENTITY_CONFIG: Record<string, { label: string; color: string }> = {
   file:      { label: "文件", color: "#22c55e" },
   system:    { label: "终端", color: "#a855f7" },
   knowledge: { label: "知识", color: "#6366f1" },
   search:    { label: "搜索", color: "#3b82f6" },
   connect:   { label: "互联", color: "#f97316" },
+  // 外部内核（多内核运行时）——各自一种颜色，便于区分是谁在干活
+  acp:       { label: "外部内核", color: "#0ea5e9" },
+  dsh:       { label: "DSH", color: "#14b8a6" },
+  pi:        { label: "Pi", color: "#eab308" },
+  // 兜底：任何未知 entity_type 都落到这里，**绝不能省**
+  builtin:   { label: "内置", color: "#94a3b8" },
 };
 
 function getColor(entityType: string | undefined) {
   if (!entityType) return ENTITY_CONFIG.connect.color;
-  return ENTITY_CONFIG[entityType]?.color ?? ENTITY_CONFIG.connect.color;
+  return ENTITY_CONFIG[entityType]?.color ?? ENTITY_CONFIG.builtin.color;
 }
 
 function formatDuration(ms?: number) {
@@ -70,7 +88,7 @@ export function SwimlaneDiagram({ steps, matchedSkills, onStepClick }: SwimlaneD
         {usedEntities.length > 0 && (
           <span className="opacity-40 text-[10px] flex items-center gap-0.5 shrink-0">
             {usedEntities.map((et) => {
-              const cfg = ENTITY_CONFIG[et] ?? ENTITY_CONFIG.builtin;
+              const cfg = ENTITY_CONFIG[et] ?? ENTITY_CONFIG.builtin;  // builtin 一定存在，见上方注释
               return (
                 <span key={et} className="flex items-center gap-0.5">
                   <span

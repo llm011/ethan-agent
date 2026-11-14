@@ -212,7 +212,15 @@ class AcpClientKernel(KernelRuntime):
         try:
             conn = acp.connect_to_agent(_Client(), proc.stdin, proc.stdout)
             await conn.initialize(protocol_version=1, client_capabilities=None)
-            session = await conn.new_session(cwd=cwd, mcp_servers=[])
+            # 把 Ethan 的工具挂给外部内核。
+            #
+            # 这是「内核作为 Ethan 的心脏驱动它干活」的落点：换掉的是大脑
+            # （规划/推理），不该丢掉手脚（工具/技能）。ACP 的 mcp_servers 是
+            # **每次 new_session 的参数**，不写入外部 agent 的任何配置文件——
+            # 实测验证过：注入后 dsh 自带的 22 个工具全在，只是多出带
+            # `mcp__ethan__*` 前缀的那批；不用 Ethan 直接跑 dsh 完全不受影响。
+            mcp_servers = self._build_mcp_servers()
+            session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
             request.session_id = session.session_id
             try:
                 await conn.prompt(
@@ -338,6 +346,76 @@ class AcpClientKernel(KernelRuntime):
             if text:
                 parts.append(text)
         return "\n".join(parts)
+
+    # ── 工具注入：把 Ethan 的工具挂给外部内核 ──────────────────
+
+    def _build_mcp_servers(self) -> list:
+        """构造指向 Ethan `/kernel-tools` 的 MCP server 声明。
+
+        返回空列表的条件（宁可不开也不开错）：
+          · 配置里显式关掉了共享（`defaults.kernel_share_tools = "off"`）
+          · 拿不到本机服务地址 / api key
+
+        地址取 `network.base_url`（服务对外可达地址）。没有时退到
+        `http://127.0.0.1:<port>`——外部内核跑在同一台机器上，回环足够。
+        """
+        from acp.schema import HttpHeader, HttpMcpServer
+
+        try:
+            from ethan.core.config import get_config
+
+            cfg = get_config()
+            share = getattr(cfg.defaults.kernel, "share_tools", "all") or "all"
+            if share == "off":
+                return []
+
+            base = (getattr(cfg.network, "base_url", "") or "").rstrip("/")
+            if not base:
+                base = f"http://127.0.0.1:{self._local_port()}"
+
+            # headers 必须是 HttpHeader 模型，不能传 (name, value) 元组——
+            # 否则 pydantic 校验失败，整个 try 被兜住，表现为「静默不注入」。
+            headers = []
+            api_key = getattr(cfg.network, "mcp_api_key", "") or ""
+            if api_key:
+                headers.append(
+                    HttpHeader(name="Authorization", value=f"Bearer {api_key}")
+                )
+
+            return [
+                HttpMcpServer(
+                    type="http",
+                    name="ethan",
+                    url=f"{base}/kernel-tools/",
+                    headers=headers,
+                )
+            ]
+        except Exception:
+            logger.warning("构造 Ethan MCP server 声明失败，本次不注入工具", exc_info=True)
+            return []
+
+    @staticmethod
+    def _local_port() -> int:
+        """推断当前进程实际在监听的端口。
+
+        不能只读 `cfg.server.port`：那是**主实例**的配置（通常是 8900），
+        而开发/测试实例可能跑在别的端口（如 8910），配置里没有这个信息。
+        优先用 api.py 记录的运行时绑定地址，再退到配置，最后 8900。
+        """
+        try:
+            from ethan.interface.api import _SERVER_BIND
+
+            port = _SERVER_BIND[1]
+            if port:
+                return int(port)
+        except Exception:
+            pass
+        try:
+            from ethan.core.config import get_config
+
+            return int(getattr(get_config().server, "port", 8900) or 8900)
+        except Exception:
+            return 8900
 
     # ── provider 注入（仅 DSH 这类需要 token 的 agent 用）────────
 

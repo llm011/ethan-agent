@@ -720,8 +720,13 @@ async def _run_generation(
             if agent._skills and agent.last_matched_skills:
                 for _name in agent.last_matched_skills:
                     asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
-            asyncio.create_task(_maybe_consolidate(session_id, runner.model, user_id, mode=mode))
-            asyncio.create_task(_maybe_generate_skill(session_id, runner.model, user_id))
+            # 后台任务用 real_model：它们走 Ethan 自己的 provider，与前台内核无关。
+            # 用 runner.model 的话，外部内核下会拿到 "DSH" 这种非 model id，
+            # create_provider 直接报 Provider 'openai_compat' not found。
+            asyncio.create_task(
+                _maybe_consolidate(session_id, runner.real_model, user_id, mode=mode)
+            )
+            asyncio.create_task(_maybe_generate_skill(session_id, runner.real_model, user_id))
 
         # touch 只更新会话列表的 updated_at 排序时间戳，与主消息落库解耦：
         # 极端情况下主消息已保存成功、touch 撞锁重试耗尽时，不该给前端报

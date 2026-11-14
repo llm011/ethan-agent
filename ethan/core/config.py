@@ -156,6 +156,13 @@ class KernelSelectionConfig(BaseModel):
     """
     default: str = ""  # "" = 原生 Ethan；可选 ethan | claude_code | codex | opencode
     task_rules: dict[str, str] = Field(default_factory=dict)  # {"coding": "claude_code"}
+    # 外部内核能用多少 Ethan 的工具（通过 /kernel-tools MCP 端点注入）。
+    #   "all"      —— 除 shell 外的全部（默认）。用户要求「内核作为 Ethan 的心脏」，
+    #                 只读不够，外部内核写不了文件就等于干不了活。
+    #   "readonly" —— 只有只读工具
+    #   "off"      —— 完全注入，外部内核只用它自己的工具
+    # 无论哪种，shell 与 delegate_coding 永不暴露（见 kernel/tool_bridge.py）。
+    share_tools: str = "all"
 
 
 class RoutingConfig(BaseModel):

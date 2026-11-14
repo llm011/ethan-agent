@@ -122,10 +122,28 @@ class KernelRunner:
 
     @property
     def model(self) -> str:
-        # 原生内核报真实模型；外部内核报内核名（它的模型由 CLI 自己决定）
+        """用于展示的模型标识。
+
+        ⚠️ 外部内核返回的是内核名（如 "DSH"），因为它真正的模型由 CLI 内部决定，
+        我们无从得知。**这个值只适合给 UI 显示，不能拿去当 model id 用**——
+        传进 `create_provider()` 会因为找不到 provider 而报
+        `Provider 'openai_compat' not found`（实测踩到：切到 dsh 后
+        后台记忆抽取直接失败）。
+
+        需要真实模型 id 的地方请用 `real_model`。
+        """
         if self.runtime.kind == KernelKind.ETHAN:
             return self._model
         return f"{self.runtime.display_name}"
+
+    @property
+    def real_model(self) -> str:
+        """真实可用的 model id（始终指向 Ethan 配置里的模型）。
+
+        后台任务（记忆抽取 / 标题生成 / 技能生成）必须用这个：它们走的是
+        Ethan 自己的 provider，与前台用哪个内核无关。
+        """
+        return self._model
 
     def __getattr__(self, item: str) -> Any:
         """未定义属性一律透传给底层 Agent。

@@ -912,3 +912,39 @@ def test_tool_events_carry_args_on_both_start_and_done():
 
     tools = [e for e in events if isinstance(e, ToolEvent)]
     assert tools[1].args_summary, "done 事件丢了参数摘要"
+
+
+# ── runner.model vs runner.real_model ────────────────────────
+
+
+def test_real_model_always_valid_model_id():
+    """后台任务必须拿到真实 model id，不能是内核显示名。
+
+    实测踩到：切到 dsh 后，`_maybe_consolidate(session_id, runner.model, ...)`
+    拿到的是 "DSH"，进 `create_provider("DSH")` 没有 "/" → 回退 openai_compat
+    → `Provider 'openai_compat' not found`，后台记忆抽取直接失败。
+    """
+    from ethan.kernel.dispatch import KernelRunner
+    from ethan.kernel.runtime import KernelRuntime
+
+    rt = KernelRuntime()
+    rt.kind = KernelKind.DSH
+    rt.display_name = "DSH"
+
+    runner = KernelRunner(rt, None, model="buddy-proxy/deepseek-v4.1-flash")
+    # 展示用：内核名
+    assert runner.model == "DSH"
+    # 后台任务用：真实 model id，含 provider 前缀
+    assert runner.real_model == "buddy-proxy/deepseek-v4.1-flash"
+    assert "/" in runner.real_model
+
+
+def test_real_model_matches_model_for_ethan_kernel():
+    """原生内核下两者一致（没有外部 CLI 的歧义）。"""
+    from ethan.kernel.dispatch import KernelRunner
+    from ethan.kernel.runtime import KernelRuntime
+
+    rt = KernelRuntime()
+    rt.kind = KernelKind.ETHAN
+    runner = KernelRunner(rt, None, model="buddy-proxy/deepseek-v4.1-flash")
+    assert runner.model == runner.real_model

@@ -64,6 +64,10 @@ def client(monkeypatch):
     mcp_mod.mcp_server._session_manager = None
     new_app = mcp_mod.get_mcp_app()
     monkeypatch.setattr(api_mod, "_MCP_APP", new_app)
+    # 同时关掉 /kernel-tools：它的 app 是模块级单例，session manager 的 run()
+    # 已被上一个用例消耗，这里再 enter 会抛 "run() can only be called once"。
+    # 这个端点与 /mcp 的契约无关，本文件不测它。
+    monkeypatch.setattr(api_mod, "_KERNEL_TOOLS_APP", None)
     api_mod.app.router.routes = [
         r for r in api_mod.app.router.routes
         if getattr(r, "path", None) != "/mcp"

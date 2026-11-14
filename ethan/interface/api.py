@@ -44,6 +44,12 @@ from ethan.interface.routers import (
     ui_resources,
     wait_for_user,
 )
+from ethan.interface.routers.kernel_mcp import (
+    get_kernel_tools_app as _get_kernel_tools_app,
+)
+from ethan.interface.routers.kernel_mcp import (
+    get_kernel_tools_lifespan as _get_kernel_tools_lifespan,
+)
 from ethan.interface.routers.mcp_server import (
     get_mcp_app as _get_mcp_app,
 )
@@ -194,7 +200,17 @@ async def lifespan(app: FastAPI):
     # 每个 MCP 请求都抛 "Task group is not initialized" → 端点整体 HTTP 500。
     # 传 _MCP_APP 保证驱动的是 mount 出去的那个实例的 session manager。
     async with _get_mcp_lifespan(_MCP_APP)(app):
-        yield
+        # 内核工具端点同样需要顶层驱动 session manager（同 Mount 不转发 lifespan 的坑）。
+        #
+        # 注意：这里取的是 **模块级 _KERNEL_TOOLS_APP**，它与 mount 出去的是同一个
+        # 实例——和 /mcp 一样必须保证「驱动的」与「处理请求的」一致。
+        # 测试可以把它置 None 来跳过（见 test_mcp_server_endpoint 的 fixture），
+        # 因为每个用例重建 /mcp 的 app 时，这个单例的 session manager 已被消耗。
+        if _KERNEL_TOOLS_APP is not None:
+            async with _get_kernel_tools_lifespan(_KERNEL_TOOLS_APP)(app):
+                yield
+        else:
+            yield
     if _lark_ready():
         from ethan.interface.channels.lark.events import _wait_lark_listener_stopped, stop_lark_listener
         stop_lark_listener()
@@ -281,6 +297,24 @@ app.include_router(browser_http_router, prefix="/api")  # /api/browser/shot/{nam
 _MCP_APP = _get_mcp_app()
 app.mount("/mcp", _MCP_APP)
 
+# 内核工具端点：把 Ethan 的工具集暴露给外部内核（DSH / Claude Code 等）。
+#
+# 只在需要时挂载——不给不用外部内核的用户凭空多开一个攻击面。
+# 判定：配置里 kernel_share_tools 不是 "off"，且至少有一个外部内核被启用过。
+_KERNEL_TOOLS_APP = None
+try:
+    from ethan.core.config import get_config as _cfg_for_kernel
+
+    _kcfg = _cfg_for_kernel()
+    _share = getattr(_kcfg.defaults.kernel, "share_tools", "all") or "all"
+    if _share != "off":
+        _KERNEL_TOOLS_APP = _get_kernel_tools_app()
+        app.mount("/kernel-tools", _KERNEL_TOOLS_APP)
+except Exception:
+    logging.getLogger(__name__).debug(
+        "/kernel-tools 端点未挂载（配置读取或初始化失败）", exc_info=True
+    )
+
 if _WEB_DIST.exists():
     app.mount("/_next", StaticFiles(directory=str(_WEB_DIST / "_next")), name="next-static")
 
@@ -296,14 +330,26 @@ if _WEB_DIST.exists():
         # Flat .html (e.g. web_dist/skills.html)
         if (_WEB_DIST / f"{path}.html").is_file():
             return FileResponse(_WEB_DIST / f"{path}.html")
-        # Dynamic route: Next.js static export only pre-generates __placeholder__
-        # e.g. /chat/abc123 → chat/__placeholder__/index.html
+        # 动态路由回落，两种形态都要支持：
+        #
+        # 1) 可选 catch-all `[[...id]]`（当前 chat 用的）：产物只有 `chat/index.html`
+        #    一条，任意 `/chat/<任意id>` 都由它接管。所以先逐层往上找最近的
+        #    `index.html`——/chat/a/b 找不到就用 chat/a/index.html，再找不到用
+        #    chat/index.html。
+        #
+        # 2) 必选动态段 `[id]`（旧写法）：静态导出只预生成 `__placeholder__`，
+        #    产物是 `xxx/__placeholder__/index.html`。保留这段兼容，
+        #    避免其它动态路由（如 /settings/[tab]）受影响。
         parts = path.strip("/").split("/")
-        if len(parts) >= 2:
-            placeholder = _WEB_DIST / "/".join(parts[:-1]) / "__placeholder__" / "index.html"
+        for cut in range(len(parts), 0, -1):
+            prefix_dir = _WEB_DIST.joinpath(*parts[:cut])
+            index = prefix_dir / "index.html"
+            if index.is_file():
+                return FileResponse(index)
+            placeholder = prefix_dir / "__placeholder__" / "index.html"
             if placeholder.is_file():
                 return FileResponse(placeholder)
-        # SPA fallback
+        # 真的什么都匹配不上才回落到站点根（首页），而不是把 /chat/xxx 也送回去
         root_index = _WEB_DIST / "index.html"
         if root_index.is_file():
             return FileResponse(root_index)
