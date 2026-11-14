@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from ethan.core.config import get_config, reload_config, save_config
+from ethan.core.config import get_config, reload_config, save_config, update_config
 from ethan.core.provider_presets import PROVIDER_PRESETS
 
 from .deps import create_agent, verify_token
@@ -867,11 +867,17 @@ async def select_kernel(req: KernelSelectRequest):
                 detail={"message": f"{kind.value} 不可用，未切换", "reason": reason},
             )
 
-    cfg = get_config()
-    cfg.defaults.kernel.default = "" if kind == KernelKind.ETHAN else kind.value
-    save_config(cfg)
-    reload_config()
-    return {"ok": True, "default": cfg.defaults.kernel.default or "ethan"}
+    # 用 update_config 而不是「get_config() 改字段 + save_config」：
+    # 后者会把内存单例也改掉，导致 save_config 的「变更集」恒为空
+    # （基线 == 待写对象），表现为「接口返回成功但没落盘」——实测踩到。
+    # update_config 在锁内重新读盘、应用变更、写回，语义正确。
+    target = "" if kind == KernelKind.ETHAN else kind.value
+
+    def _apply(c):
+        c.defaults.kernel.default = target
+
+    update_config(_apply)
+    return {"ok": True, "default": target or "ethan"}
 
 
 class KernelTaskRulesRequest(BaseModel):

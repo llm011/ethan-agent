@@ -137,3 +137,66 @@ def test_update_config_uses_fresh_disk_state(tmp_path, monkeypatch):
     assert out.tools.web_fetch.backend == "deepseek"
     final = yaml.safe_load(cfg_file.read_text())
     assert final["tools"]["web_fetch"]["backend"] == "deepseek"
+
+
+# ── 嵌套段的持久化（kernel 在 defaults 下面）─────────────────
+
+
+def test_kernel_section_survives_exclude_defaults():
+    """`kernel` 在 defaults 下面，且默认值全为空。
+
+    pydantic 的 `model_dump(exclude_defaults=True)` 对嵌套 BaseModel 只看
+    「整个子对象是否等于默认构造」，于是 `kernel.default="dsh"` 这种改动会被
+    **整段省掉**——表现为「接口返回成功但配置文件里没有 kernel 段」，
+    重启后又变回原生内核。实测踩到：点「启用 DSH」返回 200，读回来还是 ethan。
+    """
+    from ethan.core.config import Config, _config_to_raw
+
+    c = Config()
+    assert "kernel" not in _config_to_raw(c).get("defaults", {}), "全默认时不该写"
+
+    c.defaults.kernel.default = "dsh"
+    raw = _config_to_raw(c)
+    assert raw["defaults"]["kernel"] == {"default": "dsh"}
+
+
+def test_kernel_task_rules_persist():
+    from ethan.core.config import Config, _config_to_raw
+
+    c = Config()
+    c.defaults.kernel.task_rules = {"coding": "claude_code"}
+    raw = _config_to_raw(c)
+    assert raw["defaults"]["kernel"]["task_rules"] == {"coding": "claude_code"}
+
+
+def test_save_config_persists_kernel_change(tmp_path, monkeypatch):
+    """端到端：走 save_config 之后，盘上真的有 kernel 段。
+
+    注意必须用 update_config 语义——直接「get_config() 改字段 + save_config」
+    会因为基线已被同步修改而算出空变更集（另一个坑，见 update_config 文档）。
+    """
+    import yaml
+
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
+    monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfg_mod, "_config", None)
+
+    cfg_mod.update_config(lambda c: setattr(c.defaults.kernel, "default", "dsh"))
+
+    final = yaml.safe_load(cfg_file.read_text())
+    assert final["defaults"]["kernel"]["default"] == "dsh"
+
+
+def test_update_config_survives_reload(tmp_path, monkeypatch):
+    """写完再读，值还在（模拟用户重启服务后的状态）。"""
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
+    monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfg_mod, "_config", None)
+
+    cfg_mod.update_config(lambda c: setattr(c.defaults.kernel, "default", "pi"))
+
+    monkeypatch.setattr(cfg_mod, "_config", None)
+    fresh = cfg_mod.load_config()
+    assert fresh.defaults.kernel.default == "pi"

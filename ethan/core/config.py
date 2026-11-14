@@ -752,9 +752,65 @@ def _config_file_lock():
         fh.close()
 
 
+# 这些嵌套模型的字段需要「逐字段」判默认值，不能整体被 exclude_defaults 省略。
+#
+# pydantic 的坑：`model_dump(exclude_defaults=True)` 对**嵌套 BaseModel** 只看
+# 「这个子模型对象是否等于它自己的默认构造」，而不是逐字段比较。于是
+# `KernelSelectionConfig()`（全默认）会被整体省掉——即使我们刚把
+# `kernel.default` 从 "" 改成 "dsh"，因为改动后的对象仍被判定为"与默认不同"…
+# 实测反而相反：整个 kernel 段连同改动一起消失，导致「切换内核成功但没写盘」。
+#
+# 所以对这些段：明确把它们 dump 出来（不过滤默认值），让下游按字段判断。
+# 点分路径。注意 kernel 在 defaults 下面，不是顶层。
+_FORCE_INCLUDE_SECTIONS = ("defaults.kernel",)
+
+
 def _config_to_raw(config: Config) -> dict:
-    """Config 对象 → 可写入 YAML 的 dict（统一处理 exclude_defaults 与 type 字段）。"""
+    """Config 对象 → 可写入 YAML 的 dict。
+
+    处理三件事：
+      1. exclude_defaults 去掉等默认值的字段（减小文件体积）
+      2. providers 的 type 必须显式持久化
+      3. 少数嵌套段（kernel）强制逐字段输出——否则整段被误省略
+    """
     data = config.model_dump(exclude_defaults=True, exclude_none=True)
+
+    # 强制包含的段：逐字段与默认值比较，只留下真的改过的叶子。
+    #
+    # 不能用 `sub.model_dump(exclude_defaults=True)`：pydantic 对嵌套模型的
+    # exclude_defaults 行为不可靠（实测 `kernel.default="dsh"` 也被省掉）。
+    # 所以自己拿一个默认实例做基准，逐字段比。
+    for section in _FORCE_INCLUDE_SECTIONS:
+        # 按点分路径取，与 EDITABLE_FIELDS 的写法保持一致
+        sub = config
+        for part in section.split("."):
+            sub = getattr(sub, part, None)
+            if sub is None:
+                break
+        if sub is None:
+            continue
+        try:
+            base = type(sub)()
+        except Exception:
+            base = None
+        changed: dict = {}
+        for field_name in type(sub).model_fields:
+            val = getattr(sub, field_name, None)
+            if base is not None and val == getattr(base, field_name, None):
+                continue
+            if val is None or val == "" or val == {} or val == []:
+                continue
+            changed[field_name] = val
+        if changed:
+            # 按点分路径写回（只支持两级，够用且不引入通用 setter）
+            parts = section.split(".")
+            if len(parts) == 1:
+                data[parts[0]] = changed
+            else:
+                node = data.setdefault(parts[0], {})
+                if isinstance(node, dict):
+                    node[parts[1]] = changed
+
     # exclude_defaults 会去掉等于默认值的字段（比如 type="openai_compat"），
     # 但 providers 的 type 必须显式持久化，所以强制写回。
     if "providers" in data:
