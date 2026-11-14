@@ -18,16 +18,20 @@
 A. `~/.dsh-tui/themes/gruvbox-material-dark.json`：从 `base: dark` 覆盖出
    Gruvbox 调色板（正文 #d4be98、背景 #1d2021 系）。任何一条覆盖都要过对比度
    门槛（正文 ≥ 4.5，faint 字 ≥ 4.0），不达标就报错退出，不写半成品。
-B. `~/.dsh/profiles/tui/cordis.patch.yml` 加一行 `dsh-tui` patch，把
-   `fullscreen` 关掉：在 inline 模式下 dsh-tui 不跑 OSC 11 探测，faint 直接
-   用 SGR 2（终端自己混），可读性由 A 的高对比色板兜住。行里其余键放
-   `!!js` 转发，与包自带 patch 的语义一致（patch 是整行替换，漏写的键会丢）。
+B. `~/.dsh/profiles/tui/cordis.patch.yml` 重写 `dsh-tui` 块（幂等、带 marker）。
+   默认 `fullscreen: true`：alt-screen 布局稳定，不会出现 inline 主屏模式下
+   每帧追加/回滚行造成的底部空白和抖动，选中色走主题键 `selectionBg`。
+   `--inline` 才写 `fullscreen: false`：inline 下 dsh-tui 不跑 OSC 11 探测，
+   faint 直接用 SGR 2（终端自己混），可读性由 A 的高对比色板兜住，但代价是
+   主屏布局在 pane 尺寸变化时容易重排。块里其余键放 `!!js` 转发，与包自带
+   patch 的语义一致（patch 是整块替换，漏写的键会丢）。
 C. `--bar-free-fill <#rrggbb>`：可选。把 dsh-tui 产物里写死的空闲段填充色
    换成同色板里的深色，并备份原文件；传 `--revert` 还原。
 
 用法：
 
-    uv run scripts/setup_dsh_tui_theme.py                # A + B
+    uv run scripts/setup_dsh_tui_theme.py                # A + B（fullscreen）
+    uv run scripts/setup_dsh_tui_theme.py --inline       # A + B（inline 主屏）
     uv run scripts/setup_dsh_tui_theme.py --bar-free-fill '#3c3836'
     uv run scripts/setup_dsh_tui_theme.py --revert       # 只还原 C
 """
@@ -134,19 +138,25 @@ CONTRAST_FLOOR = {
     "warning": 5.0,
 }
 
-PROFILE_ROW = """\
+DEFAULT_FULLSCREEN = True
+
+PROFILE_HEADER = """\
 # dsh-tui 显示配置（scripts/setup_dsh_tui_theme.py 写入，可重复执行）。
 #
-# fullscreen: false → inline 主屏。副作用是 dsh-tui 不再请求 OSC 11 探测终端
-# 底色（herdr 的终端内核不回答 OSC 11，旧行为会回落到纯黑，让 SGR 2 faint
-# 在 Gruvbox 深底上再压一轮、字发灰看不清）；inline 下 faint 交给终端自己混，
-# 配色由 ~/.dsh-tui/themes/gruvbox-material-dark.json 保证对比度。
+# fullscreen 默认保持 true（alt-screen）：布局稳定，不会有 inline 模式下
+# 主屏追加/回滚导致的底部空白与抖动，应用内选中走主题键 selectionBg。
+# 传 --inline 才切到 inline 主屏——它会关掉 OSC 11 探测（herdr 不回答该查询，
+# 回落纯黑会让 SGR 2 faint 再压一轮），但代价是每帧往主屏追加行，pane 尺寸
+# 变化时容易看到重排/抖动。
 #
-# patch 是整行替换，下面每一项都从包自带 patch 原样转发（!!js 在加载时求值），
+# patch 是整块替换，下面每一项都从包自带 patch 原样转发（!!js 在加载时求值），
 # 漏写的键等于删掉。
+"""
+
+PROFILE_ROW_TEMPLATE = """\
 - id: dsh-tui
   config:
-    fullscreen: false
+    fullscreen: {fullscreen}
     provider: deepseek-official
     terminalImages: true
     effort: max
@@ -196,9 +206,15 @@ def write_theme() -> None:
     print(f"主题已写入 {THEME_PATH}")
 
 
-def _write_profile_patch() -> None:
+def _profile_row(fullscreen: bool) -> str:
+    flag = "true" if fullscreen else "false"
+    return PROFILE_HEADER + PROFILE_ROW_TEMPLATE.format(fullscreen=flag)
+
+
+def _write_profile_patch(fullscreen: bool = DEFAULT_FULLSCREEN) -> None:
     PROFILE_PATCH.parent.mkdir(parents=True, exist_ok=True)
     text = PROFILE_PATCH.read_text(encoding="utf-8") if PROFILE_PATCH.exists() else ""
+    row = _profile_row(fullscreen)
     if MARKER in text:
         start = text.index(MARKER)
         # 行区块最后一行是 backend 转发行，之后是下一行 patch 的开头。
@@ -210,13 +226,13 @@ def _write_profile_patch() -> None:
                 "文件可能被手改过；请先人工确认，脚本不会擅自覆盖"
             )
         end = anchor_at + len(anchor)
-        new_text = text[:start] + PROFILE_ROW + text[end:]
+        new_text = text[:start] + row + text[end:]
     else:
         if text and not text.endswith("\n"):
             text += "\n"
-        new_text = text + "\n" + PROFILE_ROW
+        new_text = text + "\n" + row
     PROFILE_PATCH.write_text(new_text, encoding="utf-8")
-    print(f"profile patch 已更新 {PROFILE_PATCH}")
+    print(f"profile patch 已更新 {PROFILE_PATCH}（fullscreen: {str(fullscreen).lower()}）")
 
 
 def _dsh_package_dir() -> Path:
@@ -310,7 +326,11 @@ def main() -> int:
     parser.add_argument("--bar-free-fill", metavar="COLOR", help="把上下文进度条空闲段填充色换成 COLOR（需重启 dsh-tui）")
     parser.add_argument("--revert", action="store_true", help="只还原 --bar-free-fill 对 npm 包做的改动")
     parser.add_argument("--skip-profile", action="store_true", help="不改 ~/.dsh/profiles/tui/cordis.patch.yml")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--inline", action="store_true", help="profile 里写 fullscreen: false（inline 主屏；布局可能抖动）")
+    group.add_argument("--fullscreen", action="store_true", help="profile 里写 fullscreen: true（默认，alt-screen 布局稳定）")
     args = parser.parse_args()
+    fullscreen = not args.inline
 
     if args.revert:
         revert_bar(_dsh_package_dir())
@@ -325,7 +345,7 @@ def main() -> int:
 
     write_theme()
     if not args.skip_profile:
-        _write_profile_patch()
+        _write_profile_patch(fullscreen)
 
     if args.bar_free_fill:
         if patch_bar_free_fill(_dsh_package_dir(), args.bar_free_fill) != 0:
