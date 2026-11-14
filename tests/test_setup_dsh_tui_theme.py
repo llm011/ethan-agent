@@ -23,8 +23,10 @@ def mod():
 def patch_file(mod, tmp_path):
     p = tmp_path / "cordis.patch.yml"
     p.write_text("# 别的 patch\n- id: other\n  config:\n    a: 1\n", encoding="utf-8")
+    original = mod.PROFILE_PATCH
     mod.PROFILE_PATCH = p
-    return p
+    yield p
+    mod.PROFILE_PATCH = original
 
 
 def test_default_is_fullscreen(mod, patch_file):

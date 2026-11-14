@@ -326,9 +326,11 @@ def main() -> int:
     parser.add_argument("--bar-free-fill", metavar="COLOR", help="把上下文进度条空闲段填充色换成 COLOR（需重启 dsh-tui）")
     parser.add_argument("--revert", action="store_true", help="只还原 --bar-free-fill 对 npm 包做的改动")
     parser.add_argument("--skip-profile", action="store_true", help="不改 ~/.dsh/profiles/tui/cordis.patch.yml")
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--inline", action="store_true", help="profile 里写 fullscreen: false（inline 主屏；布局可能抖动）")
-    group.add_argument("--fullscreen", action="store_true", help="profile 里写 fullscreen: true（默认，alt-screen 布局稳定）")
+    parser.add_argument(
+        "--inline",
+        action="store_true",
+        help="profile 里写 fullscreen: false（inline 主屏，布局可能抖动；默认不传即 fullscreen: true）",
+    )
     args = parser.parse_args()
     fullscreen = not args.inline
 
