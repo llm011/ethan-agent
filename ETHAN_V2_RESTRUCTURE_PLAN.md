@@ -1,7 +1,82 @@
 # Ethan Agent v2 重构 — 进度与后续计划
 
-> 最后更新：2026-11-14
-> 状态：**上一轮（#443）的实现已全部回退或重做**，下方是核实过的真实进度。
+> 最后更新：2026-11-15
+> 状态：**重构主体已完成并待合入 main**。下方是核实过的真实进度。
+> 测试基线：1868 passed, 2 skipped。Android 已能真实编译出 APK。
+
+---
+
+## 零、本轮（2026-11-15）新增了什么
+
+这一轮把 v2 从「设计 + 半成品」推进到**可验收状态**。
+
+### 多内核运行时（六个内核全部可用）
+
+| 内核 | 可用 | 用 Ethan 的工具 | 实现 |
+|---|---|---|---|
+| ethan | ✅ | ✅ 原生 | — |
+| claude_code | ✅ | ✅ | `--mcp-config` + `--dangerously-skip-permissions` |
+| codex | ✅ | ❌ | 能接受 MCP 配置但不加载工具 |
+| opencode | ✅ | ❌ | 只能改全局配置（不做，避免污染用户环境） |
+| dsh | ✅ | ✅ | ACP `mcp_servers` 参数 |
+| pi | ✅ | ❌ | 源码里没有 MCP 实现 |
+
+「用 Ethan 的工具」是本轮的核心：外部内核有自己的大脑，但通过 MCP 拿到 Ethan
+的 58 个工具（`/kernel-tools` 端点），于是能读 Ethan 的知识库、用 Ethan 的搜索。
+实测 DSH 调用 `mcp__ethan__ethan_web_search`、Claude 调用同名工具均成功。
+
+**不污染用户环境**：`mcp_servers` 是 ACP 的 `new_session()` 参数，`--mcp-config`
+是临时文件，都不写入 `~/.dsh` / `~/.claude`。实测注入后 DSH 自带的 22 个工具全在。
+
+**外壳暴露权限**（用户确认）：所有外部内核以完全放行权限运行
+（`--dangerously-skip-permissions` / `--approval-policy never`），MCP 共享里
+排除 `shell`（等于交出整台机器）与 `delegate_coding`（递归无意义）。
+
+### 外部内核 session id 展示
+
+用外部内核时，对话标题下展示内核自己的 session id + 复制按钮
+（三端：web / desktop / Android）。用户拿它去命令行定位：
+`dsh --session-id <id>` / `claude --resume <uuid>`。
+
+落库持久化，刷新不丢。两个 id 严格分开：`request.session_id` 是 Ethan 的，
+`request.kernel_session_id` 是内核的——早期实现混用会导致续接错位。
+
+### 外部内核活性检测
+
+外部内核**完全绕开 Ethan 的 `LoopMonitor`**（那套熔断在 `Agent.stream_chat` 内部，
+内核模式下不执行）。所以补了一层：120s（coding 300s）无任何事件即中止并提示，
+而不是干等整轮 timeout。
+
+### TTS / ASR 后端可配置
+
+`edge-tts`（在线零安装）与 `ethan-tts`（本地，需 Apple Silicon + MLX）。
+选本地后端时**先做系统预检**：非 Apple Silicon 直接拒绝，零安装动作。
+服务启动由选择动作触发，用户不需要敲命令。
+
+### DeepSeek 自研能力接成 provider
+
+Search / Fetch / OCR 三个接入 `web_search` / `web_fetch` / `ocr_extract_text`，
+provider 顺序 `searxng → deepseek → tavily → duckduckgo → bing`。
+OCR 走独立工具，但**系统提示词强制优先用模型自身识图**，OCR 只作兜底。
+
+### 修掉的重大回归
+
+**配置写入全线失效**（本轮最严重的自伤）：修并发时让 `save_config` 拿内存单例
+做 diff 基线，而所有调用方都是「`get_config()` 改字段 → `save_config()`」，
+基线已含改动 → 变更集恒为空 → 接口返回 `{"ok": true}` 但一个字没写。
+影响 **50 处调用点**（模型增删改、内核切换、语音后端、providers、channels……）。
+改用「上次落盘快照」做基线，并加 `tests/test_config_write_contract.py` 锁死。
+
+**Android 编译不过**：14 个文件来自三个未完成的「深度重构」（`7d866b51` /
+`0f45b6b3` / `39920bfa`），从引入起就没编译过，且零生产引用。连同 7 个
+`Optimized*.kt` 一起删除（生产入口用的是 `ChatScreen` / `EthanApp`）。
+删完 `assembleDebug` 通过，APK 22MB，dex 里能查到新增的类。
+
+**对话白屏**：`swimlane-diagram.tsx` 的 `ENTITY_CONFIG` 连 `builtin` 兜底项都没有，
+多内核后 `entity_type` 出现 `acp`/`dsh`/`pi` → `cfg` 为 undefined → `cfg.color` 崩。
+
+**点进对话跳回 /chat**：合并路由后产物只剩 `chat/index.html`，但后端 fallback
+只认 `chat/__placeholder__/index.html` → 落到站点根。改成逐层往上找最近的 index。
 
 ---
 
@@ -197,10 +272,25 @@ prompt cache（`docs/caching.md`）能省**费用**（稳定层命中 0.1×）�
 `ethan/core/skill_filter.py` 定义了 `CORE_SKILLS` / `MEDIUM_SKILLS` 分级，但零引用。
 现在的分级逻辑直接在 `SkillRegistry.build_index_block()` 里实现了，**这个文件可以删**。
 
-### P3：Android 设置页的真实数据通道
+### P3 ✅ Android 设置页 / 编译问题（已解决）
 
-恢复的是「能编译、结构完整」的旧版，但它的数据绑定仍需要人工确认（`SettingsViewModel`
-只有 3 个 `on*` 方法，而 `EthanApp` 传了 40+ 回调——需确认哪些是真通路、哪些是空壳）。
+两个层面都处理完了：
+
+**1. 编译**：14 个文件（来自 `7d866b51` / `0f45b6b3` / `39920bfa` 三次未完成的
+「深度重构」）+ 7 个 `Optimized*.kt` 全是死代码（零生产引用，生产入口是
+`ChatScreen` / `EthanApp`）。删除后 `assembleDebug` 通过，产出 22MB APK。
+
+**2. 数据通道**：新增的内核 / 语音 Tab 走真实后端接口
+（`/api/kernels`、`/api/tts/backends`），链路是
+Ktor `EthanApiService` → `EthanRepository` → `SettingsViewModel` → Compose，
+每层都补了方法和类型。
+
+**遗留**：Android 单元测试代码缺 junit/mockito 依赖配置（`compileDebugUnitTestKotlin`
+报错），不影响 APK 产出，但意味着 Android 侧的单元测试跑不起来。**这是测试基建欠账，
+不是功能缺陷**，需要单独补 `build.gradle.kts` 的 testImplementation。
+
+**未做的验证**：没有真机/模拟器跑过。APK 能构建、dex 里能查到新类，
+但「点进去能用」需要装一次才能确认。
 
 ### P4：需求文档里的「8 种场景 / Power Bundles」
 
@@ -364,3 +454,31 @@ headless 没有）。这是用户侧配置，不该由代码擅自改用户的 p
    而真正的 34K 在 `tools.md`。先测量，再优化。
 4. **编辑器里的假 UI 会掩盖真实问题。** Android 那个假设置页不仅没功能，还让
    `EthanApp.kt` 的调用方编译不过——但因为没有 CI 跑 Android 构建，一直没被发现。
+
+### 本轮（2026-11-15）新增的教训
+
+5. **修基础设施前，先摸清所有调用方的写法。** 修配置并发时我把 `save_config` 的
+   diff 基线设成内存单例，而 50 处调用方全是「`get_config()` 改完直接 save」——
+   基线已含改动 → 变更集恒为空 → 接口返回 `{"ok": true}` 但磁盘一个字没写。
+   用户报「模型删不掉、加不上」才发现。**基础设施的语义变更必须以「调用方实际怎么写」
+   为准，不能以「设计上应该怎么写」为准。**
+
+6. **必须验证「写入 → 重新读盘」，不能只测函数本身。** 上面那个 bug，单测全绿、
+   类型检查全过、接口返回成功——只有真正读盘才能发现。现在有
+   `tests/test_config_write_contract.py`（7 条）专做这件事。
+
+7. **排查时先确认自己在看对的文件。** 一度以为内核切换没落盘，查了很久——结果是我
+   在看 `~/.ethan/config.yaml`，而 dev 实例用的是独立数据目录
+   `/tmp/ethan-dev-data-8910/config.yaml`。**先确认环境边界，再动手查。**
+
+8. **「能接受配置」不等于「配置生效」。** Codex 对 `-c mcp_servers.*` 和
+   `config.toml` 都接受、不报错，但工具列表里始终没有 MCP 工具。不能因为配置写进去了
+   就宣称支持——要看**功能是否真的到达模型**。
+
+9. **给用户展示能力差异，别让用户自己踩坑。** Codex/OpenCode/Pi 不能共享 Ethan 工具，
+   界面就明说原因（「Codex 能接受 MCP 配置但不加载其中的工具」），而不是诱导用户
+   以为能用、试了才发现不行。
+
+10. **删死代码比修死代码更对。** Android 那 21 个文件是三次未完成重构的产物，
+    内部逻辑本身就不完整，修编译错误只是让它「看起来能编译」。它们零生产引用，
+    删掉才是正确处置——**先证明没人用，再删，别硬修。**
