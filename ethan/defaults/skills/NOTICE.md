@@ -31,6 +31,7 @@ in their `SKILL.md` frontmatter.
 - xiaohongshu (Python CDP engine borrowed from community, upstream unclear)
 - obsidian
 - bookshelf-management (not in repo; only in `~/.ethan/skills/`)
+- dsh-tui-theme (pairs with repo `scripts/setup_dsh_tui_theme.py`)
 
 ## License Review Notes
 
