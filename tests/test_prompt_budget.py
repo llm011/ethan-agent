@@ -37,6 +37,49 @@ def test_available_skills_is_tiered(measured):
     assert measured["blocks"].get("available_skills", 0) <= BUDGETS["available_skills"]
 
 
+def test_no_duplicate_xml_blocks(measured):
+    """同一个 xml 块只能出现一次。
+
+    历史上 Full Path 拼了两个 <available_skills>：稳定层一个（default 技能分级）、
+    动态层一个（discoverable 触发词），标签重复且后者每轮重新计费。已合并到稳定层。
+    """
+    dupes = {name: n for name, n in measured["block_counts"].items() if n > 1}
+    assert not dupes, f"system prompt 出现重复块：{dupes}"
+
+
+def test_preview_matches_real_prompt(measured):
+    """预览页的 system prompt 必须与真实典型一轮一致，不能自己多注入内容。
+
+    曾用 dummy message "(preview)"，它命中技能匹配多注入一块 <relevant_skills>
+    （约 3.2K 字符），导致预览比真实对话还长。
+    """
+    import asyncio
+
+    from ethan.interface.routers.settings import system_prompt_preview
+
+    data = asyncio.run(system_prompt_preview())
+    assert data["chars"] == measured["total"], (
+        f"预览 {data['chars']} 字符 ≠ 真实 {measured['total']} 字符"
+    )
+    assert "<relevant_skills>" not in data["system_prompt"]
+
+
+def test_preview_tools_tokens_use_real_schema(measured):
+    """tools token 估算必须来自真实 schema，不能写死 tool_count * 70。
+
+    旧估算把 67 个工具算成 ~4.7K tokens，真实 schema 是 ~18K，低估近 4 倍。
+    """
+    import asyncio
+
+    from ethan.interface.routers.settings import system_prompt_preview
+
+    data = asyncio.run(system_prompt_preview())
+    assert data["approx_tools_chars"] > 40_000, "真实 schema 应远大于旧估算的 70 字符/工具"
+    assert data["approx_tools_tokens"] == data["approx_tools_chars"] // 3
+    assert data["approx_tokens"] == data["chars"] // 3
+    assert data["approx_total_tokens"] == data["approx_tokens"] + data["approx_tools_tokens"]
+
+
 # ── build_index_block 行为 ───────────────────────────────────
 
 

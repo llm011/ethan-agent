@@ -1,5 +1,24 @@
 # Ethan Agent 深度优化计划
 
+> ⚠️ **历史规划文档，非验收报告**（2026-11-14 标注）
+>
+> 本文写于一次重构之前，文中的「预期效果」「-92%」「-80%」等数字是**当时的目标推测**，
+> 不是实测结果，也未全部落地。v2 第一轮曾据此类数字声称完成，核实后发现多处为零引用
+> 的假实现，详见 `ETHAN_V2_RESTRUCTURE_PLAN.md`。
+>
+> 特别是「Context 占用 ~6KB → ~300B」这个前提本身是错的：真实的 6KB 级占用不在技能包，
+> 而在 `~/.ethan/system/tools.md`（`tools_reference`）与技能全量描述表。当前 system prompt
+> 的**实测**体积请以唯一可信入口为准：
+>
+> ```bash
+> .venv/bin/python -m tests.bench_prompt_size          # 各块字符数 + 体积护栏
+> .venv/bin/python -m pytest tests/test_prompt_budget.py -q
+> ```
+>
+> 截至 2026-11-14 实测：full 档 system prompt 51,954 字符（≈17.3K tokens），其中
+> `tools_reference` 34,317 字符占 66%；技能分级已落地（12.9K → 4.5K），但
+> `tools.md` 的结构性拆分仍是 P1 待办，尚未完成。
+
 ## 🎯 优化目标
 
 1. **极致精简** - 减少 80% 的无用技能注入
