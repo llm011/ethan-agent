@@ -32,6 +32,20 @@ TOOL_FREQ_LIMIT_VARIED = 6  # 同一工具名连续调用但参数每次不同�
 _FREQ_LIMIT_EXEMPT = {"file_read", "file_write", "rg_search", "fd_find", "skill_read", "skill_list", "web_search", "web_fetch", "memory_recall", "plan_read", "knowledge_search", "knowledge_read"}
 # shell 工具不整体豁免，而是按实际命令前缀判定（见 _effective_tool_name）
 
+# 「只读分段读取」命令：sed/awk/head/tail/cat/less/bat/grep 连续读同一个大文件的不同区间，
+# 是 review diff、翻长日志的标准做法——参数每次都不同，本身就是在推进。把它们与 file_read
+# 同等对待（同样豁免 varied 频率熔断），否则 6 轮就被判死循环。
+# 真实 badcase（会话 s_20261112_1603_c3ca）：深度 review MR 时用 `sed -n 'a,bp' mr.diff`
+# 逐段读 diff，跑到第 40 轮、42 次工具调用全部成功无一次报错，仍被 varied 频率熔断收尾，
+# 而收尾轮模型返回空内容，整轮白干、用户侧表现为「对话莫名中断」。
+# 注意：豁免的只是「不同参数」的频率熔断——精确重复（STUCK_WINDOW）与连续报错
+# （ERROR_WINDOW）两条分支照旧生效，真的原地读同一段仍会停。
+_READ_ONLY_PAGING_CMDS = {
+    "sed", "awk", "head", "tail", "cat", "less", "more", "bat", "nl",
+    "grep", "egrep", "fgrep", "rg", "jq", "cut", "tr", "wc", "sort", "uniq",
+    "diff", "md5", "md5sum", "shasum", "file", "stat", "ls",
+}
+
 # browser_* 不整体豁免，而是给一个更高的「varied」阈值：逐个打开不同视频/笔记详情页、
 # 对不同页面轮流 snapshot/eval 抓数据，是浏览器批量任务（如「搜索 Top10 逐个补全指标」）的
 # 正常路径，参数每次都不同，6 轮上限太紧会误砍（实测抖音/小红书 Top10 抓取常在第 14~22 轮被误熔断）。
@@ -47,6 +61,21 @@ _CMD_SEP_RE = _re.compile(r"&&|\|\||[|;]")
 _ENV_ASSIGN_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # 前导包装命令（本身不代表操作意图）——跳过一层，取被包装的命令
 _WRAPPER_CMDS = {"sudo", "env", "nohup", "time", "exec"}
+# 引号包裹的 awk/sed 表达式：里面的 > 多是数值比较（NR>10），不是 shell 重定向，
+# 判「输出重定向」时先剔除，避免把只读分页误判成写操作。
+_SHELL_QUOTED_RE = _re.compile(r"'[^']*'|\"[^\"]*\"")
+# 无副作用的重定向：fd 合并（2>&1）与丢弃到 /dev/null 不写文件，不算写操作。
+_HARMLESS_REDIRECT_RE = _re.compile(r"\d*>&\d+|\d*>>?\s*/dev/null")
+# 白名单里少数命令带特定选项就会写文件（sed -i / sort -o / gawk -i inplace）。
+# 命中这些选项时不按「只读分段读取」豁免，否则真的原地写循环会一路放到 max_iters。
+_WRITE_OPTION_RE = {
+    "sed": _re.compile(r"^--in-place(=.*)?$|^-.*[iI]"),
+    "sort": _re.compile(r"^--output(=.*)?$|^-.*[oO]"),
+    "awk": _re.compile(r"^--inplace$|^-.*[iI]"),
+}
+# awk 表达式里的 `print > "file"` / `system()` 是真写文件 / 执行命令，不能算只读分页。
+# 仅匹配这类写动作，普通的 `NR>10` 数值比较不受影响。
+_AWK_WRITE_RE = _re.compile(r"\b(?:print|printf)\s*>|\bsystem\s*\(")
 
 
 def _effective_tool_name(tc) -> str:
@@ -83,6 +112,52 @@ def _effective_tool_name(tc) -> str:
     return f"shell:{':'.join(tokens)}" if tokens else name
 
 
+def _is_read_only_paging(tc) -> bool:
+    """本轮调用是否为「只读分段读取」——判频率熔断时应当豁免。
+
+    命中条件（全部满足）：
+      - 工具是 file_read（天然按 offset/limit 分页），或
+      - 工具是 shell、有效命令属于 _READ_ONLY_PAGING_CMDS，且没有写副作用：
+        输出重定向（> / >>，2>&1 与 /dev/null 除外）、sed -i / sort -o 等
+        写文件选项、awk 的 print > / system() 都不算只读。
+
+    只用于 varied 频率分支的豁免；精确重复 / 连续报错仍由各自分支拦截。
+    """
+    if tc.name == "file_read":
+        return True
+    if tc.name != "shell":
+        return False
+    cmd = tc.arguments.get("command", "") if isinstance(tc.arguments, dict) else ""
+    if not cmd:
+        return False
+    # 输出重定向（> / >>）会写文件：先剔除引号内容（awk 的 NR>10 是数值比较），
+    # 再剔除 2>&1、>/dev/null 这类无副作用的重定向，余下的 > 一律视为写操作。
+    unquoted = _SHELL_QUOTED_RE.sub("", cmd)
+    unquoted = _HARMLESS_REDIRECT_RE.sub("", unquoted)
+    if ">" in unquoted:
+        return False
+    segment = _CMD_SEP_RE.split(cmd)[-1].strip()
+    if not segment:
+        return False
+    tokens = segment.split()
+    for idx, p in enumerate(tokens):
+        if p.startswith("-") or p.startswith("'") or p.startswith('"'):
+            continue
+        if _ENV_ASSIGN_RE.match(p) or p in _WRAPPER_CMDS:
+            continue
+        # 第一个真实命令词决定性质；sed -i / sort -o 等写文件选项不算只读
+        if p not in _READ_ONLY_PAGING_CMDS:
+            return False
+        write_opt = _WRITE_OPTION_RE.get(p)
+        if write_opt and any(write_opt.match(t) for t in tokens[idx + 1:]):
+            return False
+        # awk 表达式里的 `print > "file"` / `system()` 会写文件或执行命令
+        if p == "awk" and _AWK_WRITE_RE.search(cmd):
+            return False
+        return True
+    return False
+
+
 def _round_signature(tool_calls) -> str:
     """一轮工具调用的稳定签名：按 (name, 参数 JSON) 排序后拼成字符串。
 
@@ -106,6 +181,7 @@ class LoopMonitor:
     _signatures: list[str] = field(default_factory=list)
     _errored: list[bool] = field(default_factory=list)
     _tool_names: list[str] = field(default_factory=list)  # 每轮主工具名（取第一个）
+    _read_only_flags: list[bool] = field(default_factory=list)  # 每轮是否为只读分段读取
     reflections_used: int = 0
     awaiting_reflection_followup: bool = False  # 上一轮注入过反思，本轮需校验是否真换路
     _last_reflected_sig: str = ""
@@ -120,6 +196,10 @@ class LoopMonitor:
         self._errored.append(had_error)
         # 记录有效工具名（shell 按实际命令前缀区分，避免 bytedcli tea/codebase 被误判为重复）
         self._tool_names.append(_effective_tool_name(tool_calls[0]) if tool_calls else "")
+        # 一轮里只要有一个「非只读」调用就不算只读轮（混合批次按操作性的那个算）
+        self._read_only_flags.append(
+            bool(tool_calls) and all(_is_read_only_paging(tc) for tc in tool_calls)
+        )
 
     def is_stuck(self) -> bool:
         """是否陷入无效循环。三种触发：
@@ -127,7 +207,8 @@ class LoopMonitor:
         2. 连续 STUCK_WINDOW 轮同签名（精确重复）
         3. 同一工具名连续 TOOL_FREQ_LIMIT 轮且参数完全相同 → 严格卡住；
            参数不同 → 放宽到 varied 上限（browser_* 用 TOOL_FREQ_LIMIT_BROWSER，
-           其余用 TOOL_FREQ_LIMIT_VARIED）
+           其余用 TOOL_FREQ_LIMIT_VARIED）。varied 分支对「只读分段读取」
+           （file_read / sed / head / grep 等）豁免——逐段读大文件是正常推进。
         """
         self._freq_limit_varied = False
         sigs = self._signatures
@@ -155,6 +236,11 @@ class LoopMonitor:
                 if len(self._tool_names) >= varied_limit:
                     long_tail = self._tool_names[-varied_limit:]
                     if len(set(long_tail)) == 1:
+                        # 只读分段读取（file_read / sed / head / grep…）：参数每次不同说明
+                        # 一直在读新内容，是 review 大 diff、翻长日志的正当工作流，不算打转。
+                        # 真在原地读同一段 → 签名会相同，已被上面的严格分支拦住。
+                        if all(self._read_only_flags[-varied_limit:]):
+                            return False
                         self._freq_limit_varied = True
                         return True
         return False
