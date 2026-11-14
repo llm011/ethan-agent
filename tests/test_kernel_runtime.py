@@ -313,7 +313,8 @@ def test_acp_events_map_to_stream_chat_vocabulary(monkeypatch):
     step = {"tool": "Read", "args": "x.py", "state": "running", "result_preview": ""}
 
     async def fake_delegate(prompt, cwd=None, prefer="auto", timeout=180, resume=True,
-                            reset_session=False, user_id="", mirror=True, on_event=None):
+                            reset_session=False, user_id="", mirror=True, on_event=None,
+                            mcp_config_path=None):
         await on_event("step", step)
         await on_event("text", "先看看文件")
         step["state"] = "done"
@@ -369,7 +370,8 @@ def test_acp_kernel_skips_duplicate_final_text(monkeypatch):
     from ethan.kernel.claude_kernel import ClaudeCodeKernel
 
     async def fake_delegate(prompt, cwd=None, prefer="auto", timeout=180, resume=True,
-                            reset_session=False, user_id="", mirror=True, on_event=None):
+                            reset_session=False, user_id="", mirror=True, on_event=None,
+                            mcp_config_path=None):
         await on_event("text", "完整回答")
         return ACPResult(success=True, output="完整回答", agent="claude")
 
@@ -821,7 +823,8 @@ def test_acp_step_without_step_id_still_pairs_by_identity():
     step = {"tool": "Bash", "args": "ls", "state": "running", "result_preview": ""}
 
     async def fake_delegate(prompt, cwd=None, prefer="auto", timeout=180, resume=True,
-                            reset_session=False, user_id="", mirror=True, on_event=None):
+                            reset_session=False, user_id="", mirror=True, on_event=None,
+                            mcp_config_path=None):
         await on_event("step", step)
         step["state"] = "done"
         step["result_preview"] = "out"
@@ -856,7 +859,8 @@ def test_acp_step_with_step_id_pairs_across_different_dicts():
     from ethan.kernel.claude_kernel import ClaudeCodeKernel
 
     async def fake_delegate(prompt, cwd=None, prefer="auto", timeout=180, resume=True,
-                            reset_session=False, user_id="", mirror=True, on_event=None):
+                            reset_session=False, user_id="", mirror=True, on_event=None,
+                            mcp_config_path=None):
         # 两个**不同** dict，但同一个 step_id
         await on_event("step", {"tool": "shell", "args": "ls", "state": "running",
                                 "result_preview": "", "step_id": "cx-1-shell"})
@@ -890,7 +894,8 @@ def test_tool_events_carry_args_on_both_start_and_done():
     step = {"tool": "Bash", "args": "ls -la", "state": "running", "result_preview": ""}
 
     async def fake_delegate(prompt, cwd=None, prefer="auto", timeout=180, resume=True,
-                            reset_session=False, user_id="", mirror=True, on_event=None):
+                            reset_session=False, user_id="", mirror=True, on_event=None,
+                            mcp_config_path=None):
         await on_event("step", step)
         # 模拟真实情况：done 时 args 被覆盖成空
         await on_event("step", {"tool": "Bash", "args": "", "state": "done",

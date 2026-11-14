@@ -153,3 +153,89 @@ def test_endpoint_registers_all_tools_with_valid_schema():
     for name, tool in tools.items():
         assert name.startswith("ethan_")
         assert tool.parameters.get("type") == "object", f"{name} 的 schema 不是 object"
+
+
+# ── Claude Code 的 MCP 注入（走 --mcp-config，与 DSH 不同）─────
+
+
+def test_claude_kernel_builds_mcp_config_file():
+    """Claude Code 不支持 ACP 的 mcp_servers 参数，只认 `--mcp-config <json文件>`。
+
+    格式：{"mcpServers": {"<name>": {"type": "http", "url": ..., "headers": {...}}}}
+    """
+    import json
+    import os
+
+    from ethan.kernel.claude_kernel import ClaudeCodeKernel
+
+    path, env = ClaudeCodeKernel()._build_mcp_config()
+    assert path, "应该生成配置文件"
+    try:
+        data = json.load(open(path))
+        assert "ethan" in data["mcpServers"]
+        server = data["mcpServers"]["ethan"]
+        assert server["type"] == "http"
+        assert server["url"].endswith("/kernel-tools/")
+    finally:
+        os.unlink(path)
+
+
+def test_claude_mcp_config_respects_off(monkeypatch):
+    import ethan.core.config as cfg_mod
+    from ethan.kernel.claude_kernel import ClaudeCodeKernel
+
+    cfg = cfg_mod.get_config()
+    monkeypatch.setattr(cfg.defaults.kernel, "share_tools", "off", raising=False)
+    path, _ = ClaudeCodeKernel()._build_mcp_config()
+    assert path == ""
+
+
+def test_claude_mcp_config_contains_api_key(monkeypatch):
+    """配置里要带鉴权头，否则 /kernel-tools 返回 401。"""
+    import json
+    import os
+
+    import ethan.core.config as cfg_mod
+    from ethan.kernel.claude_kernel import ClaudeCodeKernel
+
+    cfg = cfg_mod.get_config()
+    monkeypatch.setattr(cfg.network, "mcp_api_key", "test-key-123", raising=False)
+
+    path, _ = ClaudeCodeKernel()._build_mcp_config()
+    assert path
+    try:
+        data = json.load(open(path))
+        hdr = data["mcpServers"]["ethan"]["headers"]
+        assert hdr["Authorization"] == "Bearer test-key-123"
+    finally:
+        os.unlink(path)
+
+
+def test_claude_agent_passes_mcp_config_flag():
+    """`_run_claude_code` 收到 mcp_config_path 时必须拼进命令行。
+
+    注意不能加 `--strict-mcp-config`：那会忽略用户 ~/.claude 里配的 MCP server，
+    我们只是"额外挂一个"，不该把别人的丢掉。
+    """
+    import inspect
+
+    from ethan.acp import agent_claude
+
+    src = inspect.getsource(agent_claude._run_claude_code)
+    assert '"--mcp-config"' in src, "必须拼进命令行"
+    # 注释里会提到 strict 但不能真的拼进 cmd
+    cmd_lines = [ln for ln in src.splitlines() if "cmd" in ln and "strict" in ln]
+    assert not cmd_lines, "不该把 --strict-mcp-config 拼进命令（会丢掉用户自己的 MCP 配置）"
+
+
+def test_claude_mcp_requires_skip_permissions():
+    """实测：不加 --dangerously-skip-permissions 时 MCP 工具调用会被拦。
+
+    现象是 Claude 回「工具还没获得授权，这次调用被拦下了」——注册成功了但用不了。
+    """
+    import inspect
+
+    from ethan.acp import agent_claude
+
+    src = inspect.getsource(agent_claude._run_claude_code)
+    assert "--dangerously-skip-permissions" in src

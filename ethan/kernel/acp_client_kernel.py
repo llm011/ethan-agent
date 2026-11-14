@@ -70,6 +70,32 @@ from ethan.kernel.runtime import (
 logger = logging.getLogger(__name__)
 
 
+def local_port() -> int:
+    """推断当前进程实际在监听的端口。
+
+    不能只读 `cfg.server.port`：那是**主实例**的配置（通常 8900），
+    而开发/测试实例可能跑在别的端口（如 8910），配置里没有这个信息。
+    优先用 api.py 记录的运行时绑定地址，再退到配置，最后 8900。
+
+    放在模块级而不是类方法：Claude/Codex 内核走的是另一个基类
+    （ACPKernelBase），它们也需要这个能力。
+    """
+    try:
+        from ethan.interface.api import _SERVER_BIND
+
+        port = _SERVER_BIND[1]
+        if port:
+            return int(port)
+    except Exception:
+        pass
+    try:
+        from ethan.core.config import get_config
+
+        return int(getattr(get_config().server, "port", 8900) or 8900)
+    except Exception:
+        return 8900
+
+
 @dataclass
 class AcpAgentSpec:
     """一个 ACP agent 的启动方式。换 agent 只改这张表的行程。"""
@@ -396,26 +422,7 @@ class AcpClientKernel(KernelRuntime):
 
     @staticmethod
     def _local_port() -> int:
-        """推断当前进程实际在监听的端口。
-
-        不能只读 `cfg.server.port`：那是**主实例**的配置（通常是 8900），
-        而开发/测试实例可能跑在别的端口（如 8910），配置里没有这个信息。
-        优先用 api.py 记录的运行时绑定地址，再退到配置，最后 8900。
-        """
-        try:
-            from ethan.interface.api import _SERVER_BIND
-
-            port = _SERVER_BIND[1]
-            if port:
-                return int(port)
-        except Exception:
-            pass
-        try:
-            from ethan.core.config import get_config
-
-            return int(getattr(get_config().server, "port", 8900) or 8900)
-        except Exception:
-            return 8900
+        return local_port()
 
     # ── provider 注入（仅 DSH 这类需要 token 的 agent 用）────────
 

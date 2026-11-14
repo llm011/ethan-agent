@@ -45,8 +45,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, AsyncIterator
 
+from ethan.kernel.acp_client_kernel import local_port
 from ethan.kernel.runtime import (
     KernelCapabilities,
     KernelContext,
@@ -111,6 +113,10 @@ class ACPKernelBase(KernelRuntime):
         if not prompt:
             yield "[空输入] 没有可执行的内容"
             return
+
+        # 生成 MCP 配置（把 Ethan 的工具挂给 Claude Code）。
+        # 拿不到就不注入，行为退回"只用它自带工具"。
+        mcp_cfg_path, _mcp_env = self._build_mcp_config()
 
         queue: asyncio.Queue = asyncio.Queue()
         # step dict 的 id() → tool_call_id，用于把 running/done 两次回调配成一对
@@ -208,6 +214,7 @@ class ACPKernelBase(KernelRuntime):
                     user_id=request.user_id,
                     mirror=False,  # 内核模式下不落镜像会话，避免和主会话重复
                     on_event=_on_event,
+                    mcp_config_path=mcp_cfg_path or None,
                 )
                 queue.put_nowait(("__result__", result))
             except Exception as e:  # noqa: BLE001 - 必须兜住，否则消费者永久阻塞
@@ -243,6 +250,14 @@ class ACPKernelBase(KernelRuntime):
                         continue
                 yield item
         finally:
+            # 清理 MCP 临时配置（里面含 api key，不该遗留）
+            if mcp_cfg_path:
+                try:
+                    import os as _os
+
+                    _os.unlink(mcp_cfg_path)
+                except OSError:
+                    pass
             # 调用方中途取消（客户端断开）时，别把子进程晾在那儿
             if not driver.done():
                 driver.cancel()
@@ -250,6 +265,57 @@ class ACPKernelBase(KernelRuntime):
                     await driver
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     pass
+
+    # ── 工具注入：把 Ethan 的工具挂给外部内核 ──────────────────
+
+    def _build_mcp_config(self) -> tuple[str, dict]:
+        """生成 Claude Code 的 MCP 配置文件，返回 (路径, 额外环境变量)。
+
+        Claude Code 与 DSH 的注入方式不同：它不支持 ACP 的 `mcp_servers` 参数，
+        而是命令行的 `--mcp-config <json文件>`。格式是：
+
+            {"mcpServers": {"<名称>": {"type": "http", "url": "...", "headers": {...}}}}
+
+        ## 两个实测的坑
+
+        1. **必须配合 `--dangerously-skip-permissions`**。不给你会看到
+           "工具还没获得授权，这次调用被拦下了"——MCP 工具注册成功但被权限系统挡。
+           （这个参数本来就在用，见 agent_claude.py。）
+        2. **不要加 `--strict-mcp-config`**。那个会忽略用户 `~/.claude` 里配的
+           所有 MCP server，只保留我们给的。我们只是"额外挂一个"，不该把别人的丢掉。
+
+        返回 ("", {}) 表示不注入（配置关闭或拿不到服务地址）。
+        """
+        try:
+            from ethan.core.config import get_config
+
+            cfg = get_config()
+            share = getattr(cfg.defaults.kernel, "share_tools", "all") or "all"
+            if share == "off":
+                return "", {}
+
+            base = (getattr(cfg.network, "base_url", "") or "").rstrip("/")
+            if not base:
+                base = f"http://127.0.0.1:{local_port()}"
+
+            server: dict = {
+                "type": "http",
+                "url": f"{base}/kernel-tools/",
+            }
+            api_key = getattr(cfg.network, "mcp_api_key", "") or ""
+            if api_key:
+                server["headers"] = {"Authorization": f"Bearer {api_key}"}
+
+            import json
+            import tempfile
+
+            fd, path = tempfile.mkstemp(prefix="ethan_claude_mcp_", suffix=".json")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"mcpServers": {"ethan": server}}, f)
+            return path, {}
+        except Exception:
+            logger.warning("构造 Claude MCP 配置失败，本次不注入 Ethan 工具", exc_info=True)
+            return "", {}
 
     def _build_prompt(self, request: KernelRequest) -> str:
         """把消息历史压成单条 prompt。
