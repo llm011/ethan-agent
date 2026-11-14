@@ -69,6 +69,12 @@ class PiKernel(KernelRuntime):
         consent=False,
         ethan_context=False,
         resumable=True,       # --session <id>
+        # Pi 的源码里没有任何 MCP 实现（`pi --help` 也没有相关参数），
+        # 所以没有可用的注入点。这不是没做，是它不支持。
+        shares_ethan_tools=False,
+        shares_ethan_tools_reason=(
+            "Pi 不支持 MCP（源码与 CLI 参数里都没有相关实现），无法接收 Ethan 的工具"
+        ),
     )
 
     cli_binary = "pi"

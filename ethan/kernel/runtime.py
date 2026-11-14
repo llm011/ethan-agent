@@ -91,6 +91,19 @@ class KernelCapabilities:
     ethan_context: bool = True
     # 会话续接能力（同一 cwd 下多轮对话延续上下文）
     resumable: bool = False
+    # 能否共享 Ethan 的工具/技能（经 /kernel-tools MCP 端点注入）。
+    #
+    # 这是「内核作为 Ethan 的心脏」的核心指标：能共享 = 它用 Ethan 的手脚干活，
+    # 不能共享 = 只是个外接的三方 agent。实测情况：
+    #   ethan       ✅ 本来就是
+    #   dsh         ✅ ACP 的 mcp_servers 参数
+    #   claude_code ✅ --mcp-config（需配合 --dangerously-skip-permissions）
+    #   codex       ❌ 写进配置了但工具列表里没有（加载条件未明）
+    #   opencode    ❌ 只能写全局配置，会污染用户环境，不做
+    #   pi          ❌ 源码里没有 MCP 支持
+    shares_ethan_tools: bool = False
+    # 不能共享时给用户看的原因（可操作，不是「暂不支持」这种废话）
+    shares_ethan_tools_reason: str = ""
 
 
 @dataclass
@@ -273,6 +286,8 @@ class KernelRegistry:
                     "consent": rt.capabilities.consent,
                     "ethan_context": rt.capabilities.ethan_context,
                     "resumable": rt.capabilities.resumable,
+                    "shares_ethan_tools": rt.capabilities.shares_ethan_tools,
+                    "shares_ethan_tools_reason": rt.capabilities.shares_ethan_tools_reason,
                 },
             })
         return out

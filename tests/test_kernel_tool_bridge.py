@@ -239,3 +239,50 @@ def test_claude_mcp_requires_skip_permissions():
 
     src = inspect.getsource(agent_claude._run_claude_code)
     assert "--dangerously-skip-permissions" in src
+
+
+# ── 能力声明：哪些内核真的能共享 Ethan 工具 ──────────────────
+
+
+def test_shares_ethan_tools_declared_for_all_kernels():
+    """每个内核都要明确声明能否共享，不能留默认值糊过去。
+
+    实测结论（2026-11-15）：
+      ethan       ✅ 本来就是
+      dsh         ✅ ACP mcp_servers
+      claude_code ✅ --mcp-config
+      codex       ❌ 接受配置但不加载工具
+      opencode    ❌ 只能写全局配置（会污染用户环境）
+      pi          ❌ 源码里没有 MCP
+    """
+    from ethan.kernel.runtime import get_kernel_registry
+
+    expect_yes = {"ethan", "dsh", "claude_code"}
+    expect_no = {"codex", "opencode", "pi"}
+
+    for item in get_kernel_registry().list_status():
+        kind = item["kind"]
+        caps = item["capabilities"]
+        if kind in expect_yes:
+            assert caps["shares_ethan_tools"] is True, f"{kind} 应该能共享 Ethan 工具"
+        elif kind in expect_no:
+            assert caps["shares_ethan_tools"] is False, f"{kind} 不能共享，别谎报"
+            assert caps["shares_ethan_tools_reason"], (
+                f"{kind} 不能共享时必须给出原因（不能只说「不支持」）"
+            )
+
+
+def test_unsupported_reasons_are_actionable():
+    """不能共享时给的原因要能让用户做决定，不是一句「暂不支持」。"""
+    from ethan.kernel.runtime import get_kernel_registry
+
+    for item in get_kernel_registry().list_status():
+        caps = item["capabilities"]
+        if caps["shares_ethan_tools"]:
+            continue
+        reason = caps["shares_ethan_tools_reason"]
+        assert len(reason) > 15, f"{item['kind']} 的原因太笼统：{reason!r}"
+        # 应该提到具体原因或给出替代方案
+        assert any(
+            kw in reason for kw in ("实测", "不支持", "建议", "污染", "无法")
+        ), f"{item['kind']} 的原因没有解释清楚：{reason!r}"

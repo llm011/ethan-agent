@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, Check, Download, Loader2, RefreshCw, Zap } from "lucide-react";
+import { AlertCircle, Check, Download, Loader2, RefreshCw, Wrench, Zap } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -32,6 +32,10 @@ export interface KernelCapabilities {
   consent: boolean;
   ethan_context: boolean;
   resumable: boolean;
+  /** 能否共享 Ethan 的工具/技能（经 MCP 注入）。这是"内核作为 Ethan 心脏"的核心指标 */
+  shares_ethan_tools: boolean;
+  /** 不能共享时的原因（可操作说明，不是「暂不支持」） */
+  shares_ethan_tools_reason: string;
 }
 
 export interface KernelInfo {
@@ -166,23 +170,48 @@ export function KernelSelector({
 
                   {/* 能力差异：外部内核的取舍要明说，否则用户会当成 bug */}
                   {isExternal && k.capabilities && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {!k.capabilities.ethan_context && (
-                        <Badge variant="outline" className="text-[10px]">
-                          不共享 Ethan 技能/记忆
-                        </Badge>
-                      )}
-                      {!k.capabilities.consent && (
-                        <Badge variant="outline" className="text-[10px]">
-                          无中途授权
-                        </Badge>
-                      )}
-                      {k.capabilities.resumable && (
-                        <Badge variant="outline" className="text-[10px]">
-                          支持会话续接
-                        </Badge>
-                      )}
-                    </div>
+                    <>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {/* 最关键的一条：能不能用 Ethan 的工具干活 */}
+                        {k.capabilities.shares_ethan_tools ? (
+                          <Badge
+                            variant="default"
+                            className="gap-1 bg-emerald-500/15 text-[10px] text-emerald-600 hover:bg-emerald-500/20"
+                          >
+                            <Wrench className="h-2.5 w-2.5" />
+                            可用 Ethan 的工具
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground">
+                            <Wrench className="h-2.5 w-2.5" />
+                            仅自带工具
+                          </Badge>
+                        )}
+                        {!k.capabilities.ethan_context && (
+                          <Badge variant="outline" className="text-[10px]">
+                            不共享 Ethan 技能/记忆
+                          </Badge>
+                        )}
+                        {!k.capabilities.consent && (
+                          <Badge variant="outline" className="text-[10px]">
+                            无中途授权
+                          </Badge>
+                        )}
+                        {k.capabilities.resumable && (
+                          <Badge variant="outline" className="text-[10px]">
+                            支持会话续接
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* 不能共享时说明原因——别让用户以为是 bug */}
+                      {!k.capabilities.shares_ethan_tools &&
+                        k.capabilities.shares_ethan_tools_reason && (
+                          <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                            {k.capabilities.shares_ethan_tools_reason}
+                          </p>
+                        )}
+                    </>
                   )}
                 </div>
 

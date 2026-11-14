@@ -73,6 +73,7 @@ class ACPKernelBase(KernelRuntime):
     acp_agent: str = ""       # 传给 acp.delegate(prefer=...) 的值
     cli_binary: str = ""      # 用于 available() 探测的 CLI 名
 
+    # 子类各自覆盖（不同 CLI 的能力差异很大，尤其是能否共享 Ethan 的工具）
     capabilities = KernelCapabilities(
         streaming=True,
         tools=True,
@@ -358,6 +359,16 @@ class ClaudeCodeKernel(ACPKernelBase):
     display_name = "Claude Code"
     acp_agent = "claude"
     cli_binary = "claude"
+
+    capabilities = KernelCapabilities(
+        streaming=True,
+        tools=True,
+        consent=False,
+        ethan_context=False,
+        resumable=True,
+        # 走 --mcp-config 注入 Ethan 工具，实测可用
+        shares_ethan_tools=True,
+    )
 
     @property
     def install_hint(self) -> str:

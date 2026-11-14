@@ -44,6 +44,7 @@ class EthanKernel(KernelRuntime):
         consent=True,
         ethan_context=True,
         resumable=True,  # 会话续接由 sessions.db 承担
+        shares_ethan_tools=True,  # 原生内核本身就是 Ethan，工具当然共享
     )
 
     async def run(

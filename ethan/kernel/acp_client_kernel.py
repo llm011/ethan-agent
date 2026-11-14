@@ -122,6 +122,8 @@ class AcpClientKernel(KernelRuntime):
         consent=True,        # ACP 有 request_permission，可以真正对齐授权
         ethan_context=False,  # 外部 agent 有自己的系统提示词与工具集
         resumable=True,       # sessionCapabilities.resume
+        # DSH 支持 ACP 的 mcp_servers 参数，实测能把 Ethan 的 58 个工具挂上去
+        shares_ethan_tools=True,
     )
 
     def __init__(self) -> None:

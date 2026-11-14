@@ -387,6 +387,10 @@ export interface KernelCapabilities {
   /** 是否沿用 Ethan 的技能/记忆/系统提示词。外部 runtime 为 false。 */
   ethan_context: boolean;
   resumable: boolean;
+  /** 能否共享 Ethan 的工具/技能（经 MCP 注入）——「内核作为 Ethan 心脏」的核心指标 */
+  shares_ethan_tools: boolean;
+  /** 不能共享时的原因（可操作说明） */
+  shares_ethan_tools_reason: string;
 }
 
 export interface KernelInfo {

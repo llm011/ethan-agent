@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from ethan.kernel.claude_kernel import ACPKernelBase
-from ethan.kernel.runtime import KernelKind
+from ethan.kernel.runtime import KernelCapabilities, KernelKind
 
 
 class CodexKernel(ACPKernelBase):
@@ -18,6 +18,22 @@ class CodexKernel(ACPKernelBase):
     display_name = "Codex"
     acp_agent = "codex"
     cli_binary = "codex"
+
+    capabilities = KernelCapabilities(
+        streaming=True,
+        tools=True,
+        consent=False,
+        ethan_context=False,
+        resumable=True,
+        # 实测：`-c mcp_servers.*` 与写进 config.toml 都能让 Codex 接受配置，
+        # 但工具列表里始终没有 MCP 工具（只有它自带的 10 个）。加载条件未明，
+        # 与其给用户一个"看起来接上了其实没接"的状态，不如如实说没有。
+        shares_ethan_tools=False,
+        shares_ethan_tools_reason=(
+            "Codex 能接受 MCP 配置但不加载其中的工具（实测其工具列表始终只有自带的 10 个），"
+            "暂不支持共享 Ethan 工具。CI 助手建议改用 Claude Code 或 DSH"
+        ),
+    )
 
     @property
     def install_hint(self) -> str:
@@ -58,6 +74,22 @@ class OpenCodeKernel(ACPKernelBase):
     display_name = "OpenCode"
     acp_agent = "opencode"
     cli_binary = "opencode"
+
+    capabilities = KernelCapabilities(
+        streaming=True,
+        tools=True,
+        consent=False,
+        ethan_context=False,
+        resumable=True,
+        # OpenCode 只有 `opencode mcp add`（写全局配置文件），没有单次会话注入的
+        # 命令行参数。强行用它意味着要改用户的 ~/.config/opencode/config.json——
+        # 那会污染用户环境，且脱离 Ethan 后还留着我们塞的 server。
+        shares_ethan_tools=False,
+        shares_ethan_tools_reason=(
+            "OpenCode 没有单次会话注入 MCP 的方式，只能改全局配置文件。"
+            "为避免污染你的 ~/.config/opencode，暂不做共享"
+        ),
+    )
 
     @property
     def install_hint(self) -> str:
