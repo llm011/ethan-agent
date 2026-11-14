@@ -203,7 +203,13 @@ def _write_profile_patch() -> None:
         start = text.index(MARKER)
         # 行区块最后一行是 backend 转发行，之后是下一行 patch 的开头。
         anchor = "backend: !!js process.env.DSH_TUI_BACKEND || undefined\n"
-        end = text.index(anchor, start) + len(anchor)
+        anchor_at = text.find(anchor, start)
+        if anchor_at < 0:
+            raise SystemExit(
+                f"{PROFILE_PATCH} 里 {MARKER} 之后找不到 backend 转发行，"
+                "文件可能被手改过；请先人工确认，脚本不会擅自覆盖"
+            )
+        end = anchor_at + len(anchor)
         new_text = text[:start] + PROFILE_ROW + text[end:]
     else:
         if text and not text.endswith("\n"):
@@ -237,10 +243,7 @@ def _dsh_package_dir() -> Path:
 # free 段的两个硬编码来源（都没有主题键）：
 # - StatusMetrics 的 FREE_SEGMENT_FILL 常量（ContextBarView 进度条本体 + ANSI 路径）；
 # - StatusLine 里按品牌写死的 barColors.freeFill（运行时优先，hover 图例也用它）。
-
-
-
-# free 段的两处硬编码来源（都没有主题键）。写入时统一用双引号，方便幂等判断。
+# 写入时统一用双引号，方便幂等判断。
 _HEX_QUOTED = r"""['"]#[0-9A-Fa-f]{6}['"]"""
 BAR_FREE_FILL_PATTERNS = (
     (Path("lib/types/screens/StatusMetrics.js"), rf"(export const FREE_SEGMENT_FILL = ){_HEX_QUOTED}"),
@@ -248,7 +251,7 @@ BAR_FREE_FILL_PATTERNS = (
 )
 
 
-def patch_bar_free_fill(pkg: Path, fill: str) -> None:
+def patch_bar_free_fill(pkg: Path, fill: str) -> int:
     """把自由段的兜底填充色换成 fill。
 
     free 段有两个来源、都没有主题键：
@@ -264,6 +267,9 @@ def patch_bar_free_fill(pkg: Path, fill: str) -> None:
     for rel, pattern in BAR_FREE_FILL_PATTERNS:
         target = pkg / rel
         backup = target.with_suffix(target.suffix + ".orig")
+        if not target.is_file():
+            failures.append(f"{rel} 不存在（包的目录结构可能已变）")
+            continue
         text = target.read_text(encoding="utf-8")
         patched, count = re.subn(pattern, lambda m: f'{m.group(1)}"{fill}"', text)
         if count == 0:
@@ -322,7 +328,9 @@ def main() -> int:
         _write_profile_patch()
 
     if args.bar_free_fill:
-        patch_bar_free_fill(_dsh_package_dir(), args.bar_free_fill)
+        if patch_bar_free_fill(_dsh_package_dir(), args.bar_free_fill) != 0:
+            print("bar 补丁未全部生效，见上方原因；主题/profile 部分已写入。", file=sys.stderr)
+            return 1
 
     print("完成。重启 dsh-tui 后生效（/restart 或退出重开）。")
     return 0
