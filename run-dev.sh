@@ -75,9 +75,51 @@ for shared in skills remote-skills knowledge memory documents assets browser-sho
   fi
 done
 
-# config.yaml 共享（这样内核/语音/搜索的配置与 8900 一致，便于对比体验）
-if [[ -f "$HOME/.ethan/config.yaml" && ! -e "$DATA_ROOT/config.yaml" ]]; then
-  ln -s "$HOME/.ethan/config.yaml" "$DATA_ROOT/config.yaml"
+# config.yaml：**复制而非软链**，并关掉会独占全局资源的渠道。
+#
+# 为什么不能软链共享：
+#   1. 两个实例同时写同一份 config.yaml → 互相覆盖（已修好合并逻辑，但没必要制造竞争）
+#   2. **更致命**：lark-cli 的事件订阅是全局单例，只允许一个消费者。
+#      实测两个实例都启动时，dev 实例报
+#      `cannot start consumer: another consumer is already running`，
+#      反复重试后整个进程被拉起失败而退出——表现为「8910 打不开」。
+#   3. 飞书/微信渠道对开发实例没有意义（消息会重复处理）
+#
+# 所以：拷一份配置，强制关掉 lark/wechat，其余（内核/语音/搜索/模型）保持一致，
+# 这样体验的功能与 8900 相同，但不会去抢渠道连接。
+if [[ -f "$HOME/.ethan/config.yaml" ]]; then
+  .venv/bin/python - "$HOME/.ethan/config.yaml" "$DATA_ROOT/config.yaml" <<'PYEOF'
+import sys
+from pathlib import Path
+
+import yaml
+
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+try:
+    data = yaml.safe_load(src.read_text(encoding="utf-8")) or {}
+except Exception:
+    data = {}
+
+# 开发实例不该接管任何消息渠道。
+#
+# ⚠️ 只设 enabled=False 没用：`api._lark_ready()` 有向下兼容逻辑——
+# 「配了 app_id 但没 enabled 字段的老用户」会强制启用，于是 enabled=False
+# 也会起监听。必须把 app_id/app_secret 清空，让它判定为"未配置"。
+# 这个坑实测踩到过：设了 enabled=False 仍在抢 lark-cli 的事件消费者，
+# 导致 8910 反复启动失败后退出（表现为"打不开"）。
+lark = data.setdefault("lark", {})
+lark["enabled"] = False
+lark["app_id"] = ""
+lark["app_secret"] = ""
+lark["verification_token"] = ""
+lark["encrypt_key"] = ""
+
+wechat = data.setdefault("wechat", {})
+wechat["enabled"] = False
+
+dst.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+print(f"配置已复制到 {dst}（lark/wechat 已关闭）")
+PYEOF
 fi
 
 # db 目录独立：不软链，让实例自己初始化一套
