@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, Check, X, RefreshCw, Pin, PinOff } from "lucide-react";
+import { Pencil, Check, X, RefreshCw, Pin, PinOff, Copy } from "lucide-react";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
 import { renameSession, regenSessionTitle } from "@/lib/api";
@@ -19,6 +19,15 @@ interface ChatHeaderProps {
   usage: Usage;
   schedules: any[];
   pinnedAt?: number;
+  /**
+   * 外部内核自己的 session id（DSH 的 `session-xxx` / Claude 的 UUID）。
+   *
+   * 用户需要它去命令行定位具体对话（如 `dsh --session-id <id>`），所以展示在标题下方
+   * 并带复制按钮。原生内核下为空——那时用 Ethan 自己的会话 id，不需要额外展示。
+   */
+  kernelSessionId?: string;
+  /** 产生这个 id 的内核名（dsh / claude_code / pi …），用于标注来源 */
+  kernelKind?: string;
   onTitleChange: (title: string) => void;
   onTogglePin?: () => void;
 }
@@ -32,10 +41,11 @@ const SOURCE_COLOR: Record<string, string> = {
   heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
 };
 
-export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedAt, onTitleChange, onTogglePin }: ChatHeaderProps) {
+export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedAt, kernelSessionId, kernelKind, onTitleChange, onTogglePin }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const startEdit = () => {
     setEditingTitle(title);
@@ -130,6 +140,35 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedA
         {sessionId && source && (
           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${SOURCE_COLOR[source] || "bg-muted text-muted-foreground"}`}>
             {SOURCE_LABEL[source] || source}
+          </span>
+        )}
+
+        {/* 外部内核的 session id：用户拿它去命令行定位这条对话。
+            只在用外部内核时出现（原生内核用 Ethan 自己的会话 id，无需展示）。 */}
+        {kernelSessionId && (
+          <span
+            className="flex items-center gap-1 shrink-0 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground"
+            title={`${kernelKind || "外部内核"} 会话 ID —— 可在命令行用 --session-id 定位这条对话`}
+          >
+            <span className="opacity-60">{kernelKind || "kernel"}:</span>
+            <code className="font-mono">{kernelSessionId.slice(0, 12)}{kernelSessionId.length > 12 ? "…" : ""}</code>
+            <button
+              className="hover:text-primary"
+              onClick={async (e) => {
+                e.stopPropagation();
+                try {
+                  await navigator.clipboard.writeText(kernelSessionId);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                } catch {
+                  // 剪贴板不可用（非 https / 权限拒绝）时退化成选中文本，至少能让用户手抄
+                  window.prompt("复制这个 session id：", kernelSessionId);
+                }
+              }}
+              title="复制完整 session id"
+            >
+              {copied ? <Check className="h-2.5 w-2.5 text-green-500" /> : <Copy className="h-2.5 w-2.5" />}
+            </button>
           </span>
         )}
 

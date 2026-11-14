@@ -268,7 +268,8 @@ class AcpClientKernel(KernelRuntime):
             # `mcp__ethan__*` 前缀的那批；不用 Ethan 直接跑 dsh 完全不受影响。
             mcp_servers = self._build_mcp_servers()
             session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
-            request.session_id = session.session_id
+            # 写到独立字段，**不要改 request.session_id**（那是 Ethan 自己的会话 id）
+            request.kernel_session_id = session.session_id
             try:
                 await conn.prompt(
                     session_id=session.session_id,

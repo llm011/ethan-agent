@@ -22,6 +22,9 @@ export interface ConsumeStreamActions {
   setWaitForUserRequest: (req: WaitForUserRequest | null) => void;
   setBgPolling: (msg: string | null) => void;
   setSessionTitle: (title: string) => void;
+  /** 外部内核的 session id（DSH/Claude），随 done 事件下发 */
+  setKernelSessionId: (id: string) => void;
+  setKernelKind: (kind: string) => void;
   setSessionUsage: React.Dispatch<React.SetStateAction<Usage>>;
   setStopping: (v: boolean) => void;
   setStreaming: (v: boolean) => void;
@@ -141,7 +144,7 @@ export async function consumeStream(
 ): Promise<void> {
   const {
     setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-    setSessionTitle, setSessionUsage, setStopping, setStreaming, setPendingInjected,
+    setSessionTitle, setKernelSessionId, setKernelKind, setSessionUsage, setStopping, setStreaming, setPendingInjected,
     activeSession, isSessionActive,
   } = actions;
 
@@ -463,6 +466,12 @@ export async function consumeStream(
         if (chunk.total_ms != null) totalMs = chunk.total_ms;
         if (chunk.message_id != null) messageId = chunk.message_id;
         if (chunk.model) finalModel = chunk.model;
+        // 外部内核自己的 session id（DSH 的 session-xxx / Claude 的 UUID）。
+        // 只在外层内核时下发；原生内核没有这个字段，保持空即可。
+        if (chunk.kernel_session_id) {
+          writeActive(() => setKernelSessionId(chunk.kernel_session_id as string));
+          writeActive(() => setKernelKind((chunk.kernel_kind as string) || ""));
+        }
         if (chunk.title) {
           // 只更新「当前会话」的标题栏；侧边栏那条事件按会话 id 定位，切走后照样要发
           writeActive(() => setSessionTitle(chunk.title!));

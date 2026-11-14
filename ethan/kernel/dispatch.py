@@ -109,6 +109,10 @@ class KernelRunner:
         self.session_id = getattr(agent, "session_id", "") if agent is not None else ""
         self.runtime_context = getattr(agent, "runtime_context", "") if agent is not None else ""
         self.last_stats: KernelStats | None = None
+        # 外部内核自己的 session id（DSH 的 session-xxx / Claude 的 UUID）。
+        # 用户需要它来在命令行里定位具体对话（如 `dsh --session-id <id>`），
+        # 所以要在 UI 上展示 + 可复制。原生内核下为空（用 Ethan 的会话 id）。
+        self.kernel_session_id: str = ""
 
     # ── 属性代理：让既有代码以为它拿到的还是 Agent ──────────────────
 
@@ -183,6 +187,11 @@ class KernelRunner:
         error = ""
         try:
             async for event in self.runtime.run(request, context):
+                # 内核在会话建立后会把 id 写回 request.session_id（DSH 的
+                # session-xxx / Claude 的 UUID）。持续同步到 runner 上，
+                # 供 producers 在流结束时 emit 给前端。
+                if request.kernel_session_id and request.kernel_session_id != self.kernel_session_id:
+                    self.kernel_session_id = request.kernel_session_id
                 if not isinstance(event, str):
                     # 只数「start」，避免同名工具的 done 事件重复计数
                     if getattr(event, "state", "") == "start":

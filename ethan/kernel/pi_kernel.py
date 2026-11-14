@@ -200,7 +200,8 @@ class PiKernel(KernelRuntime):
         if t == "session":
             sid = evt.get("id") or ""
             if sid:
-                request.session_id = sid  # 供调用方持久化，下次 --session 续接
+                # 写到独立字段（不改 request.session_id：那是 Ethan 的会话 id）
+                request.kernel_session_id = sid
             return []
 
         if t == "message_update":

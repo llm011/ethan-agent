@@ -90,6 +90,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [stopping, setStopping] = useState(false);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState("");
+  // 外部内核自己的 session id（DSH/Claude），随 done 下发、随会话详情持久化
+  const [kernelSessionId, setKernelSessionId] = useState("");
+  const [kernelKind, setKernelKind] = useState("");
   const [sessionSource, setSessionSource] = useState("web");
   const [sessionPinnedAt, setSessionPinnedAt] = useState(0);
   const pinTogglingRef = useRef(false); // pin 切换 in-flight 标记，防快速双击竞态
@@ -523,7 +526,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const stream = resumeFromMessage(activeSession, msg.id, selectedModel);
       await consumeStream(stream, messages, {
         setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-        setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
+        setSessionTitle, setKernelSessionId, setKernelKind, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
         activeSession,
         isSessionActive: sessionActiveChecker(activeSession),
       }, false, ac.signal);
@@ -684,7 +687,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               : loaded;
             await consumeStream(stream, base, {
               setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-              setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
+              setSessionTitle, setKernelSessionId, setKernelKind, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
               activeSession: initialSessionId,
               isSessionActive: sessionActiveChecker(initialSessionId),
             }, false, resumeAc.signal);
@@ -1142,7 +1145,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       newMessages,
       {
         setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-        setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
+        setSessionTitle, setKernelSessionId, setKernelKind, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
         activeSession: sessionId,
         isSessionActive: sessionActiveChecker(sessionId),
       },
@@ -1162,6 +1165,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         usage={sessionUsage}
         schedules={schedules}
         pinnedAt={sessionPinnedAt}
+        kernelSessionId={kernelSessionId}
+        kernelKind={kernelKind}
         onTitleChange={setSessionTitle}
         onTogglePin={async () => {
           if (!activeSession || pinTogglingRef.current) return;

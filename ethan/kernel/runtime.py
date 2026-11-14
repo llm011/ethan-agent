@@ -119,6 +119,14 @@ class KernelRequest:
     channel: str = ""
     mode: str = ""
     session_id: str = ""
+    # 外部内核**自己的**会话 id（DSH 的 session-xxx / Claude 的 UUID / Pi 的 --session）。
+    #
+    # 必须与上面的 `session_id` 分开：那是 Ethan 自己的会话 id，内核若把它改写掉，
+    # 「续接哪个 Ethan 会话」就丢了。实测踩到——DSH 写回自己的 id 后，
+    # 调用方拿到的 Ethan 会话 id 变成了 dsh 的，续接/落库全部错位。
+    #
+    # 内核建立连接后把自己的 id 写这里，由 runner 取走供 UI 展示 + 落库。
+    kernel_session_id: str = ""
     # 工作目录：外部 coding runtime 靠它定位项目；原生内核靠它做相对路径解析
     working_dir: str = ""
     # 任务类型提示，供「按任务选内核」的路由用（如 "coding" / "chat" / "research"）

@@ -53,6 +53,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Add
@@ -109,6 +110,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -563,10 +565,14 @@ fun ChatScreen(
         // 状态栏区域，否则标题会被状态栏文字压住。
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding(),
+            ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -636,6 +642,21 @@ fun ChatScreen(
                     }
                 }
                 ConnectionStateIndicator(state.connectionState, state.isResuming)
+            }
+
+            // 外部内核的 session id：用户拿它去命令行定位这条对话
+            // （如 `dsh --session-id <id>` / `claude --resume <uuid>`）。
+            // 只在用外部内核时出现——原生内核用 Ethan 自己的会话 id，无需展示。
+            if (state.kernelSessionId.isNotEmpty()) {
+                KernelSessionBadge(
+                    sessionId = state.kernelSessionId,
+                    kernelKind = state.kernelKind,
+                    onCopy = { id ->
+                        clipboard.setText(AnnotatedString(id))
+                        scope.launch { snackbar.showSnackbar("已复制 ${'$'}id 内核对会话 ID") }
+                    },
+                )
+            }
             }
         },
         snackbarHost = { SnackbarContainer(snackbar) },
@@ -2087,4 +2108,65 @@ internal fun queryDisplayName(context: Context, uri: Uri): String {
         }
     }
     return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "shared_file"
+}
+
+/**
+ * 外部内核会话 ID 徽章。
+ *
+ * 为什么需要它：用 DSH / Claude Code 内核时，真正在跑的是它们的 CLI，
+ * 会话也是它们那边建的。用户想在命令行接着聊（`dsh --session-id <id>`、
+ * `claude --resume <uuid>`）就必须能拿到这个 id。
+ *
+ * 设计取舍：
+ *  · 只显示前 12 位 + 省略号 —— 完整 UUID 36 个字符会把顶栏挤爆
+ *  · 点一下复制完整值，用 snackbar 确认（移动端没有 hover 反馈）
+ *  · 原生内核下不渲染：那时用 Ethan 自己的会话 id，多显示一行纯噪声
+ */
+@Composable
+private fun KernelSessionBadge(
+    sessionId: String,
+    kernelKind: String,
+    onCopy: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 52.dp, end = 12.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val label = kernelKind.ifBlank { "kernel" }
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+            shape = RoundedCornerShape(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 8.dp, end = 2.dp, top = 1.dp, bottom = 1.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "$label:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.width(3.dp))
+                Text(
+                    text = if (sessionId.length > 12) "${sessionId.take(12)}…" else sessionId,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                IconButton(
+                    onClick = { onCopy(sessionId) },
+                    modifier = Modifier.size(22.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "复制完整 session id",
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
 }

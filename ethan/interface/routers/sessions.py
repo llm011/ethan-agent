@@ -236,6 +236,11 @@ async def get_session(
         # 运行中「补充信息」待消费队列（DB 镜像，run 结束时清空）：
         # 前端刷新后在「调用可视化」区域上方重新展示，可删除。
         "pending_injected": getattr(session, "pending_injected", None) or [],
+        # 外部内核自己的会话 id（DSH 的 session-xxx / Claude 的 UUID）。
+        # 前端在标题下展示 + 提供复制，让用户能去命令行定位这条对话。
+        # 原生内核下为空。
+        "kernel_session_id": getattr(session, "kernel_session_id", "") or "",
+        "kernel_kind": getattr(session, "kernel_kind", "") or "",
         "messages": [
             {
                 "id": getattr(m, "id", None),

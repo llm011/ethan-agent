@@ -605,12 +605,18 @@ def test_pi_tool_error_maps_to_error_state():
 
 
 def test_pi_session_id_captured():
-    """session 事件里的 id 要落回 request，供下次 --session 续接。"""
+    """session 事件里的 id 要落到 `kernel_session_id`，供下次 --session 续接。
+
+    **不能写 `request.session_id`**：那是 Ethan 自己的会话 id。
+    早期实现就是写错了字段，导致 DSH/Pi 把自己的 id 覆盖上去后，
+    「续接哪个 Ethan 会话」彻底丢失。两个 id 必须分开存。
+    """
     from ethan.kernel.pi_kernel import PiKernel
 
-    req = KernelRequest()
+    req = KernelRequest(session_id="s_ethan_original")
     PiKernel()._handle_event({"type": "session", "id": "01a1d8de-3e60"}, req)
-    assert req.session_id == "01a1d8de-3e60"
+    assert req.kernel_session_id == "01a1d8de-3e60"
+    assert req.session_id == "s_ethan_original", "Ethan 自己的会话 id 不能被内核改写"
 
 
 def test_pi_flow_markers_emit_nothing():

@@ -823,6 +823,19 @@ async def _run_generation(
     }
     if new_title:
         done_evt["title"] = new_title
+    # 外部内核自己的 session id（DSH 的 session-xxx / Claude 的 UUID）。
+    # 用户要拿它去命令行定位具体对话，所以随 done 事件下发，前端在标题下展示 + 可复制。
+    # 原生内核下为空——那时用 Ethan 自己的会话 id，不需要额外展示。
+    _ksid = getattr(runner, "kernel_session_id", "") or ""
+    if _ksid and getattr(runner, "kernel_kind", "ethan") != "ethan":
+        done_evt["kernel_session_id"] = _ksid
+        done_evt["kernel_kind"] = runner.kernel_kind
+        # 落库：刷新页面后还要能展示（否则只有当前这一轮的页面能看到）
+        if session_id:
+            try:
+                await store.save_kernel_session(session_id, _ksid, runner.kernel_kind)
+            except Exception:
+                logger.debug("保存 kernel_session_id 失败 session=%s", session_id, exc_info=True)
     run.emit(done_evt)
     run.finish()
     _RunManager_schedule_removal(run.session_id)
