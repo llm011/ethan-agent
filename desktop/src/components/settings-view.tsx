@@ -27,6 +27,7 @@ import { ProfileEditor } from "./settings/profile-editor";
 import { FastRulesTab } from "./settings/fast-rules-tab";
 import { DataTab } from "./settings/data-tab";
 import { KernelTab } from "./settings/kernel-tab";
+import { VoiceTab } from "./settings/voice-tab";
 import { PluginsTab } from "./settings/plugins-tab";
 import { ToolTiersView } from "./tool-tiers-view";
 import { AboutTab } from "./settings/about-tab";
@@ -37,7 +38,7 @@ interface SettingsViewProps {
   initialTab?: TabId;
 }
 
-type TabId = "general" | "data" | "countdown" | "fast-rules" | "providers" | "channels" | "plugins" | "identity" | "soul" | "tools" | "heartbeat" | "naming" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers" | "about" | "kernel";
+type TabId = "general" | "data" | "countdown" | "fast-rules" | "providers" | "channels" | "plugins" | "identity" | "soul" | "tools" | "heartbeat" | "naming" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers" | "about" | "kernel" | "voice";
 
 const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -50,6 +51,7 @@ const TAB_GROUPS = [
       { id: "fast-rules" as TabId, label: "快捷路由" },
       { id: "providers" as TabId, label: "模型" },
       { id: "kernel" as TabId, label: "AI 内核" },
+      { id: "voice" as TabId, label: "语音" },
       { id: "channels" as TabId, label: "渠道" },
       { id: "plugins" as TabId, label: "插件" },
     ],
@@ -1232,6 +1234,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
             )}
 
             {activeTab === "kernel" && <KernelTab />}
+            {activeTab === "voice" && <VoiceTab />}
             {activeTab === "plugins" && <PluginsTab />}
 
             {activeTab === "about" && <AboutTab />}

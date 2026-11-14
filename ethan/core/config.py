@@ -70,6 +70,23 @@ class TtsConfig(BaseModel):
     rate: str = ""
 
 
+class AsrConfig(BaseModel):
+    """语音识别（ASR）后端配置。
+
+    与 TtsConfig 对称：语音输入和语音输出是同一个「本地 vs 云端」的取舍，
+    分开配置是因为两者可用的后端不同（本地 ASR 依赖 ethan-tts 的 stt 模块，
+    云端则可能只有 TTS 没有 ASR）。
+
+    默认 off：语音输入需要麦克风权限 + 模型权重，不该默认开启。
+    """
+
+    backend: str = "off"  # off | ethan-tts
+    model: str = ""  # ethan-tts 的 ASR 模型 key（空=用它自己的默认）
+    language: str = ""  # 识别语言提示（空=自动）
+    base_url: str = ""  # 空=与 tts.base_url 同源
+    timeout_sec: float = 0.0  # 0=内置默认
+
+
 class WeChatConfig(BaseModel):
     enabled: bool = False  # 设为 true 后 ethan serve 自动启动 iLink 长轮询
     # 登录凭证由 ethan wechat login（或首次启动时扫码）自动写入
@@ -373,6 +390,7 @@ class Config(BaseModel):
     lark: LarkConfig = Field(default_factory=LarkConfig)
     wechat: WeChatConfig = Field(default_factory=WeChatConfig)
     tts: TtsConfig = Field(default_factory=TtsConfig)
+    asr: AsrConfig = Field(default_factory=AsrConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     users: list["UserConfig"] = Field(default_factory=list)  # 多用户体系；为空时自动生成 admin
 
