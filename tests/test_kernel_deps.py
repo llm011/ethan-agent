@@ -77,7 +77,6 @@ def test_registry_import_does_not_install(monkeypatch):
     from ethan.kernel.runtime import reset_kernel_registry
 
     reset_kernel_registry()
-    from ethan.kernel.dsh_kernel import DSHKernel  # noqa: F401
     from ethan.kernel.pi_kernel import PiKernel  # noqa: F401
 
     assert called == []

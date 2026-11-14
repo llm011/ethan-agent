@@ -308,7 +308,7 @@ def get_kernel_registry() -> KernelRegistry:
     for _kind, _module_path, _class_name in (
         (KernelKind.CODEX, "ethan.kernel.acp_kernel", "CodexKernel"),
         (KernelKind.OPENCODE, "ethan.kernel.acp_kernel", "OpenCodeKernel"),
-        (KernelKind.DSH, "ethan.kernel.dsh_kernel", "DSHKernel"),
+        (KernelKind.DSH, "ethan.kernel.acp_client_kernel", "DshAcpKernel"),
         (KernelKind.PI, "ethan.kernel.pi_kernel", "PiKernel"),
     ):
         try:

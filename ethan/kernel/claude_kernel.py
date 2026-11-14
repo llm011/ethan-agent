@@ -115,6 +115,10 @@ class ACPKernelBase(KernelRuntime):
         queue: asyncio.Queue = asyncio.Queue()
         # step dict 的 id() → tool_call_id，用于把 running/done 两次回调配成一对
         pending_ids: dict[int, str] = {}
+        # key(id(step)) → (tool_call_id, 工具名, 参数摘要)。done 回调不带 args
+        # （claude/codex 的 step dict 在 done 时会被覆盖成只有结果），若不在 start
+        # 时记下来，前端展开参数会看到「start 有、done 空」的跳变。
+        step_meta: dict[int, tuple[str, str, str]] = {}
         tool_seq = 0
         streamed_text: list[str] = []
 
@@ -134,18 +138,53 @@ class ACPKernelBase(KernelRuntime):
             raw_state = data.get("state", "done")
             mapped_state = "start" if raw_state == "running" else raw_state
 
-            key = id(data)
+            # 配对键的优先级（按可靠性递减）：
+            #   1. ACP 层显式给的 step_id —— 最可靠（codex/opencode 补发 start 时用）
+            #   2. id(dict) —— claude 复用同一 dict 时成立，但 ACP 层换新 dict 就失效
+            #   3. 「最后一个未完成的同名工具」—— 兜底。实测 claude 的 done 回调
+            #      传的是新 dict，既没 step_id 又 id() 不同，只能靠工具名 + 顺序配。
+            key = data.get("step_id")
+            if not key:
+                cand = id(data)
+                if cand not in pending_ids:
+                    # 不是已知的 start dict：尝试按工具名找回最近一个未完成的
+                    tool_hint = str(data.get("tool", ""))
+                    for k in reversed(list(pending_ids.keys())):
+                        meta = step_meta.get(k)
+                        if meta and meta[0] == tool_hint:
+                            cand = k
+                            break
+                key = cand
             if mapped_state == "start":
                 tool_seq += 1
-                call_id = f"acp-{tool_seq}"
+                call_id = f"{self.kind.value}-{tool_seq}"
                 pending_ids[key] = call_id
+                step_meta[key] = (
+                    str(data.get("tool", "tool")),
+                    data.get("args", "") or "",
+                    call_id,
+                )
             else:
-                call_id = pending_ids.pop(key, f"acp-{key}")
+                call_id = pending_ids.pop(key, f"{self.kind.value}-{key}")
+
+            # 参数与工具名以 **start 时记录的为准**：ACP 层的 done 回调经常把
+            # args 覆盖成空串（claude/codex 的 step dict 会被结果覆盖）。
+            # 若这里优先取 data 里的值，前端展开参数就会看到「start 有、done 空」
+            # 的跳变。只有 start 没记过（异常路径）才退回 data。
+            recorded = step_meta.get(key)
+            if recorded and mapped_state != "start":
+                # done/error 之后该 step 的生命周期结束，清掉避免长时间会话下
+                # step_meta 无限增长（一次工具调用残留一个 dict 键）
+                step_meta.pop(key, None)
+                name, args, call_id = recorded[0], recorded[1] or (data.get("args", "") or ""), call_id
+            else:
+                name = recorded[0] if recorded else str(data.get("tool", "tool"))
+                args = recorded[1] if recorded else (data.get("args", "") or "")
 
             queue.put_nowait(
                 ToolEvent(
-                    tool_name=data.get("tool", "tool"),
-                    args_summary=data.get("args", "") or "",
+                    tool_name=name,
+                    args_summary=args,
                     state=mapped_state,
                     result_preview=data.get("result_preview", "") or "",
                     tool_call_id=call_id,

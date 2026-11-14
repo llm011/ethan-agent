@@ -91,16 +91,38 @@ async def _run_opencode(
                     }
                     sub_steps.append(step)
                     if on_event:
-                        await on_event("step", step)
+                        # opencode 的 tool part 只在结束时到达一次（没有 running 阶段）。
+                        # 但上层时间线需要 start 才能显示转圈和计时起点，所以这里
+                        # **补发一个 start**。不补的话内核层只能报 done，
+                        # 前端表现为「工具凭空完成、没有过程」。
+                        #
+                        # 关键：两个事件必须带**同一个 step_id**。内核层原本靠 id(dict)
+                        # 配对 start/done，但这里补发的 start 是另一个 dict（id 不同），
+                        # 导致前端拿到两个孤立事件、配不成一对。显式给稳定 id 才对。
+                        step_id = f"oc-{len(sub_steps)}-{name}"
+                        await on_event(
+                            "step",
+                            {**step, "state": "running", "result_preview": "", "step_id": step_id},
+                        )
+                        await on_event("step", {**step, "step_id": step_id})
                 elif etype == "error" or ptype == "error":
                     is_error = True
                     msg = evt.get("message") or part.get("error") or ""
                     if msg:
-                        step = {"tool": "error", "args": _preview(str(msg), 80),
-                                "state": "error", "duration_ms": None, "result_preview": ""}
-                        sub_steps.append(step)
-                        if on_event:
-                            await on_event("step", step)
+                        # 同 codex：error 事件里有大量非失败提示（弃用、元数据缺失）。
+                        # 只有明确是任务失败的才当成工具步骤，否则会冒出名叫 "error"
+                        # 的伪工具，把时间线搞脏。
+                        low = str(msg).lower()
+                        non_fatal = (
+                            "deprecated", "metadata", "defaulting to fallback",
+                            "not found", "warning",
+                        )
+                        if not any(k in low for k in non_fatal):
+                            step = {"tool": "error", "args": _preview(str(msg), 80),
+                                    "state": "error", "duration_ms": None, "result_preview": ""}
+                            sub_steps.append(step)
+                            if on_event:
+                                await on_event("step", step)
 
         await asyncio.wait_for(_consume(), timeout=timeout)
         await asyncio.wait_for(proc.wait(), timeout=5)

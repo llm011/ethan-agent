@@ -73,6 +73,11 @@ class PiKernel(KernelRuntime):
 
     cli_binary = "pi"
 
+    def __init__(self) -> None:
+        # tool_call_id → (工具名, 参数摘要)。Pi 的 tool_execution_end 不带 args，
+        # 不在 start 时记下来，前端展开参数会看到内容跳变。
+        self._tool_meta: dict[str, tuple[str, str]] = {}
+
     def available(self) -> tuple[bool, str]:
         # 走统一的 deps 探测：它会把内核自带 bin 目录补进 PATH，也维护安装说明
         from ethan.kernel.deps import detect
@@ -216,11 +221,14 @@ class PiKernel(KernelRuntime):
             summary = ""
             if isinstance(args, dict):
                 summary = ", ".join(f"{k}={str(v)[:40]}" for k, v in list(args.items())[:3])
+            call_id = f"pi-{evt.get('toolCallId') or id(evt)}"
+            name = str(evt.get("toolName") or "tool")
+            self._tool_meta[call_id] = (name, summary)
             return [ToolEvent(
-                tool_name=str(evt.get("toolName") or "tool"),
+                tool_name=name,
                 args_summary=summary,
                 state="start",
-                tool_call_id=f"pi-{evt.get('toolCallId') or id(evt)}",
+                tool_call_id=call_id,
                 entity_type="pi",
             )]
 
@@ -240,12 +248,16 @@ class PiKernel(KernelRuntime):
                     text = str(result.get("text") or result.get("output") or "")
             else:
                 text = str(result)
+            call_id = f"pi-{evt.get('toolCallId') or id(evt)}"
+            name, args = self._tool_meta.pop(
+                call_id, (str(evt.get("toolName") or "tool"), "")
+            )
             return [ToolEvent(
-                tool_name=str(evt.get("toolName") or "tool"),
-                args_summary="",
+                tool_name=name,
+                args_summary=args,
                 state="error" if evt.get("isError") else "done",
                 result_preview=_preview(text),
-                tool_call_id=f"pi-{evt.get('toolCallId') or id(evt)}",
+                tool_call_id=call_id,
                 entity_type="pi",
             )]
 

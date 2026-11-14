@@ -647,49 +647,268 @@ def test_pi_session_guard_rejects_bogus_id():
     assert k._looks_like_pi_session("") is False
 
 
-# ── DSH 内核事件映射 ─────────────────────────────────────────
+
+# ── ACP 客户端内核：事件映射 ─────────────────────────────────
+#
+# DSH 走 ACP 协议（`dsh --profile acp`）而不是手工解析 NDJSON。事件映射的
+# 正确性决定前端能否打平——这里用真实的 ACP schema 对象做断言，不 mock 结构。
 
 
-def test_dsh_final_text():
-    from ethan.kernel.dsh_kernel import DSHKernel
+def _acp_kernel():
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
 
-    out = DSHKernel()._handle_event(
-        {"type": "final", "text": "完成", "reason": {"kind": "stop"}}, KernelRequest()
+    return DshAcpKernel()
+
+
+def test_acp_message_chunk_maps_to_str():
+    from acp.schema import AgentMessageChunk, TextContentBlock
+
+    out = _acp_kernel()._map_update(
+        AgentMessageChunk(
+            sessionUpdate="agent_message_chunk",
+            content=TextContentBlock(type="text", text="你好"),
+        ),
+        queue=None,
     )
-    assert out == ["完成"]
+    assert out == ["你好"]
 
 
-def test_dsh_final_error_surfaces_message():
-    from ethan.kernel.dsh_kernel import DSHKernel
+def test_acp_thought_chunk_maps_to_thinking():
+    from acp.schema import AgentThoughtChunk, TextContentBlock
 
-    out = DSHKernel()._handle_event({
-        "type": "final",
-        "text": "",
-        "reason": {"kind": "error", "error": {"message": "no API key", "code": "MISSING_CREDENTIAL"}},
-    }, KernelRequest())
-    assert any("no API key" in str(x) for x in out)
-
-
-def test_dsh_session_id_captured():
-    from ethan.kernel.dsh_kernel import DSHKernel
-
-    req = KernelRequest()
-    DSHKernel()._handle_event({"type": "session", "sessionId": "session-abc"}, req)
-    assert req.session_id == "session-abc"
-
-
-def test_dsh_step_start_emits_thinking():
-    from ethan.kernel.dsh_kernel import DSHKernel
-
-    out = DSHKernel()._handle_event(
-        {"type": "status", "phase": "step_start", "turn": 1, "step": 1}, KernelRequest()
+    out = _acp_kernel()._map_update(
+        AgentThoughtChunk(
+            sessionUpdate="agent_thought_chunk",
+            content=TextContentBlock(type="text", text="想一想"),
+        ),
+        queue=None,
     )
     assert len(out) == 1
     assert type(out[0]).__name__ == "ThinkingEvent"
 
 
-def test_dsh_unknown_event_does_not_crash():
-    """DSH 迭代快，新增事件类型不该让整轮失败。"""
-    from ethan.kernel.dsh_kernel import DSHKernel
+def test_acp_tool_call_start_maps_to_tool_event():
+    from acp.schema import ToolCallStart
 
-    assert DSHKernel()._handle_event({"type": "brand_new_thing"}, KernelRequest()) == []
+    k = _acp_kernel()
+    out = k._map_update(
+        ToolCallStart(
+            sessionUpdate="tool_call",
+            toolCallId="tc1",
+            title="bash: ls -la",
+            kind="execute",
+            status="in_progress",
+        ),
+        queue=None,
+    )
+    assert len(out) == 1
+    ev = out[0]
+    assert ev.state == "start"
+    assert ev.tool_name == "bash"
+    assert ev.args_summary == "ls -la"
+    assert ev.tool_call_id == "tc1"
+
+
+def test_acp_tool_call_start_uses_raw_input_when_title_has_no_args():
+    """title 有时只有工具名，参数全在 raw_input 里。前端靠 args 显示「在干什么」。"""
+    from acp.schema import ToolCallStart
+
+    out = _acp_kernel()._map_update(
+        ToolCallStart(
+            sessionUpdate="tool_call",
+            toolCallId="tc1",
+            title="bash",
+            kind="execute",
+            status="in_progress",
+            rawInput={"command": "ls -la", "description": "list"},
+        ),
+        queue=None,
+    )
+    assert "command=ls -la" in out[0].args_summary
+
+
+def test_acp_tool_progress_keeps_tool_name():
+    """关键回归：ToolCallProgress **不带 title**。
+
+    若不在 start 时记下工具名，done 事件只能报 "tool"，前端时间线就没名字了。
+    """
+    from acp.schema import ToolCallProgress, ToolCallStart
+
+    k = _acp_kernel()
+    k._map_update(
+        ToolCallStart(
+            sessionUpdate="tool_call",
+            toolCallId="tc1",
+            title="bash: ls",
+            kind="execute",
+            status="in_progress",
+        ),
+        queue=None,
+    )
+    out = k._map_update(
+        ToolCallProgress(
+            sessionUpdate="tool_call_update",
+            toolCallId="tc1",
+            kind="execute",
+            status="completed",
+        ),
+        queue=None,
+    )
+    assert out[0].tool_name == "bash", "done 事件丢了工具名"
+    assert out[0].state == "done"
+
+
+def test_acp_tool_progress_failed_maps_to_error():
+    from acp.schema import ToolCallProgress, ToolCallStart
+
+    k = _acp_kernel()
+    k._map_update(
+        ToolCallStart(
+            sessionUpdate="tool_call",
+            toolCallId="tc1", title="bash", kind="execute", status="in_progress",
+        ),
+        queue=None,
+    )
+    out = k._map_update(
+        ToolCallProgress(
+            sessionUpdate="tool_call_update",
+            toolCallId="tc1", kind="execute", status="failed",
+        ),
+        queue=None,
+    )
+    assert out[0].state == "error"
+
+
+def test_acp_usage_update_captured():
+    from acp.schema import UsageUpdate
+
+    k = _acp_kernel()
+    k._map_update(
+        UsageUpdate(sessionUpdate="usage_update", used=9641, size=1000000), queue=None
+    )
+    assert k.last_usage["input"] == 9641
+
+
+def test_acp_unknown_update_does_not_crash():
+    """协议会演进，未知 update 类型不该让整轮失败。"""
+
+    class _Unknown:
+        session_update = "brand_new_thing"
+
+    assert _acp_kernel()._map_update(_Unknown(), queue=None) == []
+
+
+def test_acp_kernel_declares_consent_support():
+    """ACP 有 request_permission，所以这个内核**能**对齐中途授权。
+
+    这是它相对手工解析（claude --dangerously-skip-permissions）的实质优势。
+    """
+    assert _acp_kernel().capabilities.consent is True
+
+
+# ── 展示对齐：六个内核的事件契约必须一致 ─────────────────────
+#
+# 这一组锁的是「前端时间线能否打平」——六个内核产出的事件必须满足同一套约束，
+# 否则 ToolTimeline 在某个内核下就会缺少转圈、缺参数、配不上对。
+
+
+def test_acp_step_without_step_id_still_pairs_by_identity():
+    """claude/codex 复用同一个 step dict 时靠 id() 配对。"""
+    import ethan.acp as acp_mod
+    from ethan.acp.models import ACPResult
+    from ethan.kernel.claude_kernel import ClaudeCodeKernel
+
+    step = {"tool": "Bash", "args": "ls", "state": "running", "result_preview": ""}
+
+    async def fake_delegate(prompt, cwd=None, prefer="auto", timeout=180, resume=True,
+                            reset_session=False, user_id="", mirror=True, on_event=None):
+        await on_event("step", step)
+        step["state"] = "done"
+        step["result_preview"] = "out"
+        await on_event("step", step)
+        return ACPResult(success=True, output="", agent="claude")
+
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    mp.setattr(acp_mod, "delegate", fake_delegate)
+    try:
+        async def collect():
+            return [e async for e in ClaudeCodeKernel().run(
+                KernelRequest(messages=[Message(role="user", content="x")])
+            )]
+
+        events = asyncio.run(collect())
+    finally:
+        mp.undo()
+
+    tools = [e for e in events if isinstance(e, ToolEvent)]
+    assert len(tools) == 2
+    assert tools[0].tool_call_id == tools[1].tool_call_id
+
+
+def test_acp_step_with_step_id_pairs_across_different_dicts():
+    """codex/opencode 补发 start 时是新 dict，只能靠 step_id 配对。
+
+    不靠 step_id 的话前端会拿到两个孤立事件：一个永远转圈、一个凭空完成。
+    """
+    import ethan.acp as acp_mod
+    from ethan.acp.models import ACPResult
+    from ethan.kernel.claude_kernel import ClaudeCodeKernel
+
+    async def fake_delegate(prompt, cwd=None, prefer="auto", timeout=180, resume=True,
+                            reset_session=False, user_id="", mirror=True, on_event=None):
+        # 两个**不同** dict，但同一个 step_id
+        await on_event("step", {"tool": "shell", "args": "ls", "state": "running",
+                                "result_preview": "", "step_id": "cx-1-shell"})
+        await on_event("step", {"tool": "shell", "args": "ls", "state": "done",
+                                "result_preview": "out", "step_id": "cx-1-shell"})
+        return ACPResult(success=True, output="", agent="codex")
+
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    mp.setattr(acp_mod, "delegate", fake_delegate)
+    try:
+        async def collect():
+            return [e async for e in ClaudeCodeKernel().run(
+                KernelRequest(messages=[Message(role="user", content="x")])
+            )]
+
+        events = asyncio.run(collect())
+    finally:
+        mp.undo()
+
+    tools = [e for e in events if isinstance(e, ToolEvent)]
+    assert tools[0].tool_call_id == tools[1].tool_call_id
+
+
+def test_tool_events_carry_args_on_both_start_and_done():
+    """done 时 args 不能丢空——前端展开参数会看到内容跳变。"""
+    import ethan.acp as acp_mod
+    from ethan.acp.models import ACPResult
+    from ethan.kernel.claude_kernel import ClaudeCodeKernel
+
+    step = {"tool": "Bash", "args": "ls -la", "state": "running", "result_preview": ""}
+
+    async def fake_delegate(prompt, cwd=None, prefer="auto", timeout=180, resume=True,
+                            reset_session=False, user_id="", mirror=True, on_event=None):
+        await on_event("step", step)
+        # 模拟真实情况：done 时 args 被覆盖成空
+        await on_event("step", {"tool": "Bash", "args": "", "state": "done",
+                                "result_preview": "out"})
+        return ACPResult(success=True, output="", agent="claude")
+
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    mp.setattr(acp_mod, "delegate", fake_delegate)
+    try:
+        async def collect():
+            return [e async for e in ClaudeCodeKernel().run(
+                KernelRequest(messages=[Message(role="user", content="x")])
+            )]
+
+        events = asyncio.run(collect())
+    finally:
+        mp.undo()
+
+    tools = [e for e in events if isinstance(e, ToolEvent)]
+    assert tools[1].args_summary, "done 事件丢了参数摘要"
