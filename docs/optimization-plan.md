@@ -15,9 +15,10 @@
 > .venv/bin/python -m pytest tests/test_prompt_budget.py -q
 > ```
 >
-> 截至 2026-11-14 实测：full 档 system prompt 51,954 字符（≈17.3K tokens），其中
-> `tools_reference` 34,317 字符占 66%；技能分级已落地（12.9K → 4.5K），但
-> `tools.md` 的结构性拆分仍是 P1 待办，尚未完成。
+> 截至 2026-11-14 实测：full 档 system prompt 约 52K 字符（≈17K tokens），其中
+> `tools_reference` 约 34K 字符、占六成以上（数字会随时间戳等动态内容小幅浮动，
+> 精确值一律以 `bench_prompt_size` 实时输出为准，不要在文档里写死）；技能分级已落地，
+> 但 `tools.md` 的结构性拆分仍是 P1 待办，尚未完成。
 
 ## 🎯 优化目标
 

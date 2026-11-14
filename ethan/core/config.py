@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 # 文件锁的重入计数（每线程独立）
 _lock_state = threading.local()
 
+# 上一次成功落盘的内容快照。save_config 用它做 diff 基线——
+# 用「当前内存对象」当基线会导致变更集恒为空（见 save_config 注释）。
+_last_saved_raw: dict | None = None
+
 class ProviderConfig(BaseModel):
     api_key: str = ""
     base_url: Optional[str] = None
@@ -663,6 +667,12 @@ def load_config() -> Config:
 
     _apply_env_overrides(raw)
     config = Config.model_validate(raw)
+    # 初始化 diff 基线：让第一次 save_config 能正确算出变更集。
+    # 不在这里设的话，首次保存的 base 是 None → 全部内容都算变更 → 退化成整体覆盖
+    # （功能上能写进去，但失去了并发保护）。
+    global _last_saved_raw
+    if _last_saved_raw is None:
+        _last_saved_raw = _config_to_raw(config)
 
     need_save = False
     if not config.network.auth_token:
@@ -837,12 +847,20 @@ def save_config(config: Config) -> None:
     写回文件。若另一进程（另一个 worktree 的服务、CLI、或用户手改）在此期间
     改了别的字段，整体覆盖会把它抹掉——实测踩到 `tts.backend` 刚设好就被回滚。
     """
-    global _config
+    global _config, _last_saved_raw
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     data = _config_to_raw(config)
-    # 基线：进程内单例（调用方是基于它改的）。变更 = 传入对象相对基线的差异。
-    base = _config_to_raw(_config) if _config is not None else None
+    # 基线必须是「上一次成功落盘的内容」，**不能是 `_config` 单例**。
+    #
+    # 为什么：绝大多数调用方的写法是
+    #     cfg = get_config(); cfg.models = [...]; save_config(cfg)
+    # 此时 `_config` 和 `cfg` 是同一个对象，基线已含本次改动 → 变更集恒为空
+    # → 什么都写不进去。实测踩到：模型删不掉、加不上、切内核也不生效。
+    #
+    # 改用「上次落盘快照」：只有真正与上次不同的字段才算本次变更，
+    # 既能正确写入，又能保住并发方的其它改动。
+    base = _last_saved_raw
     with _SAVE_LOCK, _config_file_lock():
         try:
             # 注意：这里**不能**用 load_config()——它会补写 auth_token 并反向
@@ -854,6 +872,8 @@ def save_config(config: Config) -> None:
             # 读盘失败就用传入的（宁可覆盖也不要写不进去）
             logger.debug("save_config 合并读盘失败，直接写入", exc_info=True)
         _write_raw(data)
+        # 记住本次落盘内容，作为下一次 save 的基线
+        _last_saved_raw = data
         # 内存单例同步成刚写的内容，避免后续读到过期状态。
         # 同样用裸读 + 重新校验，不调 load_config 以免触发上面的递归。
         if _config is not None:

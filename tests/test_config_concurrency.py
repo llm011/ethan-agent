@@ -62,40 +62,35 @@ def test_apply_delta_keeps_sibling_keys_not_in_delta():
 
 
 def test_merge_preserves_concurrent_change(tmp_path, monkeypatch):
-    """端到端：A 基于过期快照保存，不该抹掉 B 期间的改动。
+    """A 基于过期快照保存，不该抹掉 B 期间的改动。
 
-    构造方式直接对着「实现要求」写，不绕：
-      · 基线（进程内单例）里 provider = searxng   ← A 眼里的"原始状态"
-      · A 要写的对象里 provider 也是 searxng（他没动它），只改了 tts.backend
-      · 但盘上 B 已经把 provider 改成 deepseek 了
-      · 期望：A 保存后 provider 仍是 deepseek（B 的改动保住），tts.backend 生效
+    基线是「上次落盘快照」（`_last_saved_raw`），不是内存单例——
+    这条在 test_config_save_semantics.py 里有更细的覆盖，这里只留一个
+    并发场景的端到端验证。
     """
     import yaml
 
     cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.dump({"tools": {"web_search": {"provider": "searxng"}}}))
     monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
     monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(cfg_mod, "_config", None)
+    monkeypatch.setattr(cfg_mod, "_last_saved_raw", None)
 
-    # B 已经把盘上写成 deepseek 了
+    # 建基线（此时盘上 searxng）
+    base = cfg_mod.load_config()
+
+    # B 在盘上改成 deepseek（模拟另一个进程）
     cfg_file.write_text(yaml.dump({"tools": {"web_search": {"provider": "deepseek"}}}))
 
-    # A 的基线（内存）是旧状态：provider 还是 searxng
-    base = cfg_mod.load_config()
-    monkeypatch.setattr(cfg_mod, "_config", base)
-    base.tools.web_search.provider = "searxng"
-
-    # A 要保存的对象：provider 没动（仍是 searxng），只改了 tts.backend
-    incoming = cfg_mod.load_config()
-    incoming.tools.web_search.provider = "searxng"
-    incoming.tts.backend = "ethan-tts"
-
-    cfg_mod.save_config(incoming)
+    # A 拿着旧对象（provider 仍是 searxng）改别的字段并保存
+    base.tts.backend = "ethan-tts"
+    cfg_mod.save_config(base)
 
     final = yaml.safe_load(cfg_file.read_text())
     assert final["tts"]["backend"] == "ethan-tts", "本次变更没写进去"
     assert final["tools"]["web_search"]["provider"] == "deepseek", (
-        "A 没改 provider，不该把盘上 B 写的 deepseek 顶回 searxng"
+        "A 没改 provider（与基线相同 → 不在 delta 里），不该把盘上的 deepseek 顶回 searxng"
     )
 
 
