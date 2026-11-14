@@ -138,12 +138,31 @@ def test_ask_ethan_declares_read_only(client):
     assert "ctx" not in tool["inputSchema"]["properties"]
 
 
-def test_ask_ethan_streams_progress_before_result(client, monkeypatch):
-    """进度通知必须带 related_request_id 走本次 tools/call 的 SSE，先于最终 result 到达。"""
+def test_ask_ethan_streams_progress_before_result(client, monkeypatch, tmp_path):
+    """进度通知必须带 related_request_id 走本次 tools/call 的 SSE，先于最终 result 到达。
+
+    ⚠️ ask_ethan 会真的调 `get_session_store()` 并写库。之前这个用例直接跑在真实的
+    `~/.ethan/db/sessions.db` 上，每跑一次测试就在用户的会话列表里留一条
+    「几点了 → 现在是凌晨两点」的垃圾会话（实测污染过）。这里用临时库隔离。
+    """
     from types import SimpleNamespace
 
     import ethan.interface.routers.deps as deps
+    import ethan.interface.routers.mcp_server as mcp_router
+    from ethan.memory.session import SessionStore
     from ethan.providers.base import ToolEvent
+
+    # 用临时库隔离，但必须自己 init()——get_session_store() 返回的是已初始化的
+    # 单例，这里的替代品不会自动被 init，不显式初始化会在第一次写库时抛
+    # "no active connection"，异常被 ask_ethan 的 try 吞掉，表现为「进度为空」。
+    tmp_store = SessionStore(db_path=tmp_path / "sessions.db")
+
+    async def _tmp_store():
+        if tmp_store._db is None:
+            await tmp_store.init()
+        return tmp_store
+
+    monkeypatch.setattr(mcp_router, "get_session_store", _tmp_store)
 
     class _FakeAgent:
         session_id = None
