@@ -365,11 +365,14 @@ class WebSearchTool(BaseTool):
         available["bing"] = lambda: self._bing_general_search(query, max_results)
 
         # 按 cfg.provider 排首选，其余作为失败后的 fallback。
-        # deepseek 放在 duckduckgo/bing **之前**：它是自研索引（千亿级网页、
-        # 过滤 SEO 作弊/低质 AIGC），质量优于两个兜底引擎；但仍在 searxng/tavily
-        # 之后 —— 自建实例和 Tavily 的可控性更高，用户配了就该优先用。
+        #
+        # deepseek 排在 tavily **之前**：它的自研索引质量（千亿级网页、过滤 SEO 作弊/
+        # 低质 AIGC、带 rerank_score 与 authority 双质量信号）实测优于 Tavily 的
+        # basic 档。计费也便宜得多：deepseek 按请求计费（5 元/千次），
+        # tavily 按次另算且 free tier 额度紧张。
+        # 但仍让 searxng 在前：自建实例零成本、结果完全可控，用户配了就说明想优先用。
         order = [cfg.provider] + [
-            n for n in ("searxng", "tavily", "deepseek", "duckduckgo", "bing")
+            n for n in ("searxng", "deepseek", "tavily", "duckduckgo", "bing")
             if n != cfg.provider
         ]
         candidates: list[tuple[str, object]] = [(n, available[n]) for n in order if n in available]

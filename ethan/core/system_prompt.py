@@ -34,6 +34,44 @@ def _documents_protocol() -> str:
     )
 
 
+
+def _ocr_available() -> bool:
+    """OCR 工具是否注册（与 agent_factory 的判断保持一致）。
+
+    只在工具真的存在时才注入优先级规则——否则会教模型去用一个不存在的工具。
+    """
+    try:
+        from ethan.core.config import get_config
+
+        return bool((get_config().tools.web_fetch.api_key or "").strip())
+    except Exception:
+        return False
+
+
+def _image_priority_protocol() -> str:
+    """图片处理的优先级约定（只在 OCR 工具可用时注入）。
+
+    为什么写进 system prompt 而不是只靠工具描述：模型选工具主要看描述，但**默认
+    倾向**是「有专门工具就用专门工具」。如果不显式规定顺序，它会对每张图都调 OCR——
+    又慢又费钱，而模型自己读图是免费的、还能结合上下文理解。
+
+    这条规则的收益是可量化的：图片 → OCR 按请求计费（5 元/千次）+ 多一次网络往返；
+    图片 → 模型直读 0 成本。
+    """
+    return (
+        "<image_protocol>\n"
+        "**处理图片的优先级（必须遵守）**：\n"
+        "1. **单张/少量图片，且你需要看懂内容** → **直接把图片交给模型**"
+        "（你自己就能读图，免费、能结合上下文）。不要调 OCR。\n"
+        "2. 只有以下情况才用 `ocr_extract_text`：\n"
+        "   · PDF / Word / PPT 等**文档**（你无法把文档当图片读）\n"
+        "   · 扫描件、密集排版文字（OCR 比逐字辨认更稳）\n"
+        "   · 需要按页保留版面结构\n"
+        "3. OCR **按请求计费**且会把用户文件上传到云端（会请求授权）。"
+        "能不用就不用。\n"
+        "</image_protocol>"
+    )
+
 def build_schedule_context(workspace: str) -> str:
     """读取 APScheduler SQLite 数据库，返回当前活跃定时任务摘要（不需要启动 scheduler）。"""
     import datetime as dt
@@ -304,6 +342,8 @@ def build_system_prompt(
             "绝不要用 shell/terminal 跑 python 去硬凑这些能力。"
         )
         parts.append(_documents_protocol())
+        if _ocr_available():
+            parts.append(_image_priority_protocol())
         parts.append(_INTENT_SYSTEM_INSTRUCTION)
         if is_owner:
             parts.append(
@@ -400,6 +440,9 @@ def build_system_prompt(
         parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
         parts.append(_INTENT_SYSTEM_INSTRUCTION)
     parts.append(_documents_protocol())
+    # 图片处理优先级：只在 OCR 工具真的注册时注入（否则会教模型用不存在的工具）。
+    if _ocr_available():
+        parts.append(_image_priority_protocol())
 
     if skills:
         # 分级注入：高频技能（fast_path 或历史命中过）给描述，冷门技能只列名字。

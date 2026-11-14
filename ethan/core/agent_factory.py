@@ -47,6 +47,7 @@ from ethan.tools.builtin.lark_tools import (
 )
 from ethan.tools.builtin.lunar import LunarCalendarTool
 from ethan.tools.builtin.memory_write import MemoryWriteTool
+from ethan.tools.builtin.ocr import OcrTool
 from ethan.tools.builtin.plan import PlanReadTool, PlanUpdateTool, PlanWriteTool
 from ethan.tools.builtin.procedure_write import ProcedureWriteTool
 from ethan.tools.builtin.profile_update import ProfileUpdateTool
@@ -164,6 +165,19 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
     except Exception:
         pass  # 配置未加载时不阻塞工具注册
     registry.register(WebFetchTool())
+    # OCR：只有配了 DeepSeek API Key 才注册。没 key 时注册它等于给模型一个
+    # 必然失败的工具，会诱导它去尝试（agent 不知道没配 key），反而拖慢任务。
+    try:
+        from ethan.core.config import get_config as _get_ocr_cfg
+
+        if (_get_ocr_cfg().tools.web_fetch.api_key or "").strip():
+            registry.register(OcrTool())
+    except Exception:
+        # 配置读不到就不注册。注意这里**不要**裸吞后静默：OCR 是可选项，
+        # 但真出问题时（比如字段改名）应该能从日志看出来，而不是永远悄悄消失。
+        import logging as _logging
+
+        _logging.getLogger(__name__).debug("OCR 工具未注册（配置读取失败）", exc_info=True)
     registry.register(WeatherTool())
     registry.register(LunarCalendarTool())
     registry.register(ChartTool())
