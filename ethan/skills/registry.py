@@ -250,3 +250,34 @@ class SkillRegistry:
             else:
                 parts.append(f"[Skill: {skill.name}]\n{content}")
         return "\n\n".join(parts)
+
+    def build_index_block(self, desc_chars: int = 60) -> tuple[list[str], list[str]]:
+        """把 default 类技能拆成「热」「冷」两组简表行，供 available_skills 分级注入。
+
+        背景：全量 default 技能（160+ 个）每个都带描述，单这一块就占 12.5K 字符，
+        是 system prompt 里仅次于 tools.md 的开销。但其中真正被用到的只是少数，
+        其余纯属占位——模型只需要知道「有这么个技能」，细节可以用 skill_list /
+        skill_read 现取。
+
+        分组口径（任一命中即算热）：
+          - fast_path=True：技能作者显式声明的高频技能
+          - stats 里 hit_count > 0：历史上真被命中过
+        冷门技能只列名字，省掉描述。
+
+        返回 (热行, 冷行)。热行保留描述，冷行只有名字。
+        """
+        hot: list[str] = []
+        cold: list[str] = []
+        used = self._stats.all()
+        for s in self._skills:
+            if getattr(s, "category", "default") != "default":
+                continue
+            is_hot = bool(getattr(s, "fast_path", False)) or used.get(s.name, {}).get("hit_count", 0) > 0
+            if is_hot:
+                desc = (s.description or "").strip()
+                if len(desc) > desc_chars:
+                    desc = desc[:desc_chars] + "…"
+                hot.append(f"- {s.name}: {desc}" if desc else f"- {s.name}")
+            else:
+                cold.append(s.name)
+        return hot, cold

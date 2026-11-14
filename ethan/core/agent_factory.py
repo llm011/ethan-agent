@@ -20,6 +20,7 @@ from ethan.tools.builtin.background_task import (
 )
 from ethan.tools.builtin.browser import BrowserClientTool, BrowserPageTool, BrowserSessionTool, BrowserTabTool
 from ethan.tools.builtin.chart import ChartTool
+from ethan.tools.builtin.code_assistant import CodeAssistantTool, CodeRunnerTool
 from ethan.tools.builtin.config import ConfigGetTool, ConfigSetTool
 from ethan.tools.builtin.decide import DecideTool
 from ethan.tools.builtin.deliver_file import DeliverFileTool
@@ -148,6 +149,10 @@ def build_tool_registry(user_id: str = "", toolset: str = "full", channel: str =
 
     # 基础工具（所有 toolset 共有）
     registry.register(ShellTool())
+    # 代码助手：code_analyze 只读静态检查；code_run 委托 ShellTool 执行，
+    # 继承 shell 的授权弹窗 / secret 注入 / 进程组清理（见 code_assistant 模块注释）。
+    registry.register(CodeAssistantTool())
+    registry.register(CodeRunnerTool())
     registry.register(WebSearchTool())
     # image_search：开启 image_search_enabled 即注册。
     # Wallhaven 是主力来源，不依赖 SearXNG；SearXNG 仅作补充（配置了 base_url 才用）。
