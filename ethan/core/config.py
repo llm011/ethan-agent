@@ -285,10 +285,37 @@ class DefaultsConfig(BaseModel):
 
 
 class WebSearchToolConfig(BaseModel):
-    provider: str = "duckduckgo"  # "duckduckgo" | "tavily" | "searxng"
+    provider: str = "duckduckgo"  # "duckduckgo" | "tavily" | "searxng" | "deepseek"
     api_key: str = ""  # tavily 用
     base_url: str = ""  # searxng 用，如 http://localhost:8888（自建）或第三方现成实例地址
     image_search_enabled: bool = True  # 图片搜索工具开关；Wallhaven 为主力来源，无需 SearXNG 也能用
+    # DeepSeek 自研搜索（2026-10 开放）。与上面三个 provider 并列，不替代它们——
+    # 它只是「优先级更高的一档」，DuckDuckGo/Bing 继续做兜底（见 web_search 的 order）。
+    # 单独一个 key 字段而不复用 api_key，是因为 tavily 与 deepseek 的 key 不能混用。
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+
+
+class WebFetchToolConfig(BaseModel):
+    """web_fetch 的后端配置。
+
+    `backend` 决定抓取路径：
+      · "http"     —— 内置 httpx 抓取 + 正文本地提取（默认，零依赖零成本）
+      · "deepseek" —— 走 DeepSeek Fetch API，返回现成 Markdown
+
+    为什么默认 http：内置路径零成本、无网络外部依赖，多数页面够用。
+    DeepSeek Fetch 的价值在于反爬/JS 渲染/正文提取这些内置路径搞不定的情况，
+    所以它是「增强后端」而不是默认路径——不该让每个抓取都产生费用。
+
+    fallback_to_http：DeepSeek 失败时是否退回内置抓取。默认 True——
+    抓网页这种事，多一条路总比直接失败好。
+    """
+
+    backend: str = "http"  # "http" | "deepseek"
+    api_key: str = ""
+    base_url: str = "https://api.deepseek.com"
+    fallback_to_http: bool = True
+
 
 class KnowledgeConfig(BaseModel):
     backend: str = "filesystem"  # "filesystem" | "obsidian" | "external" | "notion"
@@ -327,6 +354,7 @@ class MCPConfig(BaseModel):
 
 class ToolsConfig(BaseModel):
     web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
+    web_fetch: WebFetchToolConfig = Field(default_factory=WebFetchToolConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     dida: DidaConfig = Field(default_factory=DidaConfig)

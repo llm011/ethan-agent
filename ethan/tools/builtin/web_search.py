@@ -354,11 +354,24 @@ class WebSearchTool(BaseTool):
             available["searxng"] = lambda: self._searxng_search(query, max_results, cfg.base_url, language)
         if cfg.api_key:
             available["tavily"] = lambda: self._tavily_search(query, max_results, cfg.api_key)
+        # DeepSeek：独立 key 字段（不与 tavily 的 key 混用）
+        _ds_key = getattr(cfg, "deepseek_api_key", "") or ""
+        if _ds_key:
+            _ds_base = getattr(cfg, "deepseek_base_url", "") or "https://api.deepseek.com"
+            available["deepseek"] = lambda: self._deepseek_search(
+                query, max_results, _ds_key, _ds_base
+            )
         available["duckduckgo"] = lambda: self._ddg_search(query, max_results)
         available["bing"] = lambda: self._bing_general_search(query, max_results)
 
-        # 按 cfg.provider 排首选，其余作为失败后的 fallback
-        order = [cfg.provider] + [n for n in ("searxng", "tavily", "duckduckgo", "bing") if n != cfg.provider]
+        # 按 cfg.provider 排首选，其余作为失败后的 fallback。
+        # deepseek 放在 duckduckgo/bing **之前**：它是自研索引（千亿级网页、
+        # 过滤 SEO 作弊/低质 AIGC），质量优于两个兜底引擎；但仍在 searxng/tavily
+        # 之后 —— 自建实例和 Tavily 的可控性更高，用户配了就该优先用。
+        order = [cfg.provider] + [
+            n for n in ("searxng", "tavily", "deepseek", "duckduckgo", "bing")
+            if n != cfg.provider
+        ]
         candidates: list[tuple[str, object]] = [(n, available[n]) for n in order if n in available]
 
         for name, factory in candidates:
@@ -578,6 +591,64 @@ class WebSearchTool(BaseTool):
                 "engine": "tavily",
                 "published": "",
                 "source": "",
+            })
+        return results
+
+    # ── DeepSeek（自研搜索索引）────────────────────────────────────────────
+
+    async def _deepseek_search(
+        self, query: str, max_results: int, api_key: str, base_url: str = "https://api.deepseek.com"
+    ) -> list[dict]:
+        """DeepSeek 自研搜索 API。异常向上传播给 _call_with_retry 处理。
+
+        与其他 provider 的几个差异（都来自官方 schema，别照抄别家的假设）：
+
+        1. **字段名是 `snippet` / `summary` 两个**，不是单一的 content。
+           官方对它们的定位：`snippet` 是给**前端展示**的短摘要（100-200 字），
+           `summary` 是给**模型阅读**的长摘要（600-800 字）。所以这里取
+           `summary` 优先给模型——它信息量更大，且是官方推荐的「给模型读」字段。
+        2. `count` 上限 50，不是常见的 10/100。
+        3. 计费按**请求次数**而非条数，且「无结果不计费」。所以 `count` 开大一点
+           不浪费钱，反而能一次拿够、少发请求。
+        4. 有 `rerank_score`（0-3，≥1.5 为优质）和 `authority`（0-4，≥3 极权威）。
+           把 score 带上，让调用方（或未来 UI）能按质量筛选，而不是只按返回顺序。
+        """
+        url = (base_url or "https://api.deepseek.com").rstrip("/") + "/v1/tools/search"
+        # count 上限 50；多要几条不额外收费（按请求计费）
+        count = max(1, min(50, max_results))
+        async with httpx.AsyncClient(timeout=20.0, trust_env=False) as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"query": query, "count": count},
+            )
+            # 402=余额不足、429=超 QPS。这两种 client.raise_for_status 会抛，
+            # 交给上层 _call_with_retry → 熔断，符合既有设计。
+            resp.raise_for_status()
+
+        data = resp.json()
+        raw_results = data.get("results") or []
+        self._last_total = len(raw_results)
+
+        results = []
+        for item in raw_results[:max_results]:
+            score = item.get("rerank_score")
+            authority = item.get("authority")
+            results.append({
+                "title": item.get("title", "") or "",
+                # 模型读 summary（官方定位：长摘要，给模型）；前端展示才用 snippet。
+                # 这里没有 summary 时退回 snippet，避免空结果。
+                "snippet": item.get("summary") or item.get("snippet") or "",
+                "url": item.get("url", "") or "",
+                "engine": "deepseek",
+                "published": item.get("date") or "",
+                "source": item.get("site_name") or "",
+                # 质量信号：让上层能做「只保留优质结果」这类决策，而不是只能看顺序
+                "score": score if isinstance(score, (int, float)) else None,
+                "authority": authority if isinstance(authority, int) else None,
             })
         return results
 
