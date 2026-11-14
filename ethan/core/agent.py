@@ -1171,6 +1171,7 @@ class Agent:
         # 记忆召回已改为 recall_memory 工具按需调用，ToolEvent 由工具执行路径自动产生
 
         from ethan.core.loop_control import (
+            TOOL_FREQ_LIMIT_VARIED,
             LoopMonitor,
             decision_prompt_message,
             detect_implicit_decision,
@@ -2088,6 +2089,12 @@ class Agent:
             if monitor.is_stuck():
                 if monitor._freq_limit_varied:
                     # 批量操作达到宽松上限（如整理 tab）→ 直接禁工具收尾，不走反思
+                    logger.warning(
+                        "stream_chat() 第 %d 轮触发 varied 频率熔断（工具=%s，连续 %d 轮不同参数），禁工具收尾",
+                        i + 1,
+                        monitor._tool_names[-1] if monitor._tool_names else "",
+                        TOOL_FREQ_LIMIT_VARIED,
+                    )
                     sys = system + finalize_system_suffix("varied")
                     varied_content = ""
                     async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
@@ -2098,6 +2105,11 @@ class Agent:
                             self.usage.add(chunk.usage)
                     if not varied_content:
                         varied_content = await _empty_reply(working, "varied")
+                        yield varied_content
+                    if not varied_content:
+                        # 兜底也空：绝不能静默结束，否则前端表现为「对话莫名中断」
+                        logger.warning("stream_chat() varied 收尾内容仍为空，使用保底文案")
+                        varied_content = _empty_reply_fallback_text("varied", len(working))
                         yield varied_content
                     # varied 收尾前检查补充信息
                     _late_injected = _drain_inject()
@@ -2127,6 +2139,11 @@ class Agent:
                     return
                 if monitor.exhausted():
                     # 反思次数用尽仍卡住 → 收尾放弃：禁工具，让模型流式整理「已做/卡点/建议」
+                    logger.warning(
+                        "stream_chat() 第 %d 轮反思耗尽仍卡住（工具=%s），禁工具收尾",
+                        i + 1,
+                        monitor._tool_names[-1] if monitor._tool_names else "",
+                    )
                     sys = system + finalize_system_suffix("stuck")
                     stuck_content = ""
                     async for chunk in self._provider.stream_chat(working, tools=None, system=sys):
@@ -2137,6 +2154,12 @@ class Agent:
                             self.usage.add(chunk.usage)
                     if not stuck_content:
                         stuck_content = await _empty_reply(working, "stuck")
+                        yield stuck_content
+                    if not stuck_content:
+                        # 兜底也空：绝不能静默结束，否则前端表现为「对话莫名中断」
+                        # （真实 badcase：s_20261112_1603_c3ca 只剩 2 个字符的空白回复）
+                        logger.warning("stream_chat() stuck 收尾内容仍为空，使用保底文案")
+                        stuck_content = _empty_reply_fallback_text("stuck", len(working))
                         yield stuck_content
                     # stuck 收尾前检查补充信息
                     _late_injected = _drain_inject()
