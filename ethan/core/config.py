@@ -1,5 +1,8 @@
+import contextlib
+import logging
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +11,11 @@ from pydantic import BaseModel, Field
 CONFIG_DIR = Path(os.environ.get("ETHAN_DATA_DIR", "")) if os.environ.get("ETHAN_DATA_DIR") else Path.home() / ".ethan"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
+
+logger = logging.getLogger(__name__)
+
+# 文件锁的重入计数（每线程独立）
+_lock_state = threading.local()
 
 class ProviderConfig(BaseModel):
     api_key: str = ""
@@ -694,20 +702,171 @@ def load_config() -> Config:
     return config
 
 
-def save_config(config: Config) -> None:
+# 进程内串行化：同一进程里多个请求同时保存时排队。
+# 用 RLock 而非 Lock：`load_config()` 在某些路径下会回调 `save_config()`
+# （补写 auth_token），二者都在锁内 → 非可重入锁会自死锁。
+_SAVE_LOCK = threading.RLock()
+
+
+@contextlib.contextmanager
+def _config_file_lock():
+    """跨进程排他锁（fcntl.flock）。
+
+    为什么需要：`ethan serve` 持有内存里的配置对象，UI 每次改设置都会把**整份**
+    对象写回文件。如果同时还有别的进程（另一个 worktree 的服务、CLI 命令、
+    用户手动编辑）也在改，后写的会把先写的整体覆盖——实测踩到 `tts.backend`
+    刚设好就被回滚成默认值。
+
+    flock 在 macOS/Linux 上可靠。Windows 没有 fcntl，降级为不加锁（仍然有
+    进程内锁 + 原子写兜底，比原来好）。
+    """
+    lock_path = CONFIG_DIR / ".config.lock"
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - Windows
+        yield
+        return
 
-    # 手动序列化，保留 type 字段，但去除其他可选/空字段
+    # 用线程局部计数实现同线程重入：同一线程嵌套获取时不再重复 flock
+    # （有些平台对同一进程重复 flock 会阻塞），也避免提前释放外层持有的锁。
+    depth = getattr(_lock_state, "depth", 0)
+    if depth > 0:
+        _lock_state.depth = depth + 1
+        try:
+            yield
+        finally:
+            _lock_state.depth -= 1
+        return
+
+    fh = open(lock_path, "w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        _lock_state.depth = 1
+        try:
+            yield
+        finally:
+            _lock_state.depth = 0
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
+def _config_to_raw(config: Config) -> dict:
+    """Config 对象 → 可写入 YAML 的 dict（统一处理 exclude_defaults 与 type 字段）。"""
     data = config.model_dump(exclude_defaults=True, exclude_none=True)
-
-    # 由于 exclude_defaults 会把等于默认值的字段去掉（比如 type="openai_compat"），
-    # 但我们需要明确持久化 type，所以对于存在于 config.providers 中的，强制把 type 写进去
+    # exclude_defaults 会去掉等于默认值的字段（比如 type="openai_compat"），
+    # 但 providers 的 type 必须显式持久化，所以强制写回。
     if "providers" in data:
         for k, p in config.providers.items():
             if k in data["providers"]:
                 data["providers"][k]["type"] = p.type
+    return data
 
-    _write_raw(data)
+
+def save_config(config: Config) -> None:
+    """保存配置。
+
+    语义是「让文件反映传入的 config」，但**不会盲目覆盖别人的并发改动**：
+    在锁内先重新读盘，算出「盘上比传入对象更新的字段」，把它们保留下来。
+
+    为什么不能直接覆盖：`ethan serve` 持有内存单例，UI 每次改设置都把整份对象
+    写回文件。若另一进程（另一个 worktree 的服务、CLI、或用户手改）在此期间
+    改了别的字段，整体覆盖会把它抹掉——实测踩到 `tts.backend` 刚设好就被回滚。
+    """
+    global _config
+
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    data = _config_to_raw(config)
+    # 基线：进程内单例（调用方是基于它改的）。变更 = 传入对象相对基线的差异。
+    base = _config_to_raw(_config) if _config is not None else None
+    with _SAVE_LOCK, _config_file_lock():
+        try:
+            # 注意：这里**不能**用 load_config()——它会补写 auth_token 并反向
+            # 调用 save_config，形成无限递归。用无副作用的裸读。
+            on_disk = _read_raw_file()
+            delta = _diff_against_base(base, data)
+            data = _apply_delta(on_disk, delta) if on_disk else data
+        except Exception:
+            # 读盘失败就用传入的（宁可覆盖也不要写不进去）
+            logger.debug("save_config 合并读盘失败，直接写入", exc_info=True)
+        _write_raw(data)
+        # 内存单例同步成刚写的内容，避免后续读到过期状态。
+        # 同样用裸读 + 重新校验，不调 load_config 以免触发上面的递归。
+        if _config is not None:
+            try:
+                _config = Config.model_validate(_read_raw_file())
+            except Exception:
+                pass
+
+
+def _diff_against_base(base: dict | None, incoming: dict) -> dict:
+    """算出 incoming 相对 base 的**变更集**（浅层递归）。
+
+    这是合并的关键：只有在 base 基础上**真的变了**的叶子，才算「我要写的东西」，
+    其余一律不动。这样基于过期快照的保存就不会把别人的改动顶回去。
+
+    规则：
+      · 两边都是 dict → 递归求变更；子树无变更则不出现
+      · 值相同 → 不出现
+      · 其余（含 base 里没有的 key、数组整体变化）→ 取 incoming
+    """
+    if not isinstance(incoming, dict):
+        return incoming
+    if not isinstance(base, dict):
+        return incoming
+
+    delta: dict = {}
+    for key, val in incoming.items():
+        old = base.get(key)
+        if isinstance(val, dict) and isinstance(old, dict):
+            sub = _diff_against_base(old, val)
+            if sub:
+                delta[key] = sub
+        elif val != old:
+            delta[key] = val
+    return delta
+
+
+def _apply_delta(on_disk: dict, delta: dict) -> dict:
+    """把变更集叠加到盘上内容，返回最终要写的数据。"""
+    if not isinstance(on_disk, dict):
+        return delta
+    merged = dict(on_disk)
+    for key, val in delta.items():
+        if isinstance(val, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _apply_delta(merged[key], val)
+        else:
+            merged[key] = val
+    return merged
+
+
+def update_config(mutator) -> Config:
+    """**推荐的配置修改入口**：加锁 → 重新读盘 → 应用变更 → 写回 → 刷新单例。
+
+    与 `save_config` 的区别：save_config 用的是调用方手里那份**可能过期**的对象，
+    会把别人的并发改动覆盖掉。这里在锁内重新 `load_config()`，只把你的变更叠上去。
+
+    用法：
+        update_config(lambda c: setattr(c.tools.web_fetch, "backend", "deepseek"))
+
+    mutator 返回 None 表示原地修改；返回 Config 则用返回值。
+    """
+    global _config
+    with _SAVE_LOCK, _config_file_lock():
+        # 用无副作用裸读 + 校验拿到盘上最新内容，**不调 load_config**：
+        # 后者会补写 auth_token 并回调 save_config，在持锁状态下会引起递归写盘。
+        raw = _read_raw_file()
+        if raw:
+            fresh = Config.model_validate(raw)
+        else:
+            fresh = _config or Config()
+
+        result = mutator(fresh)
+        cfg = result if isinstance(result, Config) else fresh
+        _write_raw(_config_to_raw(cfg))
+        _config = cfg
+        return cfg
 
 
 BACKUP_DIR = CONFIG_DIR / "backup"
@@ -740,11 +899,58 @@ def _backup_config() -> None:
         print(f"[config] backup failed (ignored): {e}", file=sys.stderr)
 
 
-def _write_raw(data: dict) -> None:
+
+def _read_raw_file() -> dict:
+    """只读磁盘上的 config.yaml，**不做任何 bootstrap**（不补 auth_token、不写盘）。
+
+    这个函数存在的唯一理由：`save_config` 需要知道「盘上现在是什么」，但
+    绝对不能调用 `load_config()`——后者在缺少 auth_token 时会反向调用
+    `save_config` 补写，于是形成 `save_config → load_config → save_config`
+    的无限递归（实测：全新配置下保存一次就卡死）。
+
+    所以读盘这件事必须有一个无副作用的入口。
+    """
     import yaml
+
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        with open(CONFIG_FILE) as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        logger.debug("读取 config.yaml 失败", exc_info=True)
+        return {}
+
+def _write_raw(data: dict) -> None:
+    """原子写：先写临时文件再 rename。
+
+    为什么不能直接 `open(CONFIG_FILE, "w")`：那样在写入过程中配置文件是**半截**的，
+    另一个进程（或用户在编辑器里）恰好读到就会拿到不完整 YAML。实测踩到过
+    「配置莫名丢字段」，排查下来就是写入过程中被读到。
+
+    rename 在同一文件系统内是原子的：读者要么看到旧版本、要么看到新版本，
+    不会看到中间态。
+    """
+    import os
+    import tempfile
+
+    import yaml
+
     _backup_config()
-    with open(CONFIG_FILE, "w") as f:
-        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(CONFIG_DIR), prefix=".config.yaml.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, CONFIG_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _apply_env_overrides(raw: dict) -> None:

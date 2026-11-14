@@ -19,12 +19,17 @@ import sys
 # 各块的体积上限（字符）。超了说明又有人往 system prompt 里塞东西。
 # 阈值不是「刚好卡住当前值」，而是留了合理余量的护栏——调高前先想清楚是不是
 # 该把内容挪出 prompt（tools.md → 知识库，技能描述 → skill_list 按需取）。
+#
+# 实测基线（2026-11-14，full 档，中性 query，见 `python -m tests.bench_prompt_size`）：
+#   TOTAL 51,954 字符 ≈ 17.3K tokens；tools_reference 34,317 占 66%。
+# 注意：这些阈值是「防止继续增长」的护栏，**不代表 prompt 已经够小**。
+# tools.md 的结构性拆分属于 P1 待办（见 ETHAN_V2_RESTRUCTURE_PLAN.md），
+# 由另一条分支负责，不在本护栏的范围内。
 BUDGETS: dict[str, int] = {
     # tools.md 是「工具怎么用」的操作手册，全文注入每轮 prompt。它天然分两类内容：
     #   通用工具知识（gws/lark-cli/shell/HA/生图…）~13K —— 每轮都该有
     #   任务专属 playbook（EigenFlux 批次、book-audio-digest、SSDExt）~21K —— 只在做那个任务时需要
-    # 后者是下一步该拆出去的部分（见 ETHAN_V2_RESTRUCTURE_PLAN.md P1）。
-    # 在那之前，这里的上限按实测值设定：它的作用是「防止继续增长」，不是「假装已经够小」。
+    # 当前仍是未拆分的 34.3K 全量，上限按实测值留少量余量设定。
     "tools_reference": 36_000,
     "available_skills": 6_000,
     "agent_protocols": 6_000,
@@ -43,12 +48,21 @@ def measure_prompt(query: str = "帮我 debug 这段代码", channel: str = "rep
     prompt = agent._build_system([Message(role="user", content=query)])
 
     blocks: dict[str, int] = {}
-    # 同名块可能出现多次（available_skills 就有两块），累加
+    # 同名块累加（历史实现里 available_skills 曾出现两块，现已合并为一块；
+    # 这里仍按累加统计，配合下面的 block_counts 断言守住「不重复」）。
     for m in re.finditer(r"<([a-z_]+)>(.*?)</\1>", prompt, re.S):
         name = m.group(1)
         blocks[name] = blocks.get(name, 0) + len(m.group(2))
+    # 每个标签应只出现一次；重复说明又有人拼了第二个同名块。
+    block_counts = {name: prompt.count(f"<{name}>\n") for name in blocks}
 
-    return {"total": len(prompt), "approx_tokens": len(prompt) // 3, "blocks": blocks}
+    return {
+        "total": len(prompt),
+        "approx_tokens": len(prompt) // 3,
+        "blocks": blocks,
+        "block_counts": block_counts,
+        "prompt": prompt,
+    }
 
 
 def check(measured: dict | None = None) -> list[str]:

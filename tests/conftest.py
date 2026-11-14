@@ -20,6 +20,38 @@ def _force_hash_embed():
     emb._encoder_checked, emb._encoder = old_checked, old_encoder
 
 
+@pytest.fixture(autouse=True)
+def _isolate_config_file(tmp_path_factory, monkeypatch):
+    """把配置文件的读写指向临时目录，避免测试污染真实的 ~/.ethan/config.yaml。
+
+    为什么需要：`save_config` 会真的写盘（并发安全改造后更明显——它还会在锁内
+    重新读盘做 diff 合并）。测试里若有 `monkeypatch.setattr(cfg.providers, ...)`
+    这类"改内存配置"的操作，一旦某条路径触发保存，就会把测试造出来的畸形配置
+    **固化到真实文件**——实测表现为其他测试读到 `Provider 'anthropic' not found`。
+
+    只隔离文件路径，不动配置内容：这样需要真实配置的测试（如 prompt 体积）
+    仍读到用户自己的配置。
+    """
+    import ethan.core.config as cfg_mod
+
+    tmp = tmp_path_factory.mktemp("config")
+    cfg_file = tmp / "config.yaml"
+
+    # 拷一份真实配置做基线（有就拷，没有就让测试自己初始化）
+    real = cfg_mod.CONFIG_FILE
+    if real.exists():
+        try:
+            cfg_file.write_text(real.read_text(encoding="utf-8"), encoding="utf-8")
+        except Exception:
+            pass
+
+    monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp)
+    monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
+    # 清掉单例，强制重新加载临时文件
+    monkeypatch.setattr(cfg_mod, "_config", None)
+    yield
+
+
 def pytest_sessionfinish(session, exitstatus):
     """关闭所有泄漏的 aiosqlite 连接，防止非 daemon worker 线程挂起进程。
 

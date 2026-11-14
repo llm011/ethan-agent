@@ -50,7 +50,10 @@ function SettingsRoute() {
   // models 是 A 类准静态数据，进 settings 时命中缓存 0ms 渲染；
   // 写操作（addModel/deleteModel）会 bustCache("models")，本 hook 自动 refetch
   const { data: models } = useCachedResource<ModelEntry[]>("models", fetchModels, { ttlMs: 60 * 60_000 });
-  const VALID_TABS = ["general", "countdown", "plugins", "providers", "channels", "identity", "soul", "tools", "heartbeat", "profile", "prompt-preview", "api-keys", "fast-rules", "tool-tiers", "about"];
+  // 必须与 components/settings-view.tsx 的 TabId 联合类型同步。
+  // 漏了这里的话，深链接 /settings/<tab> 会被替换成 general——
+  // 表现为「点进去又跳回默认页」。
+  const VALID_TABS = ["general", "data", "countdown", "plugins", "providers", "channels", "identity", "soul", "tools", "heartbeat", "naming", "profile", "prompt-preview", "api-keys", "fast-rules", "tool-tiers", "about", "kernel", "voice"];
   const initialTab = tab && VALID_TABS.includes(tab) ? tab : "general";
   return (
     <div className="flex flex-col flex-1 h-full min-h-0">

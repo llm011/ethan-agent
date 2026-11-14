@@ -74,13 +74,16 @@ export function PromptPreview() {
             <span className="font-mono">~{data.approx_tokens.toLocaleString()} tokens ({data.chars.toLocaleString()} 字符)</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">Tools schema（{data.tool_count} 个工具）</span>
-            <span className="font-mono">~{data.approx_tools_tokens.toLocaleString()} tokens</span>
+            <span className="text-muted-foreground">Tools schema（注册表全量 {data.tool_count} 个工具）</span>
+            <span className="font-mono">~{data.approx_tools_tokens.toLocaleString()} tokens ({data.approx_tools_chars.toLocaleString()} 字符)</span>
           </div>
           <div className="border-t pt-1 mt-1 flex justify-between font-semibold">
             <span>Total（每轮 input 底线）</span>
             <span className="font-mono">~{data.approx_total_tokens.toLocaleString()} tokens</span>
           </div>
+          <p className="text-xs text-muted-foreground pt-1">
+            按 3 字符/token 粗估，不含历史消息；同一轮工具循环里这段固定开销会随每次模型调用重复发送。
+          </p>
         </div>
       )}
 

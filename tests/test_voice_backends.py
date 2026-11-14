@@ -278,11 +278,9 @@ def test_select_accepts_edge_tts_without_probe(monkeypatch):
         tts_router.select_voice_backend(tts_router.VoiceBackendSelect(tts="edge-tts"))
     )
     assert out["ok"] is True
-    assert get_config().tts.backend == "edge-tts"
-
-    # 复原，避免影响其他用例读到的配置
-    cfg = get_config()
-    cfg.tts.backend = "ethan-tts"
+    # 断言「返回值的字段」而不是 get_config() 单例：save_config 写完会用新对象
+    # 替换单例，此刻 get_config() 拿到的不一定还是调用方手里那个引用。
+    assert out["tts"] == "edge-tts"
 
 
 # ── 自制 shim：不支持 doctor 但服务能跑 ──────────────────────
