@@ -61,6 +61,21 @@ _CMD_SEP_RE = _re.compile(r"&&|\|\||[|;]")
 _ENV_ASSIGN_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # 前导包装命令（本身不代表操作意图）——跳过一层，取被包装的命令
 _WRAPPER_CMDS = {"sudo", "env", "nohup", "time", "exec"}
+# 引号包裹的 awk/sed 表达式：里面的 > 多是数值比较（NR>10），不是 shell 重定向，
+# 判「输出重定向」时先剔除，避免把只读分页误判成写操作。
+_SHELL_QUOTED_RE = _re.compile(r"'[^']*'|\"[^\"]*\"")
+# 无副作用的重定向：fd 合并（2>&1）与丢弃到 /dev/null 不写文件，不算写操作。
+_HARMLESS_REDIRECT_RE = _re.compile(r"\d*>&\d+|\d*>>?\s*/dev/null")
+# 白名单里少数命令带特定选项就会写文件（sed -i / sort -o / gawk -i inplace）。
+# 命中这些选项时不按「只读分段读取」豁免，否则真的原地写循环会一路放到 max_iters。
+_WRITE_OPTION_RE = {
+    "sed": _re.compile(r"^--in-place(=.*)?$|^-.*[iI]"),
+    "sort": _re.compile(r"^--output(=.*)?$|^-.*[oO]"),
+    "awk": _re.compile(r"^--inplace$|^-.*[iI]"),
+}
+# awk 表达式里的 `print > "file"` / `system()` 是真写文件 / 执行命令，不能算只读分页。
+# 仅匹配这类写动作，普通的 `NR>10` 数值比较不受影响。
+_AWK_WRITE_RE = _re.compile(r"\b(?:print|printf)\s*>|\bsystem\s*\(")
 
 
 def _effective_tool_name(tc) -> str:
@@ -102,7 +117,9 @@ def _is_read_only_paging(tc) -> bool:
 
     命中条件（全部满足）：
       - 工具是 file_read（天然按 offset/limit 分页），或
-      - 工具是 shell 且其有效命令属于 _READ_ONLY_PAGING_CMDS。
+      - 工具是 shell、有效命令属于 _READ_ONLY_PAGING_CMDS，且没有写副作用：
+        输出重定向（> / >>，2>&1 与 /dev/null 除外）、sed -i / sort -o 等
+        写文件选项、awk 的 print > / system() 都不算只读。
 
     只用于 varied 频率分支的豁免；精确重复 / 连续报错仍由各自分支拦截。
     """
@@ -113,16 +130,31 @@ def _is_read_only_paging(tc) -> bool:
     cmd = tc.arguments.get("command", "") if isinstance(tc.arguments, dict) else ""
     if not cmd:
         return False
+    # 输出重定向（> / >>）会写文件：先剔除引号内容（awk 的 NR>10 是数值比较），
+    # 再剔除 2>&1、>/dev/null 这类无副作用的重定向，余下的 > 一律视为写操作。
+    unquoted = _SHELL_QUOTED_RE.sub("", cmd)
+    unquoted = _HARMLESS_REDIRECT_RE.sub("", unquoted)
+    if ">" in unquoted:
+        return False
     segment = _CMD_SEP_RE.split(cmd)[-1].strip()
     if not segment:
         return False
-    for p in segment.split():
+    tokens = segment.split()
+    for idx, p in enumerate(tokens):
         if p.startswith("-") or p.startswith("'") or p.startswith('"'):
             continue
         if _ENV_ASSIGN_RE.match(p) or p in _WRAPPER_CMDS:
             continue
-        # 第一个真实命令词决定性质
-        return p in _READ_ONLY_PAGING_CMDS
+        # 第一个真实命令词决定性质；sed -i / sort -o 等写文件选项不算只读
+        if p not in _READ_ONLY_PAGING_CMDS:
+            return False
+        write_opt = _WRITE_OPTION_RE.get(p)
+        if write_opt and any(write_opt.match(t) for t in tokens[idx + 1:]):
+            return False
+        # awk 表达式里的 `print > "file"` / `system()` 会写文件或执行命令
+        if p == "awk" and _AWK_WRITE_RE.search(cmd):
+            return False
+        return True
     return False
 
 

@@ -79,6 +79,45 @@ def test_read_only_paging_rejects_writes_and_actions():
         assert _is_read_only_paging(_shell(cmd)) is False, cmd
 
 
+def test_read_only_paging_rejects_write_options_and_redirects():
+    """白名单命令带写文件选项 / 输出重定向时不能豁免（review 反馈的反例）。"""
+    for cmd in (
+        "sed -i 's/a/b/' f.py",
+        "sed --in-place 's/a/b/' f.py",
+        "sort -o b.txt a.txt",
+        "sed -n '1,5p' a.diff > out.txt",
+        "cat a.txt >> log.txt",
+        "awk '{print > \"out.txt\"}' a.txt",
+        "awk '{system(\"touch /tmp/x\")}' a.txt",
+    ):
+        assert _is_read_only_paging(_shell(cmd)) is False, cmd
+
+
+def test_read_only_paging_keeps_harmless_redirects_and_comparisons():
+    """2>&1、/dev/null 和引号里的 NR>10 比较不算写操作，别把正常分页误伤。"""
+    for cmd in (
+        "sed -n '1,5p' a.diff 2>&1",
+        "grep -n foo a.diff 2>/dev/null",
+        "awk 'NR>10' mr.diff",
+        "awk 'x>3 {print}' mr.diff",
+    ):
+        assert _is_read_only_paging(_shell(cmd)) is True, cmd
+
+
+def test_sed_in_place_write_loop_still_trips_varied_limit():
+    """回归点：连续 30 轮 sed -i（参数各异）不能靠只读豁免一路放到 max_iters。"""
+    m = LoopMonitor()
+    tripped_at = None
+    for i in range(30):
+        _call(m, _shell(f"sed -i 's/foo{i}/bar/' f{i}.py"))
+        if m.is_stuck() and tripped_at is None:
+            tripped_at = i + 1
+    # 具体轮次取决于 TOOL_FREQ_LIMIT / VARIED 的组合，只要求确实在有限轮内拦住
+    assert tripped_at is not None
+    assert tripped_at <= TOOL_FREQ_LIMIT
+    assert m._freq_limit_varied is True
+
+
 def test_read_only_paging_only_last_segment_matters():
     """复合命令只看最后一段，与 _effective_tool_name 的口径一致。"""
     assert _is_read_only_paging(_shell("cd /tmp && sed -n '1,10p' a.diff")) is True
