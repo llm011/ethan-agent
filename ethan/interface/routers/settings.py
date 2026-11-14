@@ -616,6 +616,20 @@ async def system_prompt_preview(model: str | None = None):
         ensure_ascii=False,
     ))
     approx_tools_tokens = schema_chars // 3
+
+    # 上面是「注册表全量」口径（工具列表展示用）。真实对话只广播当前路由档的工具，
+    # 两者差很多（实测 full 档 41 个 vs 全量 67 个）。单独算一份，避免 Total 被误读成
+    # 真实每轮开销。_select_route 返回的 tools 可能是名字或对象，统一取对象。
+    _route, _sys, _names, _iters = agent._select_route(dummy_messages)
+    broadcast_tools = []
+    for _n in _names:
+        _t = agent._registry.get(_n) if isinstance(_n, str) else _n
+        if _t is not None:
+            broadcast_tools.append(_t)
+    broadcast_chars = len(json.dumps(
+        [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in broadcast_tools],
+        ensure_ascii=False,
+    ))
     return {
         "system_prompt": system,
         "tools": [{"name": t.name, "description": t.description, "parameters": t.parameters, "fast_path": t.fast_path} for t in tools],
@@ -625,6 +639,10 @@ async def system_prompt_preview(model: str | None = None):
         "tool_count": tool_count,
         "approx_total_tokens": approx_tokens + approx_tools_tokens,
         "chars": len(system),
+        # 真实广播档口径
+        "broadcast_tool_count": len(broadcast_tools),
+        "approx_broadcast_tools_tokens": broadcast_chars // 3,
+        "approx_broadcast_total_tokens": approx_tokens + broadcast_chars // 3,
     }
 
 

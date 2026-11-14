@@ -76,8 +76,11 @@ behavioral_guidelines  3777     7%
 soul                   2794     5%
 其余 6 块合计          1912     4%
 ------------------------------------------------
-TOTAL                 51954          ≈ 17.3K tokens（不含历史消息、不含 tools schema）
+TOTAL                 ~52K           ≈ 17K tokens（不含历史消息、不含 tools schema）
 ```
+
+> 表中字符数会随 `Current time:` 等动态内容小幅浮动，精确值以
+> `python -m tests.bench_prompt_size` 实时输出为准，不要在文档里写死具体数字。
 
 另外，Full Path 曾在稳定层和动态层各拼一个 `<available_skills>`（标签重复、内容重叠），
 现已合并为一个块并整体放进 `Current time:` 之前的缓存稳定层；预览页的 tools token

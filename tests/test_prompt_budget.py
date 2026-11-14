@@ -80,6 +80,23 @@ def test_preview_tools_tokens_use_real_schema(measured):
     assert data["approx_total_tokens"] == data["approx_tokens"] + data["approx_tools_tokens"]
 
 
+def test_preview_distinguishes_full_and_broadcast(measured):
+    """预览必须同时给出「注册表全量」和「真实广播档」两种口径，且后者更小。
+
+    Total 那行曾叫「每轮 input 底线」却按全量 67 个工具算，容易被误读成真实开销。
+    """
+    import asyncio
+
+    from ethan.interface.routers.settings import system_prompt_preview
+
+    data = asyncio.run(system_prompt_preview())
+    assert 0 < data["broadcast_tool_count"] < data["tool_count"]
+    assert data["approx_broadcast_total_tokens"] < data["approx_total_tokens"]
+    assert data["approx_broadcast_total_tokens"] == (
+        data["approx_tokens"] + data["approx_broadcast_tools_tokens"]
+    )
+
+
 # ── build_index_block 行为 ───────────────────────────────────
 
 

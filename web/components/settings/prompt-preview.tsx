@@ -78,11 +78,16 @@ export function PromptPreview() {
             <span className="font-mono">~{data.approx_tools_tokens.toLocaleString()} tokens ({data.approx_tools_chars.toLocaleString()} 字符)</span>
           </div>
           <div className="border-t pt-1 mt-1 flex justify-between font-semibold">
-            <span>Total（每轮 input 底线）</span>
+            <span>Total（全量口径，非真实开销）</span>
             <span className="font-mono">~{data.approx_total_tokens.toLocaleString()} tokens</span>
+          </div>
+          <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+            <span className="text-muted-foreground">实际每轮固定开销（广播 {data.broadcast_tool_count} 个工具）</span>
+            <span className="font-mono">~{data.approx_broadcast_total_tokens.toLocaleString()} tokens</span>
           </div>
           <p className="text-xs text-muted-foreground pt-1">
             按 3 字符/token 粗估，不含历史消息；同一轮工具循环里这段固定开销会随每次模型调用重复发送。
+            全量口径用于查看注册表里所有工具的 schema，真实对话只广播当前路由档的工具。
           </p>
         </div>
       )}

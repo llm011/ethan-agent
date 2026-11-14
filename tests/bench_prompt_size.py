@@ -20,8 +20,9 @@ import sys
 # 阈值不是「刚好卡住当前值」，而是留了合理余量的护栏——调高前先想清楚是不是
 # 该把内容挪出 prompt（tools.md → 知识库，技能描述 → skill_list 按需取）。
 #
-# 实测基线（2026-11-14，full 档，中性 query，见 `python -m tests.bench_prompt_size`）：
-#   TOTAL 51,954 字符 ≈ 17.3K tokens；tools_reference 34,317 占 66%。
+# 实测量级（2026-11-14，full 档，中性 query，见 `python -m tests.bench_prompt_size`）：
+#   TOTAL 约 52K 字符 ≈ 17K tokens；tools_reference 约 34K，占六成以上。
+# 具体字符数会随时间戳等动态内容小幅浮动，精确值以实时输出为准，不在此写死。
 # 注意：这些阈值是「防止继续增长」的护栏，**不代表 prompt 已经够小**。
 # tools.md 的结构性拆分属于 P1 待办（见 ETHAN_V2_RESTRUCTURE_PLAN.md），
 # 由另一条分支负责，不在本护栏的范围内。
@@ -48,13 +49,14 @@ def measure_prompt(query: str = "帮我 debug 这段代码", channel: str = "rep
     prompt = agent._build_system([Message(role="user", content=query)])
 
     blocks: dict[str, int] = {}
-    # 同名块累加（历史实现里 available_skills 曾出现两块，现已合并为一块；
-    # 这里仍按累加统计，配合下面的 block_counts 断言守住「不重复」）。
+    block_counts: dict[str, int] = {}
+    # 只认成对的 xml 块（<tag>...</tag>），不靠「开标签后面刚好跟换行」这种巧合，
+    # 也不受正文里零散的标签引用（如 agent.md 提到 `<available_skills>`）干扰。
+    # 同名块累加体积，同时按找出的**成对块**数量判重——这才是「块重复」的真实语义。
     for m in re.finditer(r"<([a-z_]+)>(.*?)</\1>", prompt, re.S):
         name = m.group(1)
         blocks[name] = blocks.get(name, 0) + len(m.group(2))
-    # 每个标签应只出现一次；重复说明又有人拼了第二个同名块。
-    block_counts = {name: prompt.count(f"<{name}>\n") for name in blocks}
+        block_counts[name] = block_counts.get(name, 0) + 1
 
     return {
         "total": len(prompt),
