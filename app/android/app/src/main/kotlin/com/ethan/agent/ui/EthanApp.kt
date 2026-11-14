@@ -300,6 +300,10 @@ private fun MainContent(authViewModel: AuthViewModel) {
                     onClearCache = vm::clearCache,
                     onClearCacheCleared = vm::clearCacheCleared,
                     onClearError = vm::clearError,
+                    onSelectKernel = vm::selectKernel,
+                    onRefreshKernels = vm::loadKernels,
+                    onSelectVoice = vm::selectVoiceBackend,
+                    onRefreshVoice = vm::loadVoiceBackends,
                 )
             }
 

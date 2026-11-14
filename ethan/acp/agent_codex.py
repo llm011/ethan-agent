@@ -45,7 +45,20 @@ def _codex_item_to_step(item: dict) -> Optional[dict]:
         # 弃用/配置提示类「error」是警告而非真失败（turn 仍正常完成），不计入步骤，
         # 以免在镜像会话/时间轴里显示成吓人的红色错误（如 codex_hooks deprecated）。
         low = msg.lower()
-        if any(k in low for k in ("deprecated", "is no longer supported", "use `[features]")):
+        # 「error」在 codex 的语义里包含大量**非失败**的提示：弃用警告、模型元数据缺失等
+        # （turn 仍会正常完成）。这些不该在时间轴里显示成红色工具错误——实测
+        # `Model metadata for deepseek-v4.1-flash not found` 就是这样冒出来变成一个
+        # 名叫 "error" 的伪工具的，用户会以为工具真的失败了。
+        non_fatal = (
+            "deprecated",
+            "is no longer supported",
+            "use `[features]",
+            "metadata",
+            "defaulting to fallback",
+            "not found",
+            "unknown provider",
+        )
+        if any(k in low for k in non_fatal):
             return None
         return {"tool": "error", "args": _preview(msg, 80),
                 "state": "error", "duration_ms": None, "result_preview": ""}
@@ -67,6 +80,12 @@ def _codex_provider_overrides() -> tuple[list[str], dict, str]:
     无 cliproxy 配置时返回空 → 退回 codex 自身 config，不破坏既有行为。
     模型默认 gpt-5.5，可用 ETHAN_CODEX_MODEL 覆盖。
     """
+    # 内核模式（ethan/kernel/acp_kernel.py 的 CodexKernel）会设这个变量跳过覆盖：
+    # 作为内核用时必须尊重用户自己的 ~/.codex/config.toml，不能强行改 provider。
+    # 委派工具（delegate_coding）不设它，继续复用 Ethan 的 cliproxy。
+    if os.environ.get("ETHAN_CODEX_NO_PROVIDER_OVERRIDE") == "1":
+        return [], {}, ""
+
     try:
         from ethan.core.config import get_config
         p = get_config().providers.get("cliproxy")
@@ -111,7 +130,16 @@ async def _run_codex(
     work_dir = cwd or str(Path.cwd())
     prov_args, prov_env, model = _codex_provider_overrides()
     model_args = ["-m", model] if model else []
-    base_flags = ["--json", "--dangerously-bypass-approvals-and-sandbox", *prov_args, *model_args]
+    # --skip-git-repo-check：codex 默认拒绝在非 git 目录里跑（报
+    # "Not inside a trusted directory"）。作为内核用时 working_dir 可能是任意目录
+    # （甚至没传、用了进程 cwd），不加这个参数会直接失败且信息很晦涩。
+    base_flags = [
+        "--json",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--skip-git-repo-check",
+        *prov_args,
+        *model_args,
+    ]
     # --dangerously-bypass-approvals-and-sandbox：非交互委派场景跳审批与沙箱
     if resume_session_id:
         cmd = [codex_bin, "exec", "resume", resume_session_id, *base_flags, prompt]
@@ -161,7 +189,23 @@ async def _run_codex(
                     if step:
                         sub_steps.append(step)
                         if on_event:
-                            await on_event("step", step)
+                            # codex 只发 item.completed（没有 running 阶段）。
+                            # 上层时间线需要 start 才能显示转圈 + 计时起点，
+                            # 否则表现为「工具凭空完成、看不到过程」。
+                            # 两个事件必须带同一个 step_id：补发的 start 是另一个
+                            # dict，id() 不同，内核层只能靠这个字段配对。
+                            step_id = f"cx-{len(sub_steps)}-{step.get('tool', 'tool')}"
+                            await on_event(
+                                "step",
+                                {
+                                    **step,
+                                    "state": "running",
+                                    "result_preview": "",
+                                    "duration_ms": None,
+                                    "step_id": step_id,
+                                },
+                            )
+                            await on_event("step", {**step, "step_id": step_id})
                 elif t == "turn.failed":
                     is_error = True
                     err = (evt.get("error") or {}).get("message") or ""

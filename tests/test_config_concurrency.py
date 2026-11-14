@@ -1,0 +1,197 @@
+r"""配置保存的并发安全与原子性。
+
+背景（实测踩到）：`ethan serve` 持有内存里的配置对象，UI 每次改设置都把**整份**
+对象写回文件。同时有其他进程（另一 worktree 的服务 / CLI / 用户手改）也在改时，
+后写的会把先写的整体覆盖——表现为「刚设好的值自己变回去了」。
+
+修法三层：
+  1. 原子写（临时文件 + rename）——读者不会看到半截 YAML
+  2. 跨进程文件锁（flock）+ 进程内锁
+  3. **diff 合并**：只把「本次真正变了的字段」叠到盘上，不盲目覆盖
+
+另外这个文件也覆盖一个曾经导致服务启动失败的低级错误：`global _config`
+声明写在函数中间 → `SyntaxError: name '_config' is used prior to global declaration`。
+当时没有任何测试调用 save_config，所以 CI 全绿但服务起不来。
+"""
+from __future__ import annotations
+
+from ethan.core import config as cfg_mod
+
+
+def test_save_config_is_importable_and_runs():
+    """最基本的一条：save_config 能被调用。
+
+    这条看着废话，但它能抓住「语法错误 / 作用域错误」——上面那个 global 位置
+    错误就是靠人肉启动服务才发现的，测试完全没覆盖。
+    """
+    cfg = cfg_mod.get_config()
+    cfg_mod.save_config(cfg)  # 不抛异常即通过
+
+
+def test_diff_only_reports_changed_leaves():
+    base = {"a": 1, "b": {"x": 1, "y": 2}}
+    incoming = {"a": 1, "b": {"x": 1, "y": 99}}
+    delta = cfg_mod._diff_against_base(base, incoming)
+    assert delta == {"b": {"y": 99}}, "没变的字段不该出现在变更集里"
+
+
+def test_diff_includes_new_keys():
+    assert cfg_mod._diff_against_base({}, {"k": 1}) == {"k": 1}
+    assert cfg_mod._diff_against_base({"a": 1}, {"a": 1, "b": 2}) == {"b": 2}
+
+
+def test_diff_against_none_base_returns_all():
+    """没有基线（首次保存）时，全部内容都算变更。"""
+    assert cfg_mod._diff_against_base(None, {"a": 1}) == {"a": 1}
+
+
+def test_apply_delta_preserves_untouched_keys():
+    on_disk = {"keep": "me", "nested": {"a": 1, "b": 2}}
+    delta = {"nested": {"b": 99}}
+    out = cfg_mod._apply_delta(on_disk, delta)
+    assert out["keep"] == "me"
+    assert out["nested"] == {"a": 1, "b": 99}
+
+
+def test_apply_delta_keeps_sibling_keys_not_in_delta():
+    """关键：盘上有、delta 里没有的字段必须保留（那是别人的改动）。"""
+    on_disk = {"others": "theirs", "mine": "old"}
+    out = cfg_mod._apply_delta(on_disk, {"mine": "new"})
+    assert out["others"] == "theirs"
+    assert out["mine"] == "new"
+
+
+def test_merge_preserves_concurrent_change(tmp_path, monkeypatch):
+    """A 基于过期快照保存，不该抹掉 B 期间的改动。
+
+    基线是「上次落盘快照」（`_last_saved_raw`），不是内存单例——
+    这条在 test_config_save_semantics.py 里有更细的覆盖，这里只留一个
+    并发场景的端到端验证。
+    """
+    import yaml
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.dump({"tools": {"web_search": {"provider": "searxng"}}}))
+    monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
+    monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfg_mod, "_config", None)
+    monkeypatch.setattr(cfg_mod, "_last_saved_raw", None)
+
+    # 建基线（此时盘上 searxng）
+    base = cfg_mod.load_config()
+
+    # B 在盘上改成 deepseek（模拟另一个进程）
+    cfg_file.write_text(yaml.dump({"tools": {"web_search": {"provider": "deepseek"}}}))
+
+    # A 拿着旧对象（provider 仍是 searxng）改别的字段并保存
+    base.tts.backend = "ethan-tts"
+    cfg_mod.save_config(base)
+
+    final = yaml.safe_load(cfg_file.read_text())
+    assert final["tts"]["backend"] == "ethan-tts", "本次变更没写进去"
+    assert final["tools"]["web_search"]["provider"] == "deepseek", (
+        "A 没改 provider（与基线相同 → 不在 delta 里），不该把盘上的 deepseek 顶回 searxng"
+    )
+
+
+def test_atomic_write_does_not_leave_partial_file(tmp_path, monkeypatch):
+    """写完之后必须是完整合法 YAML（临时文件路径）。"""
+    import yaml
+
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
+    monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp_path)
+
+    cfg_mod._write_raw({"a": 1, "b": [1, 2, 3]})
+    data = yaml.safe_load(cfg_file.read_text())
+    assert data == {"a": 1, "b": [1, 2, 3]}
+    # 不该留下临时文件
+    leftovers = [p.name for p in tmp_path.glob(".config.yaml.*.tmp")]
+    assert leftovers == []
+
+
+def test_update_config_uses_fresh_disk_state(tmp_path, monkeypatch):
+    """update_config 应该在锁内重新读盘，不信任内存单例。"""
+    import yaml
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.dump({"tts": {"backend": "edge-tts"}}))
+    monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
+    monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfg_mod, "_config", None)
+
+    # 内存里放一份「过期」的（backend=ethan-tts），盘上是 edge-tts
+    stale = cfg_mod.load_config()
+    monkeypatch.setattr(cfg_mod, "_config", stale)
+    cfg_file.write_text(yaml.dump({"tts": {"backend": "edge-tts"}}))
+
+    out = cfg_mod.update_config(
+        lambda c: setattr(c.tools.web_fetch, "backend", "deepseek")
+    )
+    # 拿到的是盘上最新状态 + 本次变更
+    assert out.tools.web_fetch.backend == "deepseek"
+    final = yaml.safe_load(cfg_file.read_text())
+    assert final["tools"]["web_fetch"]["backend"] == "deepseek"
+
+
+# ── 嵌套段的持久化（kernel 在 defaults 下面）─────────────────
+
+
+def test_kernel_section_survives_exclude_defaults():
+    """`kernel` 在 defaults 下面，且默认值全为空。
+
+    pydantic 的 `model_dump(exclude_defaults=True)` 对嵌套 BaseModel 只看
+    「整个子对象是否等于默认构造」，于是 `kernel.default="dsh"` 这种改动会被
+    **整段省掉**——表现为「接口返回成功但配置文件里没有 kernel 段」，
+    重启后又变回原生内核。实测踩到：点「启用 DSH」返回 200，读回来还是 ethan。
+    """
+    from ethan.core.config import Config, _config_to_raw
+
+    c = Config()
+    assert "kernel" not in _config_to_raw(c).get("defaults", {}), "全默认时不该写"
+
+    c.defaults.kernel.default = "dsh"
+    raw = _config_to_raw(c)
+    assert raw["defaults"]["kernel"] == {"default": "dsh"}
+
+
+def test_kernel_task_rules_persist():
+    from ethan.core.config import Config, _config_to_raw
+
+    c = Config()
+    c.defaults.kernel.task_rules = {"coding": "claude_code"}
+    raw = _config_to_raw(c)
+    assert raw["defaults"]["kernel"]["task_rules"] == {"coding": "claude_code"}
+
+
+def test_save_config_persists_kernel_change(tmp_path, monkeypatch):
+    """端到端：走 save_config 之后，盘上真的有 kernel 段。
+
+    注意必须用 update_config 语义——直接「get_config() 改字段 + save_config」
+    会因为基线已被同步修改而算出空变更集（另一个坑，见 update_config 文档）。
+    """
+    import yaml
+
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
+    monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfg_mod, "_config", None)
+
+    cfg_mod.update_config(lambda c: setattr(c.defaults.kernel, "default", "dsh"))
+
+    final = yaml.safe_load(cfg_file.read_text())
+    assert final["defaults"]["kernel"]["default"] == "dsh"
+
+
+def test_update_config_survives_reload(tmp_path, monkeypatch):
+    """写完再读，值还在（模拟用户重启服务后的状态）。"""
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setattr(cfg_mod, "CONFIG_FILE", cfg_file)
+    monkeypatch.setattr(cfg_mod, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(cfg_mod, "_config", None)
+
+    cfg_mod.update_config(lambda c: setattr(c.defaults.kernel, "default", "pi"))
+
+    monkeypatch.setattr(cfg_mod, "_config", None)
+    fresh = cfg_mod.load_config()
+    assert fresh.defaults.kernel.default == "pi"

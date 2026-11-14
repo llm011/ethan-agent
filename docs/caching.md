@@ -22,25 +22,29 @@ system prompt 中有大量内容在多轮对话间几乎不变（identity、soul
 [稳定层]                         ← 打 cache_control: ephemeral
 <soul>...</soul>
 <identity>...</identity>
+<persona_override> / <mode_identity>（按 mode 可选）
 <agent_protocols>...</agent_protocols>
-<tools_reference>...</tools_reference>
-<available_skills>...</available_skills>
+<tools_reference>...</tools_reference>       ← 当前 34.3K 字符，最大单一来源
+<documents_protocol> / <image_protocol>（按条件）
+<available_skills>...</available_skills>     ← 技能简表，合并为单个块
 
 ─── Current time: 2026-06-12 10:30:00 ───  ← 分割点
 
 [动态层]                         ← 不缓存，每次新鲜传输
-workspace 路径
-定时任务摘要
-<memory_context>（facts）
+workspace 路径 / Current model
+<memory_recall_hint>（仅 owner）
 <user_profile>
 <behavioral_guidelines>（procedures）
-<relevant_skills>（关键词匹配结果）
+<relevant_skills>（关键词匹配结果，按 query 变化）
+<runtime_context> / <previous_run_summary>（按条件）
 ```
 -->
 
-稳定层内容由 `system/soul.md`、`system/identity.md`、`system/agent.md`、`system/tools.md` 和 Skill 名称列表组成，这些文件在服务运行期间几乎不变，缓存命中率极高。
+稳定层内容由 `system/soul.md`、`system/identity.md`、`system/agent.md`、`system/tools.md` 和技能简表组成，这些文件在服务运行期间几乎不变，缓存命中率极高。技能简表（`<available_skills>`）是**一个**块：曾同时在稳定层和动态层各拼一个同名块，已合并；现在整体位于稳定层。
 
-动态层包含当前时间、记忆注入结果和 Skill 匹配结果，每轮都会变化，不适合缓存。
+动态层包含当前时间、用户画像、纠正准则和 Skill 匹配结果，每轮都会变化，不适合缓存。
+
+**注意**：缓存降低的是**费用**（命中时按 0.1× input 计费），并不减少每次请求实际传输的 token 数、不释放上下文窗口、也不缩短首 token 延迟。当前 full 档单次调用的固定开销约 29.7K tokens（system 17.3K + 41 个广播工具的 schema 12.4K，均不含历史消息），且在工具循环的每次迭代里重复发送。真正的体积优化只能靠减少注入内容（见 `ETHAN_V2_RESTRUCTURE_PLAN.md` P1）。
 
 ---
 

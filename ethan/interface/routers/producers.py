@@ -295,6 +295,29 @@ async def _run_generation(
     # 关联 ChatRun 到 ToolExecutor：使外部可通过 run.cancel_tool(tool_call_id) 取消单个工具。
     agent._executor.current_run = run
 
+    # 内核选择：默认 ethan（原生），行为与引入多内核前完全一致；配置了外部内核
+    # （claude_code / codex / opencode）时本轮执行权交给对应 runtime。
+    # runner 对 agent 是鸭子类型兼容的（有 stream_chat/.usage/.model），所以下面
+    # 的消费逻辑一行都不用改。
+    runner = agent
+    try:
+        from ethan.kernel.dispatch import build_runner
+
+        runner = build_runner(
+            agent,
+            task_kind=_infer_task_kind(messages),
+            working_dir=_kernel_working_dir(agent),
+            channel=getattr(agent, "_channel", ""),
+            user_id=user_id,
+            mode=mode,
+        )
+        if runner.kernel_kind != "ethan":
+            # 让前端知道本轮换了内核（真实模型由外部 CLI 决定，model 事件据实报内核名）
+            run.emit({"kernel": runner.kernel_kind, "kernel_name": runner.kernel_name})
+    except Exception:
+        logger.debug("kernel 选择失败，回退原生内核", exc_info=True)
+        runner = agent
+
     # consent provider 经 ContextVar 注入；本任务有独立 context，需在任务内设置。
     set_consent_provider(consent)
     # 「运行中补充信息」drainer 也经 ContextVar 注入：agent loop 每轮开头调它取走 inbox 内容。
@@ -306,7 +329,7 @@ async def _run_generation(
     # 让气泡底部「开始时间」旁立即显示所用模型，而不是等到 done 事件才出现。
     # 前端会在收到该事件时把 model 写进当前 assistant 气泡并即时重渲染。
     try:
-        run.emit({"model": agent.model})
+        run.emit({"model": runner.model})
     except Exception:
         logger.debug("emit model event failed session=%s", session_id, exc_info=True)
 
@@ -321,7 +344,7 @@ async def _run_generation(
         except Exception:
             logger.debug("恢复遗留补充信息失败 session=%s", session_id, exc_info=True)
 
-    collector = StreamCollector().bind(agent)
+    collector = StreamCollector().bind(runner)
     # 工具过程实时持久化：每条工具事件 emit 给前端的同时，也把步骤快照落库。
     # 这样即便后续 finalize 失败 / 进程崩溃 / 用户关页面，工具调用过程也留存，不会白干。
     # 落的是一条 role=assistant、content 为占位、tool_steps 为当前全部步骤的「进度消息」，
@@ -329,7 +352,7 @@ async def _run_generation(
     # 流结束后把同一条更新为最终内容（content/usage/a2ui），避免「占位行 + 最终行」重复两条。
     progress_msg_id: int | None = None
     try:
-        async for item in agent.stream_chat(messages):
+        async for item in runner.stream_chat(messages):
             if isinstance(item, ConsentEvent):
                 run.interaction_ids.add(item.request_id)
                 evt = {
@@ -501,7 +524,7 @@ async def _run_generation(
                             ttfb_ms=collector.ttfb_ms,
                             total_ms=collector.total_ms,
                             status="stopped",
-                            model=agent._provider.model,
+                            model=runner.model,
                         ),
                     )
                     await store.touch(session_id, mark_read=bool(run.subscribers))
@@ -526,7 +549,7 @@ async def _run_generation(
                     ttfb_ms=collector.ttfb_ms,
                     total_ms=collector.total_ms,
                     status="stopped",
-                    model=agent._provider.model,
+                    model=runner.model,
                 )
                 await store.save_message(session_id, stopped_msg)
                 await store.touch(session_id, mark_read=bool(run.subscribers))
@@ -584,7 +607,7 @@ async def _run_generation(
                 ttfb_ms=collector.ttfb_ms,
                 total_ms=collector.total_ms,
                 status="interrupted",
-                model=agent._provider.model,
+                model=runner.model,
                 error=err_text,
             )
             try:
@@ -666,7 +689,7 @@ async def _run_generation(
             matched_skills=collector.matched_skills or None,
             ttfb_ms=collector.ttfb_ms,
             total_ms=collector.total_ms,
-            model=agent._provider.model,
+            model=runner.model,
         )
         # 正常结束：把实时进度行就地更新为最终回复（content/usage/tool_steps/a2ui 全写全），
         # 复用同一行，避免「占位行 + 最终行」重复两条 assistant 消息。无进度行则照常新建。
@@ -697,8 +720,13 @@ async def _run_generation(
             if agent._skills and agent.last_matched_skills:
                 for _name in agent.last_matched_skills:
                     asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
-            asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
-            asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
+            # 后台任务用 real_model：它们走 Ethan 自己的 provider，与前台内核无关。
+            # 用 runner.model 的话，外部内核下会拿到 "DSH" 这种非 model id，
+            # create_provider 直接报 Provider 'openai_compat' not found。
+            asyncio.create_task(
+                _maybe_consolidate(session_id, runner.real_model, user_id, mode=mode)
+            )
+            asyncio.create_task(_maybe_generate_skill(session_id, runner.real_model, user_id))
 
         # touch 只更新会话列表的 updated_at 排序时间戳，与主消息落库解耦：
         # 极端情况下主消息已保存成功、touch 撞锁重试耗尽时，不该给前端报
@@ -791,10 +819,94 @@ async def _run_generation(
         "ttfb_ms": collector.ttfb_ms,
         "total_ms": collector.total_ms,
         "message_id": msg_id,
-        "model": agent._provider.model,
+        "model": runner.model,
     }
     if new_title:
         done_evt["title"] = new_title
+    # 外部内核自己的 session id（DSH 的 session-xxx / Claude 的 UUID）。
+    # 用户要拿它去命令行定位具体对话，所以随 done 事件下发，前端在标题下展示 + 可复制。
+    # 原生内核下为空——那时用 Ethan 自己的会话 id，不需要额外展示。
+    _ksid = getattr(runner, "kernel_session_id", "") or ""
+    if _ksid and getattr(runner, "kernel_kind", "ethan") != "ethan":
+        done_evt["kernel_session_id"] = _ksid
+        done_evt["kernel_kind"] = runner.kernel_kind
+        # 落库：刷新页面后还要能展示（否则只有当前这一轮的页面能看到）
+        if session_id:
+            try:
+                await store.save_kernel_session(session_id, _ksid, runner.kernel_kind)
+            except Exception:
+                logger.debug("保存 kernel_session_id 失败 session=%s", session_id, exc_info=True)
     run.emit(done_evt)
     run.finish()
     _RunManager_schedule_removal(run.session_id)
+
+
+# ── 内核选择相关的小工具 ──────────────────────────────────────────────
+
+
+def _infer_task_kind(messages: list) -> str:
+    """粗粒度任务类型推断，供 `kernel.task_rules` 的按任务选内核使用。
+
+    刻意保持极简：只区分 coding / research / chat 三类，且只做关键词判断——
+    真正的意图理解由模型自己做（有个 `classify.py` 在 acp 里，但那是为委派服务的，
+    代价太大，不适合每轮都跑）。猜错的代价很小：回退到 `kernel.default`。
+    """
+    text = ""
+    for m in reversed(messages or []):
+        if getattr(m, "role", "") == "user":
+            text = (getattr(m, "content", "") or "")[:500].lower()
+            break
+    if not text:
+        return "chat"
+
+    coding_kw = (
+        "代码", "重构", "实现", "修复", "bug", "debug", "测试", "编译",
+        "函数", "类", "接口", "api", "commit", "pr ", "merge",
+        "refactor", "implement", "fix", "test", "python", "typescript",
+    )
+    research_kw = ("调研", "分析", "对比", "论文", "研究", "report", "research", "survey")
+
+    if any(k in text for k in coding_kw):
+        return "coding"
+    if any(k in text for k in research_kw):
+        return "research"
+    return "chat"
+
+
+def _kernel_working_dir(agent) -> str:
+    """外部内核的工作目录。
+
+    **绝不能返回空串让 ACP 落到进程 cwd**：`ethan serve` 被人为以 `/` 为 cwd 启动
+    （launchd/watchdog 拉起时的常见情况），外部 CLI 在根目录下跑会立刻失败——
+    实测 codex 报 `Not inside a trusted directory`，claude 的行为也不可预期。
+
+    优先级：
+      1. 会话级 working_dir（ACP client / 渠道层显式设置）
+      2. agent 上记录的值
+      3. 用户 workspace（`~/.ethan`）—— 一个确定可写、非根的位置
+    """
+    try:
+        from ethan.core.context import get_working_dir
+
+        wd = get_working_dir()
+        if wd:
+            return wd
+    except Exception:
+        pass
+
+    wd = getattr(agent, "_working_dir", "") or ""
+    if wd:
+        return wd
+
+    # 兜底到 workspace：外部 CLI 需要一个真实目录，而不是 "/" 或安装目录
+    try:
+        from ethan.core.config import get_config
+
+        ws = get_config().defaults.workspace
+        if ws:
+            import os
+
+            return os.path.expanduser(ws)
+    except Exception:
+        pass
+    return ""

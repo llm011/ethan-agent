@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Pencil, Check, X, RefreshCw, Link2, RotateCw, Pin, PinOff } from "lucide-react";
+import { Pencil, Check, X, RefreshCw, Link2, RotateCw, Pin, PinOff, Copy } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Clock, Calendar } from "lucide-react";
 import { Button } from "@ethan/shared/ui/button";
@@ -19,6 +19,15 @@ interface ChatHeaderProps {
   usage: Usage;
   schedules: any[];
   pinnedAt?: number;
+  /**
+   * 外部内核自己的 session id（DSH 的 `session-xxx` / Claude 的 UUID）。
+   *
+   * 用户需要它去命令行定位具体对话（如 `dsh --session-id <id>`），所以展示在标题下方
+   * 并带复制按钮。原生内核下为空——那时用 Ethan 自己的会话 id，不需要额外展示。
+   */
+  kernelSessionId?: string;
+  /** 产生这个 id 的内核名（dsh / claude_code / pi …），用于标注来源 */
+  kernelKind?: string;
   onTitleChange: (title: string) => void;
   onTogglePin?: () => void;
   onReloadChat?: () => void;
@@ -33,11 +42,13 @@ const SOURCE_COLOR: Record<string, string> = {
   heartbeat: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
 };
 
-export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedAt, onTitleChange, onTogglePin, onReloadChat }: ChatHeaderProps) {
+export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedAt, kernelSessionId, kernelKind, onTitleChange, onTogglePin, onReloadChat }: ChatHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [editingTitle, setEditingTitle] = useState("");
   const [copied, setCopied] = useState(false);
+  // 内核 session id 的复制反馈，与上面「复制会话链接」的 copied 分开
+  const [kernelCopied, setKernelCopied] = useState(false);
 
   // 窗口拖拽：整个 header 区域可拖拽移动窗口（用 Tauri JS API，不依赖 data-tauri-drag-region）
   // 注意：必须排除交互元素，否则 startDragging() 会抢占 mousedown 导致按钮 click 永不触发
@@ -153,6 +164,34 @@ export function ChatHeader({ sessionId, title, source, usage, schedules, pinnedA
         {sessionId && source && (
           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${SOURCE_COLOR[source] || "bg-muted text-muted-foreground"}`}>
             {SOURCE_LABEL[source] || source}
+          </span>
+        )}
+
+        {/* 外部内核的 session id：用户拿它去命令行定位这条对话。
+            只在用外部内核时出现（原生内核用 Ethan 自己的会话 id，无需展示）。 */}
+        {kernelSessionId && (
+          <span
+            className="flex items-center gap-1 shrink-0 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground"
+            title={`${kernelKind || "外部内核"} 会话 ID —— 可在命令行用 --session-id 定位这条对话`}
+          >
+            <span className="opacity-60">{kernelKind || "kernel"}:</span>
+            <code className="font-mono">{kernelSessionId.slice(0, 12)}{kernelSessionId.length > 12 ? "…" : ""}</code>
+            <button
+              className="hover:text-primary"
+              onClick={async (e) => {
+                e.stopPropagation();
+                try {
+                  await navigator.clipboard.writeText(kernelSessionId);
+                  setKernelCopied(true);
+                  setTimeout(() => setKernelCopied(false), 1500);
+                } catch {
+                  window.prompt("复制这个 session id：", kernelSessionId);
+                }
+              }}
+              title="复制完整 session id"
+            >
+              {kernelCopied ? <Check className="h-2.5 w-2.5 text-green-500" /> : <Copy className="h-2.5 w-2.5" />}
+            </button>
           </span>
         )}
 

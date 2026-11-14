@@ -3,6 +3,12 @@ package com.ethan.agent.shared
 import com.ethan.agent.core.datastore.AppConfig
 import com.ethan.agent.core.datastore.AppConfigStore
 import com.ethan.agent.core.model.AgendaCreateRequest
+import com.ethan.agent.core.model.KernelSelectRequest
+import com.ethan.agent.core.model.KernelSelectResponse
+import com.ethan.agent.core.model.KernelsResponse
+import com.ethan.agent.core.model.VoiceBackendsResponse
+import com.ethan.agent.core.model.VoiceSelectRequest
+import com.ethan.agent.core.model.VoiceSelectResponse
 import com.ethan.agent.core.model.AgendaEnabledRequest
 import com.ethan.agent.core.model.AgendaPatchRequest
 import com.ethan.agent.core.model.AgendaResponse
@@ -778,6 +784,24 @@ class EthanRepository(
 
     suspend fun getToolTiers(model: String? = null): ToolTiersResponse {
         return api.getToolTiers(model)
+    }
+
+    // ── AI 内核 / 语音后端 ────────────────────────────────────────────────
+
+    suspend fun getKernels(): KernelsResponse {
+        return api.getKernels()
+    }
+
+    suspend fun selectKernel(body: KernelSelectRequest): KernelSelectResponse {
+        return api.selectKernel(body)
+    }
+
+    suspend fun getVoiceBackends(): VoiceBackendsResponse {
+        return api.getVoiceBackends()
+    }
+
+    suspend fun selectVoiceBackend(body: VoiceSelectRequest): VoiceSelectResponse {
+        return api.selectVoiceBackend(body)
     }
 
     suspend fun getFastRules(): FastRulesResponse {

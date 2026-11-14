@@ -32,10 +32,16 @@ async def _run_claude_code(
     resume_session_id: Optional[str] = None,
     user_id: str = "",
     on_event: Optional[callable] = None,
+    mcp_config_path: Optional[str] = None,
 ) -> ACPResult:
     """Run Claude Code with stream-json output, parse sub-steps and final result.
 
     on_event 可选：回调函数，每有中间事件调用一次，传 (event_type, data)。
+
+    mcp_config_path：可选的 MCP 配置文件路径。内核模式下用它把 Ethan 的工具
+    注入 Claude Code（见 ethan/kernel/claude_kernel.py 的 _build_mcp_config）。
+    **不传时行为与之前完全一致**——委派编码任务（delegate_coding）走的就是
+    这条不带 MCP 的路径，不受影响。
     """
     claude_bin = shutil.which("claude")
     if not claude_bin:
@@ -53,8 +59,17 @@ async def _run_claude_code(
     ]
     if resume_session_id:
         cmd += ["--resume", resume_session_id]
-    # 非交互场景跳过权限询问
+    # 非交互场景跳过权限询问。
+    #
+    # 实测：不加这个参数时，**MCP 工具调用会被权限系统拦下**（Claude 会回
+    # "工具还没获得授权，这次调用被拦下了"），即使已经通过 --mcp-config 注册成功。
+    # 所以内核模式要注入 MCP 工具时，这个参数是必需的。
     cmd.append("--dangerously-skip-permissions")
+    if mcp_config_path:
+        # 注意不加 --strict-mcp-config：那个会**忽略用户自己的全部 MCP 配置**，
+        # 只留我们给的。用户可能已经在 ~/.claude 里配了自己的 server，
+        # 我们只是"额外挂一个"，不该把它们丢掉。
+        cmd += ["--mcp-config", mcp_config_path]
 
     sub_steps: list[dict] = []
     pending: dict[str, dict] = {}  # tool_use_id → step dict（等待对应 tool_result）

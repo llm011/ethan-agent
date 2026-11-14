@@ -1,5 +1,8 @@
+import contextlib
+import logging
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +11,15 @@ from pydantic import BaseModel, Field
 CONFIG_DIR = Path(os.environ.get("ETHAN_DATA_DIR", "")) if os.environ.get("ETHAN_DATA_DIR") else Path.home() / ".ethan"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
+
+logger = logging.getLogger(__name__)
+
+# 文件锁的重入计数（每线程独立）
+_lock_state = threading.local()
+
+# 上一次成功落盘的内容快照。save_config 用它做 diff 基线——
+# 用「当前内存对象」当基线会导致变更集恒为空（见 save_config 注释）。
+_last_saved_raw: dict | None = None
 
 class ProviderConfig(BaseModel):
     api_key: str = ""
@@ -70,6 +82,23 @@ class TtsConfig(BaseModel):
     rate: str = ""
 
 
+class AsrConfig(BaseModel):
+    """语音识别（ASR）后端配置。
+
+    与 TtsConfig 对称：语音输入和语音输出是同一个「本地 vs 云端」的取舍，
+    分开配置是因为两者可用的后端不同（本地 ASR 依赖 ethan-tts 的 stt 模块，
+    云端则可能只有 TTS 没有 ASR）。
+
+    默认 off：语音输入需要麦克风权限 + 模型权重，不该默认开启。
+    """
+
+    backend: str = "off"  # off | ethan-tts
+    model: str = ""  # ethan-tts 的 ASR 模型 key（空=用它自己的默认）
+    language: str = ""  # 识别语言提示（空=自动）
+    base_url: str = ""  # 空=与 tts.base_url 同源
+    timeout_sec: float = 0.0  # 0=内置默认
+
+
 class WeChatConfig(BaseModel):
     enabled: bool = False  # 设为 true 后 ethan serve 自动启动 iLink 长轮询
     # 登录凭证由 ethan wechat login（或首次启动时扫码）自动写入
@@ -116,6 +145,28 @@ class FastRule(BaseModel):
     keywords: list[str] = Field(default_factory=list)  # 命中任一即触发（支持 * 通配）
     tools: list[str] = Field(default_factory=list)     # 额外挂载的工具名
     skills: list[str] = Field(default_factory=list)    # 强制注入 prompt 的技能名
+
+
+class KernelSelectionConfig(BaseModel):
+    """内核选择配置（见 ethan/kernel/runtime.py）。
+
+    默认 `default=""` 等价于 ethan 原生内核，行为与引入多内核之前完全一致。
+    配成外部内核（claude_code / codex / opencode）时，那一轮对话的执行权交给
+    对应的外部 runtime —— 注意它不走 Ethan 的工具/技能/记忆，也不做中途授权，
+    详见 ethan/kernel/claude_kernel.py 的取舍说明。
+
+    task_rules 是「按任务类型选内核」的映射，key 为 task_kind
+    （coding / chat / research ...），value 为内核名。未命中的走 default。
+    """
+    default: str = ""  # "" = 原生 Ethan；可选 ethan | claude_code | codex | opencode
+    task_rules: dict[str, str] = Field(default_factory=dict)  # {"coding": "claude_code"}
+    # 外部内核能用多少 Ethan 的工具（通过 /kernel-tools MCP 端点注入）。
+    #   "all"      —— 除 shell 外的全部（默认）。用户要求「内核作为 Ethan 的心脏」，
+    #                 只读不够，外部内核写不了文件就等于干不了活。
+    #   "readonly" —— 只有只读工具
+    #   "off"      —— 完全注入，外部内核只用它自己的工具
+    # 无论哪种，shell 与 delegate_coding 永不暴露（见 kernel/tool_bridge.py）。
+    share_tools: str = "all"
 
 
 class RoutingConfig(BaseModel):
@@ -265,14 +316,42 @@ class DefaultsConfig(BaseModel):
     # 切默认模型二者一起变；false 时二者各自独立配置（留空仍等于跟随默认）。
     model_sync: bool = True
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
+    kernel: KernelSelectionConfig = Field(default_factory=KernelSelectionConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
 class WebSearchToolConfig(BaseModel):
-    provider: str = "duckduckgo"  # "duckduckgo" | "tavily" | "searxng"
+    provider: str = "duckduckgo"  # "duckduckgo" | "tavily" | "searxng" | "deepseek"
     api_key: str = ""  # tavily 用
     base_url: str = ""  # searxng 用，如 http://localhost:8888（自建）或第三方现成实例地址
     image_search_enabled: bool = True  # 图片搜索工具开关；Wallhaven 为主力来源，无需 SearXNG 也能用
+    # DeepSeek 自研搜索（2026-10 开放）。与上面三个 provider 并列，不替代它们——
+    # 它只是「优先级更高的一档」，DuckDuckGo/Bing 继续做兜底（见 web_search 的 order）。
+    # 单独一个 key 字段而不复用 api_key，是因为 tavily 与 deepseek 的 key 不能混用。
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+
+
+class WebFetchToolConfig(BaseModel):
+    """web_fetch 的后端配置。
+
+    `backend` 决定抓取路径：
+      · "http"     —— 内置 httpx 抓取 + 正文本地提取（默认，零依赖零成本）
+      · "deepseek" —— 走 DeepSeek Fetch API，返回现成 Markdown
+
+    为什么默认 http：内置路径零成本、无网络外部依赖，多数页面够用。
+    DeepSeek Fetch 的价值在于反爬/JS 渲染/正文提取这些内置路径搞不定的情况，
+    所以它是「增强后端」而不是默认路径——不该让每个抓取都产生费用。
+
+    fallback_to_http：DeepSeek 失败时是否退回内置抓取。默认 True——
+    抓网页这种事，多一条路总比直接失败好。
+    """
+
+    backend: str = "http"  # "http" | "deepseek"
+    api_key: str = ""
+    base_url: str = "https://api.deepseek.com"
+    fallback_to_http: bool = True
+
 
 class KnowledgeConfig(BaseModel):
     backend: str = "filesystem"  # "filesystem" | "obsidian" | "external" | "notion"
@@ -311,6 +390,7 @@ class MCPConfig(BaseModel):
 
 class ToolsConfig(BaseModel):
     web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
+    web_fetch: WebFetchToolConfig = Field(default_factory=WebFetchToolConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     dida: DidaConfig = Field(default_factory=DidaConfig)
@@ -329,6 +409,7 @@ class Config(BaseModel):
     lark: LarkConfig = Field(default_factory=LarkConfig)
     wechat: WeChatConfig = Field(default_factory=WeChatConfig)
     tts: TtsConfig = Field(default_factory=TtsConfig)
+    asr: AsrConfig = Field(default_factory=AsrConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     users: list["UserConfig"] = Field(default_factory=list)  # 多用户体系；为空时自动生成 admin
 
@@ -586,6 +667,12 @@ def load_config() -> Config:
 
     _apply_env_overrides(raw)
     config = Config.model_validate(raw)
+    # 初始化 diff 基线：让第一次 save_config 能正确算出变更集。
+    # 不在这里设的话，首次保存的 base 是 None → 全部内容都算变更 → 退化成整体覆盖
+    # （功能上能写进去，但失去了并发保护）。
+    global _last_saved_raw
+    if _last_saved_raw is None:
+        _last_saved_raw = _config_to_raw(config)
 
     need_save = False
     if not config.network.auth_token:
@@ -632,20 +719,237 @@ def load_config() -> Config:
     return config
 
 
-def save_config(config: Config) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+# 进程内串行化：同一进程里多个请求同时保存时排队。
+# 用 RLock 而非 Lock：`load_config()` 在某些路径下会回调 `save_config()`
+# （补写 auth_token），二者都在锁内 → 非可重入锁会自死锁。
+_SAVE_LOCK = threading.RLock()
 
-    # 手动序列化，保留 type 字段，但去除其他可选/空字段
+
+@contextlib.contextmanager
+def _config_file_lock():
+    """跨进程排他锁（fcntl.flock）。
+
+    为什么需要：`ethan serve` 持有内存里的配置对象，UI 每次改设置都会把**整份**
+    对象写回文件。如果同时还有别的进程（另一个 worktree 的服务、CLI 命令、
+    用户手动编辑）也在改，后写的会把先写的整体覆盖——实测踩到 `tts.backend`
+    刚设好就被回滚成默认值。
+
+    flock 在 macOS/Linux 上可靠。Windows 没有 fcntl，降级为不加锁（仍然有
+    进程内锁 + 原子写兜底，比原来好）。
+    """
+    lock_path = CONFIG_DIR / ".config.lock"
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - Windows
+        yield
+        return
+
+    # 用线程局部计数实现同线程重入：同一线程嵌套获取时不再重复 flock
+    # （有些平台对同一进程重复 flock 会阻塞），也避免提前释放外层持有的锁。
+    depth = getattr(_lock_state, "depth", 0)
+    if depth > 0:
+        _lock_state.depth = depth + 1
+        try:
+            yield
+        finally:
+            _lock_state.depth -= 1
+        return
+
+    fh = open(lock_path, "w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        _lock_state.depth = 1
+        try:
+            yield
+        finally:
+            _lock_state.depth = 0
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
+
+# 这些嵌套模型的字段需要「逐字段」判默认值，不能整体被 exclude_defaults 省略。
+#
+# pydantic 的坑：`model_dump(exclude_defaults=True)` 对**嵌套 BaseModel** 只看
+# 「这个子模型对象是否等于它自己的默认构造」，而不是逐字段比较。于是
+# `KernelSelectionConfig()`（全默认）会被整体省掉——即使我们刚把
+# `kernel.default` 从 "" 改成 "dsh"，因为改动后的对象仍被判定为"与默认不同"…
+# 实测反而相反：整个 kernel 段连同改动一起消失，导致「切换内核成功但没写盘」。
+#
+# 所以对这些段：明确把它们 dump 出来（不过滤默认值），让下游按字段判断。
+# 点分路径。注意 kernel 在 defaults 下面，不是顶层。
+_FORCE_INCLUDE_SECTIONS = ("defaults.kernel",)
+
+
+def _config_to_raw(config: Config) -> dict:
+    """Config 对象 → 可写入 YAML 的 dict。
+
+    处理三件事：
+      1. exclude_defaults 去掉等默认值的字段（减小文件体积）
+      2. providers 的 type 必须显式持久化
+      3. 少数嵌套段（kernel）强制逐字段输出——否则整段被误省略
+    """
     data = config.model_dump(exclude_defaults=True, exclude_none=True)
 
-    # 由于 exclude_defaults 会把等于默认值的字段去掉（比如 type="openai_compat"），
-    # 但我们需要明确持久化 type，所以对于存在于 config.providers 中的，强制把 type 写进去
+    # 强制包含的段：逐字段与默认值比较，只留下真的改过的叶子。
+    #
+    # 不能用 `sub.model_dump(exclude_defaults=True)`：pydantic 对嵌套模型的
+    # exclude_defaults 行为不可靠（实测 `kernel.default="dsh"` 也被省掉）。
+    # 所以自己拿一个默认实例做基准，逐字段比。
+    for section in _FORCE_INCLUDE_SECTIONS:
+        # 按点分路径取，与 EDITABLE_FIELDS 的写法保持一致
+        sub = config
+        for part in section.split("."):
+            sub = getattr(sub, part, None)
+            if sub is None:
+                break
+        if sub is None:
+            continue
+        try:
+            base = type(sub)()
+        except Exception:
+            base = None
+        changed: dict = {}
+        for field_name in type(sub).model_fields:
+            val = getattr(sub, field_name, None)
+            if base is not None and val == getattr(base, field_name, None):
+                continue
+            if val is None or val == "" or val == {} or val == []:
+                continue
+            changed[field_name] = val
+        if changed:
+            # 按点分路径写回（只支持两级，够用且不引入通用 setter）
+            parts = section.split(".")
+            if len(parts) == 1:
+                data[parts[0]] = changed
+            else:
+                node = data.setdefault(parts[0], {})
+                if isinstance(node, dict):
+                    node[parts[1]] = changed
+
+    # exclude_defaults 会去掉等于默认值的字段（比如 type="openai_compat"），
+    # 但 providers 的 type 必须显式持久化，所以强制写回。
     if "providers" in data:
         for k, p in config.providers.items():
             if k in data["providers"]:
                 data["providers"][k]["type"] = p.type
+    return data
 
-    _write_raw(data)
+
+def save_config(config: Config) -> None:
+    """保存配置。
+
+    语义是「让文件反映传入的 config」，但**不会盲目覆盖别人的并发改动**：
+    在锁内先重新读盘，算出「盘上比传入对象更新的字段」，把它们保留下来。
+
+    为什么不能直接覆盖：`ethan serve` 持有内存单例，UI 每次改设置都把整份对象
+    写回文件。若另一进程（另一个 worktree 的服务、CLI、或用户手改）在此期间
+    改了别的字段，整体覆盖会把它抹掉——实测踩到 `tts.backend` 刚设好就被回滚。
+    """
+    global _config, _last_saved_raw
+
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    data = _config_to_raw(config)
+    # 基线必须是「上一次成功落盘的内容」，**不能是 `_config` 单例**。
+    #
+    # 为什么：绝大多数调用方的写法是
+    #     cfg = get_config(); cfg.models = [...]; save_config(cfg)
+    # 此时 `_config` 和 `cfg` 是同一个对象，基线已含本次改动 → 变更集恒为空
+    # → 什么都写不进去。实测踩到：模型删不掉、加不上、切内核也不生效。
+    #
+    # 改用「上次落盘快照」：只有真正与上次不同的字段才算本次变更，
+    # 既能正确写入，又能保住并发方的其它改动。
+    base = _last_saved_raw
+    with _SAVE_LOCK, _config_file_lock():
+        try:
+            # 注意：这里**不能**用 load_config()——它会补写 auth_token 并反向
+            # 调用 save_config，形成无限递归。用无副作用的裸读。
+            on_disk = _read_raw_file()
+            delta = _diff_against_base(base, data)
+            data = _apply_delta(on_disk, delta) if on_disk else data
+        except Exception:
+            # 读盘失败就用传入的（宁可覆盖也不要写不进去）
+            logger.debug("save_config 合并读盘失败，直接写入", exc_info=True)
+        _write_raw(data)
+        # 记住本次落盘内容，作为下一次 save 的基线
+        _last_saved_raw = data
+        # 内存单例同步成刚写的内容，避免后续读到过期状态。
+        # 同样用裸读 + 重新校验，不调 load_config 以免触发上面的递归。
+        if _config is not None:
+            try:
+                _config = Config.model_validate(_read_raw_file())
+            except Exception:
+                pass
+
+
+def _diff_against_base(base: dict | None, incoming: dict) -> dict:
+    """算出 incoming 相对 base 的**变更集**（浅层递归）。
+
+    这是合并的关键：只有在 base 基础上**真的变了**的叶子，才算「我要写的东西」，
+    其余一律不动。这样基于过期快照的保存就不会把别人的改动顶回去。
+
+    规则：
+      · 两边都是 dict → 递归求变更；子树无变更则不出现
+      · 值相同 → 不出现
+      · 其余（含 base 里没有的 key、数组整体变化）→ 取 incoming
+    """
+    if not isinstance(incoming, dict):
+        return incoming
+    if not isinstance(base, dict):
+        return incoming
+
+    delta: dict = {}
+    for key, val in incoming.items():
+        old = base.get(key)
+        if isinstance(val, dict) and isinstance(old, dict):
+            sub = _diff_against_base(old, val)
+            if sub:
+                delta[key] = sub
+        elif val != old:
+            delta[key] = val
+    return delta
+
+
+def _apply_delta(on_disk: dict, delta: dict) -> dict:
+    """把变更集叠加到盘上内容，返回最终要写的数据。"""
+    if not isinstance(on_disk, dict):
+        return delta
+    merged = dict(on_disk)
+    for key, val in delta.items():
+        if isinstance(val, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _apply_delta(merged[key], val)
+        else:
+            merged[key] = val
+    return merged
+
+
+def update_config(mutator) -> Config:
+    """**推荐的配置修改入口**：加锁 → 重新读盘 → 应用变更 → 写回 → 刷新单例。
+
+    与 `save_config` 的区别：save_config 用的是调用方手里那份**可能过期**的对象，
+    会把别人的并发改动覆盖掉。这里在锁内重新 `load_config()`，只把你的变更叠上去。
+
+    用法：
+        update_config(lambda c: setattr(c.tools.web_fetch, "backend", "deepseek"))
+
+    mutator 返回 None 表示原地修改；返回 Config 则用返回值。
+    """
+    global _config
+    with _SAVE_LOCK, _config_file_lock():
+        # 用无副作用裸读 + 校验拿到盘上最新内容，**不调 load_config**：
+        # 后者会补写 auth_token 并回调 save_config，在持锁状态下会引起递归写盘。
+        raw = _read_raw_file()
+        if raw:
+            fresh = Config.model_validate(raw)
+        else:
+            fresh = _config or Config()
+
+        result = mutator(fresh)
+        cfg = result if isinstance(result, Config) else fresh
+        _write_raw(_config_to_raw(cfg))
+        _config = cfg
+        return cfg
 
 
 BACKUP_DIR = CONFIG_DIR / "backup"
@@ -678,11 +982,58 @@ def _backup_config() -> None:
         print(f"[config] backup failed (ignored): {e}", file=sys.stderr)
 
 
-def _write_raw(data: dict) -> None:
+
+def _read_raw_file() -> dict:
+    """只读磁盘上的 config.yaml，**不做任何 bootstrap**（不补 auth_token、不写盘）。
+
+    这个函数存在的唯一理由：`save_config` 需要知道「盘上现在是什么」，但
+    绝对不能调用 `load_config()`——后者在缺少 auth_token 时会反向调用
+    `save_config` 补写，于是形成 `save_config → load_config → save_config`
+    的无限递归（实测：全新配置下保存一次就卡死）。
+
+    所以读盘这件事必须有一个无副作用的入口。
+    """
     import yaml
+
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        with open(CONFIG_FILE) as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        logger.debug("读取 config.yaml 失败", exc_info=True)
+        return {}
+
+def _write_raw(data: dict) -> None:
+    """原子写：先写临时文件再 rename。
+
+    为什么不能直接 `open(CONFIG_FILE, "w")`：那样在写入过程中配置文件是**半截**的，
+    另一个进程（或用户在编辑器里）恰好读到就会拿到不完整 YAML。实测踩到过
+    「配置莫名丢字段」，排查下来就是写入过程中被读到。
+
+    rename 在同一文件系统内是原子的：读者要么看到旧版本、要么看到新版本，
+    不会看到中间态。
+    """
+    import os
+    import tempfile
+
+    import yaml
+
     _backup_config()
-    with open(CONFIG_FILE, "w") as f:
-        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(CONFIG_DIR), prefix=".config.yaml.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, CONFIG_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _apply_env_overrides(raw: dict) -> None:

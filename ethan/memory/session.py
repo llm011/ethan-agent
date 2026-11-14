@@ -48,6 +48,12 @@ class Session:
     # 运行中「补充信息」待消费队列（跨刷新持久化）：[{"id": str, "content": str}]。
     # inject 时落库；agent drain / run 结束时清空。前端在工具时间线上方展示，可删除。
     pending_injected: list = field(default_factory=list)
+    # 外部内核自己的 session id（DSH 的 `session-xxx` / Claude 的 UUID）。
+    # 用户需要它去命令行定位这条对话（如 `dsh --session-id <id>`），所以落库、
+    # 在标题下展示并支持复制。原生内核下为空字符串。
+    kernel_session_id: str = ""
+    # 产生上面那个 id 的内核名（dsh / claude_code / pi …），用于 UI 标注来源
+    kernel_kind: str = ""
 
 
 def _generate_id() -> str:
@@ -620,6 +626,17 @@ class SessionStore:
             await self._db.commit()
         except Exception:
             pass
+        # Migration: sessions.kernel_session_id / kernel_kind
+        # 外部内核（DSH/Claude）自己的会话 id，用户拿它去命令行定位这条对话。
+        for _col, _ddl in (
+            ("kernel_session_id", "ALTER TABLE sessions ADD COLUMN kernel_session_id TEXT NOT NULL DEFAULT ''"),
+            ("kernel_kind", "ALTER TABLE sessions ADD COLUMN kernel_kind TEXT NOT NULL DEFAULT ''"),
+        ):
+            try:
+                await self._db.execute(_ddl)
+                await self._db.commit()
+            except Exception:
+                pass  # 已存在
         # 启动扫描：把上次进程崩溃/重启时仍处于 running 的消息标记为 interrupted。
         # running 状态只存在于进程内存（ChatRun），进程重启后这些消息永远不会被更新，
         # 必须在此兜底标记，前端才能据此显示「继续」按钮。
@@ -1197,6 +1214,25 @@ class SessionStore:
         )
         await self._db.commit()
 
+    async def save_kernel_session(
+        self, session_id: str, kernel_session_id: str, kernel_kind: str = ""
+    ) -> None:
+        """记录外部内核自己的 session id。
+
+        用户需要它去命令行定位这条对话（如 `dsh --session-id <id>`），
+        所以要落库——否则刷新页面就丢了，只剩一次性的展示。
+        """
+        if not session_id:
+            return
+        try:
+            await self._db.execute(
+                "UPDATE sessions SET kernel_session_id = ?, kernel_kind = ? WHERE id = ?",
+                (kernel_session_id or "", kernel_kind or "", session_id),
+            )
+            await self._db.commit()
+        except Exception:
+            logger.debug("保存 kernel_session_id 失败 session=%s", session_id, exc_info=True)
+
     async def load_pending_injected(self, session_id: str) -> list:
         """轻量读取会话的「补充信息」待消费队列（不加载消息）。
 
@@ -1372,7 +1408,9 @@ class SessionStore:
         from ethan.providers.base import ToolCall
 
         async with self._db.execute(
-            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web'), COALESCE(mode, ''), COALESCE(pending_injected, '[]') FROM sessions WHERE id = ?",
+            "SELECT id, title, model, created_at, updated_at, COALESCE(source, 'web'), COALESCE(mode, ''), "
+            "COALESCE(pending_injected, '[]'), COALESCE(kernel_session_id, ''), COALESCE(kernel_kind, '') "
+            "FROM sessions WHERE id = ?",
             (session_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -1387,6 +1425,9 @@ class SessionStore:
             updated_at=row[4],
             source=row[5],
             mode=row[6],
+            # 外部内核会话 id（DSH/Claude），刷新后仍要展示
+            kernel_session_id=row[8] if len(row) > 8 else "",
+            kernel_kind=row[9] if len(row) > 9 else "",
         )
         # 「补充信息」待消费队列（跨刷新/重启持久化）；坏数据直接丢弃
         try:

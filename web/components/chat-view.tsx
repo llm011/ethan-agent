@@ -163,6 +163,10 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
   const [stopping, setStopping] = useState(false);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [sessionTitle, setSessionTitle] = useState("");
+  // 外部内核自己的 session id（DSH/Claude）。随 done 事件下发，也随会话详情持久化。
+  // 用户拿它去命令行定位这条对话，所以要在标题下展示 + 可复制。
+  const [kernelSessionId, setKernelSessionId] = useState("");
+  const [kernelKind, setKernelKind] = useState("");
   const [sessionSource, setSessionSource] = useState("web");
   const [sessionPinnedAt, setSessionPinnedAt] = useState(0);
   const pinTogglingRef = useRef(false); // pin 切换 in-flight 标记，防快速双击竞态
@@ -507,7 +511,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       const stream = resumeFromMessage(activeSession, msg.id, selectedModel);
       await consumeStream(stream, messages, {
         setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-        setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
+        setSessionTitle, setKernelSessionId, setKernelKind, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
         activeSession,
         isSessionActive: sessionActiveChecker(activeSession),
       });
@@ -557,6 +561,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setPendingInjected([]);
       setSessionSource("web");
       setSessionPinnedAt(0);
+      // 切到新会话：清掉上一轮的外部内核 id，否则会显示别的对话的 session
+      setKernelSessionId("");
+      setKernelKind("");
       setMode("");
       setLoadingSession(false);
       // 重置 transient 状态：否则旧会话残留的 streaming=true 会让 handleSend
@@ -608,6 +615,9 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
       setSessionTitle(cached.title || "");
       setSessionSource(cached.source || "web");
       setSessionPinnedAt(cached.pinned_at || 0);
+      // 恢复外部内核会话 id（刷新页面后仍要能看到）
+      setKernelSessionId(cached.kernel_session_id || "");
+      setKernelKind(cached.kernel_kind || "");
       setPendingInjected(cached.pending_injected || []);
       setMessages(cachedMsgs);
       setSelectedModel(cached.model);
@@ -661,7 +671,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
               : loaded;
             await consumeStream(stream, base, {
               setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling,
-              setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
+              setSessionTitle, setKernelSessionId, setKernelKind, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected,
               activeSession: initialSessionId,
               isSessionActive: sessionActiveChecker(initialSessionId),
             }, false, ac.signal);
@@ -1091,7 +1101,7 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
     await consumeStream(
       streamChat(chatMessages, selectedModel, sessionId, { quote: sentQuote, mode, btw: isBtw, review: isReview, autoConsent, signal: ac.signal }),
       newMessages,
-      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling, setSessionTitle, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected, activeSession: sessionId, isSessionActive: sessionActiveChecker(sessionId) },
+      { setMessages, setConsentRequest, setCleanupConfirm, setAskUserRequest, setWaitForUserRequest, setBgPolling, setSessionTitle, setKernelSessionId, setKernelKind, setSessionUsage, setStopping, setStreaming: _setStreaming, setPendingInjected, activeSession: sessionId, isSessionActive: sessionActiveChecker(sessionId) },
       true,
       ac.signal,
     );
@@ -1129,6 +1139,8 @@ export function ChatView({ initialSessionId }: ChatViewProps = {}) {
         usage={sessionUsage}
         schedules={schedules}
         pinnedAt={sessionPinnedAt}
+        kernelSessionId={kernelSessionId}
+        kernelKind={kernelKind}
         onTitleChange={setSessionTitle}
         onTogglePin={async () => {
           if (!activeSession || pinTogglingRef.current) return;

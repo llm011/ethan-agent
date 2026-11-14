@@ -174,4 +174,14 @@ dependencies {
     implementation(libs.material3.window.size)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // 单元测试依赖。
+    //
+    // 之前完全没有这一段，而 src/test 下已经写了 junit4 + mockito 的测试 ——
+    // 结果 `testDebugUnitTest` 直接编译失败，Android CI 在 main 上一直是红的
+    // （v0.5.402 / main 全 failure）。补上依赖才能跑起来。
+    testImplementation(libs.junit)
+    testImplementation(libs.mockito.core)
+    testImplementation(libs.mockito.kotlin)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

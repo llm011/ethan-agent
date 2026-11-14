@@ -101,8 +101,8 @@ Next.js 16 App Router 构建的浏览器界面，通过 FastAPI SSE 与后端通
 基于 `sqlite-vec` 的向量检索，文档写入时生成 embedding，查询时做余弦相似度检索。支持从 Web UI 上传、删除文档，Agent 可通过 `knowledge_search` 工具主动检索，也可通过 `/knowledge/search` HTTP 端点被外部服务调用。
 
 ### Prompt Caching (`ethan/providers/anthropic.py`)
-Anthropic Provider 在发送 system prompt 前自动将其按 `Current time:` 分界点拆分为稳定层（identity/soul/tools_reference）和动态层（时间、记忆、Skill 匹配）。稳定层打上 `cache_control: ephemeral`，5 分钟内重复调用成本降至 0.1×。
-→ 详见 [caching.md](./caching.md)
+Anthropic Provider 在发送 system prompt 前自动将其按 `Current time:` 分界点拆分为稳定层（soul/identity/agent_protocols/tools_reference/技能简表）和动态层（时间、用户画像、纠正准则、Skill 匹配结果等）。稳定层打上 `cache_control: ephemeral`，5 分钟内重复调用成本降至 0.1×。缓存只省费用，不减少实际传输量；当前 full 档单次调用固定开销约 29.7K tokens（含工具 schema），体积实测见 `python -m tests.bench_prompt_size`。
+→ 详见 [caching.md](./caching.md) 与 [agent-loop.md](./agent-loop.md) 的系统提示词构建章节
 
 ---
 

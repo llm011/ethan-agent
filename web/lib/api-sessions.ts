@@ -25,6 +25,10 @@ export interface SessionDetail {
   pinned_at?: number;
   active_run?: boolean;
   pending_injected?: Array<{ id: string; content: string }>;
+  /** 外部内核自己的会话 id（DSH 的 session-xxx / Claude 的 UUID）。原生内核为空。 */
+  kernel_session_id?: string;
+  /** 产生上面那个 id 的内核名（dsh / claude_code / pi …） */
+  kernel_kind?: string;
   messages: {
     role: string;
     content: string;

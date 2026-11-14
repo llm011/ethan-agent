@@ -23,7 +23,7 @@ import time
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from ethan.core.config import load_config
@@ -123,6 +123,18 @@ def _ensure_server_once(command: str, deadline: float) -> None:
     raise HTTPException(504, "本地语音服务未能在预期时间内就绪")
 
 
+def _voice_backends():
+    """惰性拿 voice_backends 模块。
+
+    不写成 `from ethan.core.voice_backends import probe_all` 的局部导入，是因为那样
+    测试无法 patch（每次调用重新绑定局部名）。这里返回模块对象，调用方用
+    `_voice_backends().probe_all(...)`，测试只需 patch 模块属性即可。
+    """
+    from ethan.core import voice_backends
+
+    return voice_backends
+
+
 @router.get("/status", dependencies=[Depends(verify_token)])
 def tts_status() -> dict:
     """前端开面板时探一次：服务在不在、有没有装。不做拉起动作。"""
@@ -163,3 +175,125 @@ async def speak(req: SpeakRequest):
         media_type="audio/wav",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
+
+
+# ── 语音后端管理（TTS / ASR 可配置 + 一键配置）────────────────────────
+#
+# 与上面 /status 的区别：/status 是「当前选中的后端在跑吗」，
+# 这组是「有哪些后端可选、能不能用、怎么一键配好」。
+
+
+class VoiceSetupRequest(BaseModel):
+    backend: str = "ethan-tts"
+    auto_start: bool = True
+
+
+@router.get("/backends", dependencies=[Depends(verify_token)])
+async def voice_backends() -> dict:
+    """列出所有语音后端及其可用性。
+
+    只读探测：DSH 本地后端的 probe 会跑 `ethan-tts doctor`（约 1-2s），
+    丢线程池避免卡事件循环——同样的坑在 list_skills 里踩过一次。
+    """
+    import asyncio
+
+    from ethan.core.config import get_config
+
+    cfg = get_config()
+    data = await asyncio.to_thread(_voice_backends().probe_all, cfg.tts.command, cfg.tts.base_url)
+    data["current"] = {"tts": cfg.tts.backend, "asr": cfg.asr.backend}
+    return data
+
+
+@router.post("/setup", dependencies=[Depends(verify_token)])
+async def setup_voice_backend(req: VoiceSetupRequest) -> dict:
+    """一键配置本地语音后端。
+
+    预检不过会**直接拒绝**且不执行任何安装/下载——在注定跑不起来的机器上装
+    几百 MB 模型权重，用户白等十几分钟还拿不到有效信息（见 voice_backends 模块注释）。
+
+    安装是重操作（下 MLX + 模型），丢线程池。
+    """
+    import asyncio
+
+
+    if req.backend != "ethan-tts":
+        raise HTTPException(400, f"不支持一键配置的后端：{req.backend}")
+
+    result = await asyncio.to_thread(
+        _voice_backends().setup_ethan_tts, auto_start=req.auto_start
+    )
+    payload = result.to_dict()
+    if not result.ok:
+        # 409 而不是 500：这是「环境不满足」而非服务端故障，前端要展示原因
+        payload["detail"] = result.message
+        return JSONResponse(status_code=409, content=payload)
+    return payload
+
+
+@router.get("/setup/status", dependencies=[Depends(verify_token)])
+def setup_voice_status() -> dict:
+    """上一次一键配置的进度（前端轮询用）。"""
+
+    latest = _voice_backends().latest_setup()
+    return latest.to_dict() if latest else {"ok": False, "message": "尚未执行过配置"}
+
+
+class VoiceBackendSelect(BaseModel):
+    tts: str = ""  # 空=不改
+    asr: str = ""
+
+
+@router.post("/select", dependencies=[Depends(verify_token)])
+async def select_voice_backend(req: VoiceBackendSelect) -> dict:
+    """切换 TTS / ASR 后端。
+
+    与内核选择同一条原则：**先确认可用，再写配置**。若先写配置后校验，装不上就
+    留下「配置指向不可用后端」的脏状态，之后每次朗读/识别都失败。
+    """
+    import asyncio
+
+    from ethan.core.config import get_config, reload_config, save_config
+
+    cfg = get_config()
+    notes: list[str] = []
+
+    if req.tts:
+        if req.tts not in ("edge-tts", "ethan-tts"):
+            raise HTTPException(400, f"未知 TTS 后端：{req.tts}")
+        if req.tts == "ethan-tts":
+            data = await asyncio.to_thread(_voice_backends().probe_all, cfg.tts.command, cfg.tts.base_url)
+            probe = data["tts"]["ethan-tts"]
+            if not probe["available"]:
+                raise HTTPException(
+                    409,
+                    detail={
+                        "message": "本地语音后端不可用，未切换",
+                        "reason": probe["reason"],
+                        "checks": probe["checks"],
+                    },
+                )
+        cfg.tts.backend = req.tts
+        notes.append(f"tts → {req.tts}")
+
+    if req.asr:
+        if req.asr not in ("off", "ethan-tts"):
+            raise HTTPException(400, f"未知 ASR 后端：{req.asr}")
+        if req.asr == "ethan-tts":
+            data = await asyncio.to_thread(_voice_backends().probe_all, cfg.tts.command, cfg.tts.base_url)
+            probe = data["asr"]
+            if not probe["available"]:
+                raise HTTPException(
+                    409,
+                    detail={
+                        "message": "本地语音识别不可用，未切换",
+                        "reason": probe["reason"],
+                        "checks": probe["checks"],
+                    },
+                )
+        cfg.asr.backend = req.asr
+        notes.append(f"asr → {req.asr}")
+
+    save_config(cfg)
+    reload_config()
+    return {"ok": True, "tts": cfg.tts.backend, "asr": cfg.asr.backend, "notes": notes}

@@ -34,6 +34,44 @@ def _documents_protocol() -> str:
     )
 
 
+
+def _ocr_available() -> bool:
+    """OCR 工具是否注册（与 agent_factory 的判断保持一致）。
+
+    只在工具真的存在时才注入优先级规则——否则会教模型去用一个不存在的工具。
+    """
+    try:
+        from ethan.core.config import get_config
+
+        return bool((get_config().tools.web_fetch.api_key or "").strip())
+    except Exception:
+        return False
+
+
+def _image_priority_protocol() -> str:
+    """图片处理的优先级约定（只在 OCR 工具可用时注入）。
+
+    为什么写进 system prompt 而不是只靠工具描述：模型选工具主要看描述，但**默认
+    倾向**是「有专门工具就用专门工具」。如果不显式规定顺序，它会对每张图都调 OCR——
+    又慢又费钱，而模型自己读图是免费的、还能结合上下文理解。
+
+    这条规则的收益是可量化的：图片 → OCR 按请求计费（5 元/千次）+ 多一次网络往返；
+    图片 → 模型直读 0 成本。
+    """
+    return (
+        "<image_protocol>\n"
+        "**处理图片的优先级（必须遵守）**：\n"
+        "1. **单张/少量图片，且你需要看懂内容** → **直接把图片交给模型**"
+        "（你自己就能读图，免费、能结合上下文）。不要调 OCR。\n"
+        "2. 只有以下情况才用 `ocr_extract_text`：\n"
+        "   · PDF / Word / PPT 等**文档**（你无法把文档当图片读）\n"
+        "   · 扫描件、密集排版文字（OCR 比逐字辨认更稳）\n"
+        "   · 需要按页保留版面结构\n"
+        "3. OCR **按请求计费**且会把用户文件上传到云端（会请求授权）。"
+        "能不用就不用。\n"
+        "</image_protocol>"
+    )
+
 def build_schedule_context(workspace: str) -> str:
     """读取 APScheduler SQLite 数据库，返回当前活跃定时任务摘要（不需要启动 scheduler）。"""
     import datetime as dt
@@ -304,6 +342,8 @@ def build_system_prompt(
             "绝不要用 shell/terminal 跑 python 去硬凑这些能力。"
         )
         parts.append(_documents_protocol())
+        if _ocr_available():
+            parts.append(_image_priority_protocol())
         parts.append(_INTENT_SYSTEM_INSTRUCTION)
         if is_owner:
             parts.append(
@@ -400,19 +440,41 @@ def build_system_prompt(
         parts.append(f"<tools_reference>\n{tools_content}\n</tools_reference>")
         parts.append(_INTENT_SYSTEM_INSTRUCTION)
     parts.append(_documents_protocol())
+    # 图片处理优先级：只在 OCR 工具真的注册时注入（否则会教模型用不存在的工具）。
+    if _ocr_available():
+        parts.append(_image_priority_protocol())
 
     if skills:
-        default_list = [s for s in skills.all() if getattr(s, "category", "default") == "default"]
-        if default_list:
-            skill_lines = [
-                f"- {s.name}: {s.description[:80]}{'…' if len(s.description) > 80 else ''}" for s in default_list
+        # 技能索引全放在同一个 <available_skills> 块里，且位于「Current time:」之前——
+        # 即 Anthropic prompt cache 的稳定层。历史上这里和动态层各拼了一个同名块，
+        # 内容重叠、标签重复，还让 discoverable 触发词表每轮重新计费。合并后信息不丢：
+        #   - default 类：高频技能（fast_path 或历史命中）给描述，冷门技能只列名字
+        #   - discoverable 类：给触发词，命中时用 skill_read 拉全文
+        # 160+ 个技能全带描述时这一块要 12.5K 字符；分级后约 4K，其余靠 skill_list /
+        # skill_read 现取（模型只需知道「有这个技能」，不需要默写描述）。
+        hot_lines, cold_names = skills.build_index_block()
+        discoverable = [s for s in skills.all() if getattr(s, "category", "default") == "discoverable"]
+        if hot_lines or cold_names or discoverable:
+            lines = [
+                "[技能简表 — 完整清单、分类和描述请调 skill_list 工具，"
+                "读某个技能全文用 skill_read(name=...)。不要直接念本块回答用户「你有哪些技能」]"
             ]
-            parts.append(
-                "<available_skills>\n"
-                "[默认技能简表 — 完整清单、分类和描述请调 skill_list 工具，不要直接念本块回答用户「你有哪些技能」]\n"
-                + "\n".join(skill_lines)
-                + "\n</available_skills>"
-            )
+            lines.extend(hot_lines)
+            if cold_names:
+                lines.append(
+                    f"[以下 {len(cold_names)} 个技能本轮未列描述，按需用 skill_list 查全貌或直接 skill_read：]"
+                )
+                lines.append("- " + " | ".join(cold_names))
+            if discoverable:
+                lines.append("[按需技能 — 命中触发词时用 skill_read 拉全文：]")
+                with_trig = [s for s in discoverable if s.trigger]
+                no_trig = [s for s in discoverable if not s.trigger]
+                lines.extend(f"- {s.name}: {' | '.join(s.trigger[:5])}" for s in with_trig)
+                if no_trig:
+                    lines.append(
+                        f"- （另有 {len(no_trig)} 个工具型技能无触发词，如 bytedance-*/lark-*，调 skill_list 查看完整清单）"
+                    )
+            parts.append("<available_skills>\n" + "\n".join(lines) + "\n</available_skills>")
 
     parts.append(f"Current time: {now}")
     parts.append(
@@ -459,22 +521,8 @@ def build_system_prompt(
         if skill_ctx:
             parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
 
-    if skills:
-        discoverable = [s for s in skills.all() if getattr(s, "category", "default") == "discoverable"]
-        if discoverable:
-            with_trig = [s for s in discoverable if s.trigger]
-            no_trig = [s for s in discoverable if not s.trigger]
-            lines = [f"- {s.name}: {' | '.join(s.trigger[:5])}" for s in with_trig]
-            if no_trig:
-                lines.append(
-                    f"- （另有 {len(no_trig)} 个工具型技能无触发词，如 bytedance-*/lark-*，调 skill_list 查看完整清单）"
-                )
-            parts.append(
-                "<available_skills>\n"
-                "[按需技能简表 — 命中触发词时用 skill_read 拉全文；完整清单和分类请调 skill_list，不要念本块回答「你有哪些技能」]\n"
-                + "\n".join(lines)
-                + "\n</available_skills>"
-            )
+    # 注意：discoverable 触发词表已并入上方稳定层的 <available_skills>，
+    # 此处不再重复拼第二个同名块（曾导致标签重复 + 动态层每轮重新计费）。
 
     mode_hint = build_mode_install_hint(mode, skills, messages)
     if mode_hint:

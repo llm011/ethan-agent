@@ -1,6 +1,12 @@
 package com.ethan.agent.core.network
 
 import com.ethan.agent.core.model.AgentSettings
+import com.ethan.agent.core.model.KernelSelectRequest
+import com.ethan.agent.core.model.KernelSelectResponse
+import com.ethan.agent.core.model.KernelsResponse
+import com.ethan.agent.core.model.VoiceBackendsResponse
+import com.ethan.agent.core.model.VoiceSelectRequest
+import com.ethan.agent.core.model.VoiceSelectResponse
 import com.ethan.agent.core.model.AgendaCreateRequest
 import com.ethan.agent.core.model.AgendaEnabledRequest
 import com.ethan.agent.core.model.AgendaEnabledResponse
@@ -629,6 +635,38 @@ class EthanApiService(
         client.post(url("chat/auto-consent")) { jsonBody(body) }.body()
 
     // ── Settings 扩展：tool tiers / fast rules ──────────────────────────────
+
+    // ── AI 内核（多内核运行时）────────────────────────────────────────────
+
+    /** 列出所有内核及可用性。只读探测，不安装。 */
+    suspend fun getKernels(): KernelsResponse = client.get(url("kernels")).body()
+
+    /**
+     * 切换默认内核。
+     *
+     * 后端会**先确保依赖就绪再写配置**：装不上则返回 409 且配置不变。
+     * 所以这里失败是安全的——不会留下「配置指向不可用内核」的脏状态。
+     */
+    suspend fun selectKernel(body: KernelSelectRequest): KernelSelectResponse =
+        client.post(url("kernels/select")) { jsonBody(body) }.body()
+
+    /** 只安装依赖，不切换。 */
+    suspend fun installKernel(body: KernelSelectRequest): KernelSelectResponse =
+        client.post(url("kernels/install")) { jsonBody(body) }.body()
+
+    // ── 语音后端（TTS / ASR）──────────────────────────────────────────────
+
+    suspend fun getVoiceBackends(): VoiceBackendsResponse =
+        client.get(url("tts/backends")).body()
+
+    /**
+     * 切换 TTS / ASR 后端。
+     *
+     * 与内核选择同一条原则：**先校验可用再写配置**。不可用时后端返回 409，
+     * 配置保持原值。
+     */
+    suspend fun selectVoiceBackend(body: VoiceSelectRequest): VoiceSelectResponse =
+        client.post(url("tts/select")) { jsonBody(body) }.body()
 
     suspend fun getToolTiers(model: String? = null): ToolTiersResponse =
         client.get(url("tool-tiers")) {

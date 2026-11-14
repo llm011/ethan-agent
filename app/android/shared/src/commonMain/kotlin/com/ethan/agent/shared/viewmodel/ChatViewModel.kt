@@ -124,6 +124,10 @@ data class QueuedMessage(
 data class ChatUiState(
     val sessionId: String? = null,
     val title: String = "新对话",
+    /** 外部内核自己的 session id（DSH 的 session-xxx / Claude 的 UUID）。原生内核为空。 */
+    val kernelSessionId: String = "",
+    /** 产生上面那个 id 的内核名（dsh / claude_code / pi …） */
+    val kernelKind: String = "",
     val messages: List<UiMessage> = emptyList(),
     val models: List<ModelEntry> = emptyList(),
     val modes: List<ModeEntry> = emptyList(),
@@ -554,6 +558,9 @@ class ChatViewModel(
                                 selectedModel = upgradeModelRef(st.models, session.model),
                                 selectedMode = session.mode ?: "",
                                 messages = session.messages.toUiMessages(serverUrl),
+                                // 外部内核会话 id：刷新/重进会话后仍要展示
+                                kernelSessionId = session.kernelSessionId,
+                                kernelKind = session.kernelKind,
                                 isLoading = false,
                             )
                         }
@@ -657,6 +664,8 @@ class ChatViewModel(
                             ?.let { upgradeModelRef(st.models, it) } ?: st.selectedModel,
                         selectedMode = detail.mode ?: st.selectedMode,
                         messages = detail.messages.toUiMessages(serverUrl),
+                        kernelSessionId = detail.kernelSessionId.ifBlank { st.kernelSessionId },
+                        kernelKind = detail.kernelKind.ifBlank { st.kernelKind },
                         isReloading = false,
                     )
                 }
@@ -1346,7 +1355,17 @@ class ChatViewModel(
                         // 显式提示，避免「开关亮着却仍弹窗」被当成功能坏了
                         _state.update { it.copy(error = "当前经公网访问服务器，超级权限不可用，已降级为逐项确认") }
                     }
-                    event.done == true -> { usage = event.usage }
+                    event.done == true -> {
+                        usage = event.usage
+                        // 外部内核自己的 session id（DSH/Claude）：用户拿它去命令行定位这条对话。
+                        // 原生内核下为 null，保持空即可。
+                        // 先取出局部变量：public API property 跨模块无法 smart cast
+                        val ksid = event.kernelSessionId
+                        if (!ksid.isNullOrEmpty()) {
+                            val kkind = event.kernelKind.orEmpty()
+                            _state.update { it.copy(kernelSessionId = ksid, kernelKind = kkind) }
+                        }
+                    }
                     event.error != null -> { _state.update { it.copy(error = event.error) } }
                 }
             }

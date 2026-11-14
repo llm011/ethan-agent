@@ -214,6 +214,13 @@ data class SessionDetail(
      * 旧后端不返回该字段 → false（按「没有活跃 run」兜底，与桌面端 `detail.active_run` 同语义）。
      */
     @SerialName("active_run") val activeRun: Boolean = false,
+    /**
+     * 外部内核自己的会话 id（DSH 的 `session-xxx` / Claude 的 UUID）。
+     * 用户拿它去命令行定位这条对话，所以要在标题下展示 + 可复制。原生内核为空。
+     */
+    @SerialName("kernel_session_id") val kernelSessionId: String = "",
+    /** 产生上面那个 id 的内核名（dsh / claude_code / pi …） */
+    @SerialName("kernel_kind") val kernelKind: String = "",
 )
 
 @Serializable
@@ -608,6 +615,10 @@ data class ChatStreamEvent(
     val thought: String? = null,
     val intent: String? = null,
     @SerialName("consent_request") val consentRequest: Boolean? = null,
+    /** 外部内核自己的 session id（DSH 的 session-xxx / Claude 的 UUID），随 done 下发 */
+    @SerialName("kernel_session_id") val kernelSessionId: String? = null,
+    /** 产生上面那个 id 的内核名（dsh / claude_code / pi …） */
+    @SerialName("kernel_kind") val kernelKind: String? = null,
     @SerialName("ask_user_request") val askUserRequest: Boolean? = null,
     @SerialName("wait_for_user_request") val waitForUserRequest: Boolean? = null,
     @SerialName("request_id") val requestId: String? = null,

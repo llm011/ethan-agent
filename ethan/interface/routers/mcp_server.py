@@ -138,10 +138,27 @@ async def ask_ethan(prompt: str, session_id: str | None = None, ctx: Context | N
 
     messages = memory.build_context() + [user_msg]
 
-    collector = StreamCollector().bind(agent)
+    # 与 producers._run_generation 保持一致：MCP 入口同样要能按配置选内核，
+    # 否则「配置了外部内核但 MCP 仍走原生」会造成同一 agent 两套行为。
+    runner = agent
+    try:
+        from ethan.interface.routers.producers import _infer_task_kind, _kernel_working_dir
+        from ethan.kernel.dispatch import build_runner
+
+        runner = build_runner(
+            agent,
+            task_kind=_infer_task_kind(messages),
+            working_dir=_kernel_working_dir(agent),
+            channel="mcp",
+        )
+    except Exception:
+        logger.debug("MCP 内核选择失败，回退原生内核", exc_info=True)
+        runner = agent
+
+    collector = StreamCollector().bind(runner)
     streamer = _ProgressStreamer(ctx)
     try:
-        async for item in agent.stream_chat(messages):
+        async for item in runner.stream_chat(messages):
             if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent, InjectEvent)):
                 collector.feed(item)
                 if isinstance(item, ToolEvent):
@@ -196,8 +213,12 @@ def get_mcp_lifespan(mcp_app=None):
     return inner.router.lifespan_context
 
 
-def get_mcp_app():
-    """Return the Starlette ASGI app for mounting, with API key auth middleware."""
+def _wrap_with_auth(inner_app, *, tag: str = "mcp"):
+    """给 MCP 子应用套上 API key 鉴权中间件，返回可 mount 的 Starlette app。
+
+    抽成函数是为了让 `/mcp` 与 `/kernel-tools` 共用同一套鉴权逻辑——
+    两份实现迟早会漂移（一个改了 key 校验另一个没改），那是最危险的一类 bug。
+    """
 
     class MCPAuthMiddleware:
         def __init__(self, app: ASGIApp):
@@ -223,8 +244,6 @@ def get_mcp_app():
             response = JSONResponse({"error": "Unauthorized"}, status_code=401)
             await response(scope, receive, send)
 
-    app = mcp_server.streamable_http_app()
-
     from starlette.applications import Starlette
     from starlette.routing import Mount
 
@@ -232,9 +251,14 @@ def get_mcp_app():
     # 子应用 lifespan，挂在这儿等于没挂。session manager 由顶层 lifespan 经
     # get_mcp_lifespan() 启动（见该函数 docstring）。
     authed_app = Starlette(
-        routes=[Mount("/", app=app)],
+        routes=[Mount("/", app=inner_app)],
         middleware=[Middleware(MCPAuthMiddleware)],
     )
     # 记下 inner app，供 get_mcp_lifespan(authed_app) 取到同一个 session manager
-    authed_app._ethan_inner_mcp_app = app
+    authed_app._ethan_inner_mcp_app = inner_app
     return authed_app
+
+
+def get_mcp_app():
+    """Return the Starlette ASGI app for mounting, with API key auth middleware."""
+    return _wrap_with_auth(mcp_server.streamable_http_app(), tag="mcp")

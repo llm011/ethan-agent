@@ -283,7 +283,9 @@ export function MessageBubbleInner({ msg, isStreaming, isLast, sessionId, onQuot
   useEffect(() => {
     if (msg.role !== "assistant" || !contentRef.current) return;
     const spans = !isStreaming && annotations && annotations.length > 0
-      ? annotations.map((a) => ({ id: a.id, type: a.type, color: a.color, start: a.start, end: a.end, note: a.note }))
+      // 过滤空元素：后端/本地状态里偶尔会有空洞（splice 后未压缩等），
+      // 直接 map 会在 a.color 上抛 Cannot read properties of undefined。
+      ? annotations.filter(Boolean).map((a) => ({ id: a.id, type: a.type, color: a.color, start: a.start, end: a.end, note: a.note }))
       : [];
     applyHighlights(contentRef.current, spans, true);
   }, [annotations, msg.content, isStreaming, msg.role]);

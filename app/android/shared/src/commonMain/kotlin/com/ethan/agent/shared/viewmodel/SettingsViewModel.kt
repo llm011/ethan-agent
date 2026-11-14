@@ -7,6 +7,10 @@ import com.ethan.agent.core.model.ApiKeyCreated
 import com.ethan.agent.core.model.ApiKeyInfo
 import com.ethan.agent.core.model.ChannelInfo
 import com.ethan.agent.core.model.FastRuleOptionsResponse
+import com.ethan.agent.core.model.KernelSelectRequest
+import com.ethan.agent.core.model.KernelsResponse
+import com.ethan.agent.core.model.VoiceBackendsResponse
+import com.ethan.agent.core.model.VoiceSelectRequest
 import com.ethan.agent.core.model.FastRulesPatch
 import com.ethan.agent.core.model.FastRulesResponse
 import com.ethan.agent.core.model.KnowledgeValidateRequest
@@ -30,11 +34,17 @@ import kotlinx.coroutines.launch
 
 enum class SettingsTab {
     General, Connection, Providers, Channels, Identity, Soul, Tools, Heartbeat, Profile, PromptPreview, ApiKeys,
-    FastRules, ToolTiers,
+    FastRules, ToolTiers, Kernel, Voice,
 }
 
 data class SettingsUiState(
     val tab: SettingsTab = SettingsTab.General,
+    /** 多内核：可用内核列表与当前默认（null = 还没加载） */
+    val kernels: KernelsResponse? = null,
+    /** 语音后端：TTS/ASR 可用性与当前选择 */
+    val voiceBackends: VoiceBackendsResponse? = null,
+    /** 内核/语音操作进行中（切 Tab 时用来禁用按钮防重复提交） */
+    val kernelBusy: String = "",
     val serverUrl: String = "",
     val authToken: String = "",
     val serverVersion: String? = null,
@@ -109,6 +119,8 @@ class SettingsViewModel(
             SettingsTab.FastRules -> if (_state.value.fastRules == null) loadFastRules()
             SettingsTab.ToolTiers -> if (_state.value.toolTiers == null) loadToolTiers()
             SettingsTab.Channels -> loadLarkDepsStatus()
+            SettingsTab.Kernel -> if (_state.value.kernels == null) loadKernels()
+            SettingsTab.Voice -> if (_state.value.voiceBackends == null) loadVoiceBackends()
             else -> Unit
         }
     }
@@ -214,6 +226,56 @@ class SettingsViewModel(
             runCatching { repository.getToolTiers() }
                 .onSuccess { tiers -> _state.update { it.copy(toolTiers = tiers) } }
                 .onFailure { e -> _state.update { it.copy(error = repository.friendlyError(e)) } }
+        }
+    }
+
+    // ── AI 内核 ──────────────────────────────────────────────────────────
+
+    fun loadKernels() {
+        viewModelScope.launch {
+            runCatching { repository.getKernels() }
+                .onSuccess { data -> _state.update { it.copy(kernels = data) } }
+                .onFailure { e -> _state.update { it.copy(error = repository.friendlyError(e)) } }
+        }
+    }
+
+    /**
+     * 切换内核。
+     *
+     * 后端会先确保依赖就绪再写配置；装不上返回 409 且配置不变。
+     * 所以失败时只需把原因显示出来，不用担心留下脏状态。
+     */
+    fun selectKernel(kind: String) {
+        viewModelScope.launch {
+            _state.update { it.copy(kernelBusy = kind, error = null) }
+            runCatching { repository.selectKernel(KernelSelectRequest(kind = kind)) }
+                .onSuccess { loadKernels() }
+                .onFailure { e ->
+                    _state.update { it.copy(error = repository.friendlyError(e), kernelBusy = "") }
+                }
+            _state.update { it.copy(kernelBusy = "") }
+        }
+    }
+
+    // ── 语音后端 ─────────────────────────────────────────────────────────
+
+    fun loadVoiceBackends() {
+        viewModelScope.launch {
+            runCatching { repository.getVoiceBackends() }
+                .onSuccess { data -> _state.update { it.copy(voiceBackends = data) } }
+                .onFailure { e -> _state.update { it.copy(error = repository.friendlyError(e)) } }
+        }
+    }
+
+    fun selectVoiceBackend(tts: String = "", asr: String = "") {
+        viewModelScope.launch {
+            _state.update { it.copy(kernelBusy = if (tts.isNotEmpty()) "tts" else "asr", error = null) }
+            runCatching { repository.selectVoiceBackend(VoiceSelectRequest(tts = tts, asr = asr)) }
+                .onSuccess { loadVoiceBackends() }
+                .onFailure { e ->
+                    _state.update { it.copy(error = repository.friendlyError(e), kernelBusy = "") }
+                }
+            _state.update { it.copy(kernelBusy = "") }
         }
     }
 

@@ -1,10 +1,9 @@
 """settings 路由：agent/system/provider/channel 配置 + onboarding + upload + prompt preview。"""
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from ethan.core.config import get_config, reload_config, save_config
+from ethan.core.config import get_config, reload_config, save_config, update_config
 from ethan.core.provider_presets import PROVIDER_PRESETS
 
 from .deps import create_agent, verify_token
@@ -596,21 +595,54 @@ async def install_lark_deps():
 
 @router.get("/system-prompt-preview", dependencies=[Depends(verify_token)])
 async def system_prompt_preview(model: str | None = None):
+    import json
+
     from ethan.providers.base import Message
+
     agent = create_agent(model)
-    dummy_messages = [Message(role="user", content="(preview)")]
+    # 用一条不含技能触发词的中性消息：预览应反映「典型一轮」的 system prompt。
+    # 曾用 "(preview)"，它意外命中技能匹配，多注入一块 <relevant_skills>（约 3.2K 字符），
+    # 导致预览比真实对话还长。
+    dummy_messages = [Message(role="user", content="hello")]
     system = agent._build_system(dummy_messages, fast=False)
-    approx_tokens = len(system) // 2
+    # 中文为主，按 3 字符/token 估算比 //2 更接近真实；system 与 tools 用同一口径。
+    approx_tokens = len(system) // 3
     tools = agent._registry.all()
     tool_count = len(tools)
+    # 旧实现写死 tool_count * 70，把 67 个工具估成 ~4.7K tokens，而真实 schema
+    # 序列化后是 55K+ 字符（~18K tokens）——低估 4 倍。改为按真实 schema 长度算。
+    schema_chars = len(json.dumps(
+        [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in tools],
+        ensure_ascii=False,
+    ))
+    approx_tools_tokens = schema_chars // 3
+
+    # 上面是「注册表全量」口径（工具列表展示用）。真实对话只广播当前路由档的工具，
+    # 两者差很多（实测 full 档 41 个 vs 全量 67 个）。单独算一份，避免 Total 被误读成
+    # 真实每轮开销。_select_route 返回的 tools 可能是名字或对象，统一取对象。
+    _route, _sys, _names, _iters = agent._select_route(dummy_messages)
+    broadcast_tools = []
+    for _n in _names:
+        _t = agent._registry.get(_n) if isinstance(_n, str) else _n
+        if _t is not None:
+            broadcast_tools.append(_t)
+    broadcast_chars = len(json.dumps(
+        [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in broadcast_tools],
+        ensure_ascii=False,
+    ))
     return {
         "system_prompt": system,
         "tools": [{"name": t.name, "description": t.description, "parameters": t.parameters, "fast_path": t.fast_path} for t in tools],
         "approx_tokens": approx_tokens,
-        "approx_tools_tokens": tool_count * 70,
+        "approx_tools_tokens": approx_tools_tokens,
+        "approx_tools_chars": schema_chars,
         "tool_count": tool_count,
-        "approx_total_tokens": approx_tokens + tool_count * 70,
+        "approx_total_tokens": approx_tokens + approx_tools_tokens,
         "chars": len(system),
+        # 真实广播档口径
+        "broadcast_tool_count": len(broadcast_tools),
+        "approx_broadcast_tools_tokens": broadcast_chars // 3,
+        "approx_broadcast_total_tokens": approx_tokens + broadcast_chars // 3,
     }
 
 
@@ -736,3 +768,159 @@ async def validate_knowledge_backend(req: KnowledgeValidateRequest):
         return {"ok": ok, "message": message}
     except Exception as e:
         return {"ok": False, "message": f"验证失败: {e}"}
+
+
+# ── 多内核管理 ─────────────────────────────────────────────────────
+#
+# 设计要点：**默认不装任何外部内核依赖**。用户在设置页选中某个内核时才触发安装
+# （见 ethan/kernel/deps.py 的模块 docstring）。所以这里的语义是：
+#   GET  /kernels          → 列出所有内核及其可用性/安装状态（不发安装）
+#   POST /kernels/install  → 「选中即安装」：确保依赖就绪，失败则返回原因
+#   POST /kernels/select   → 设为默认内核（会先确保依赖就绪）
+
+
+class KernelSelectRequest(BaseModel):
+    kind: str
+    # 依赖缺失时是否自动安装。默认 True——这就是「选了就触发安装」。
+    # 显式传 False 可只做能力探测，不发安装。
+    auto_install: bool = True
+
+
+@router.get("/kernels", dependencies=[Depends(verify_token)])
+async def list_kernels():
+    """列出所有内核：可用性、能力声明、依赖安装状态。
+
+    前端据此渲染内核选择器：不可用的显示「点击安装」，已安装的显示可切换。
+    """
+    from ethan.kernel.deps import all_deps_status, latest_status
+    from ethan.kernel.runtime import get_kernel_registry
+
+    registry = get_kernel_registry()
+    deps_by_kind = {d["kind"]: d for d in all_deps_status()}
+
+    items = []
+    for item in registry.list_status():
+        kind = item["kind"]
+        dep = deps_by_kind.get(kind)
+        item = dict(item)
+        # 原生内核没有外部依赖；其余把安装命令和提示一并给前端
+        item["install_command"] = dep["install_command"] if dep else ""
+        item["install_hint"] = dep["hint"] if dep else ""
+        items.append(item)
+
+    import ethan.core.config as _cfg
+    current = _cfg.get_config().defaults.kernel
+    latest = latest_status()
+    return {
+        "kernels": items,
+        "default": current.default or "ethan",
+        "task_rules": current.task_rules,
+        "last_install": latest.to_dict() if latest else None,
+    }
+
+
+@router.post("/kernels/install", dependencies=[Depends(verify_token)])
+async def install_kernel(req: KernelSelectRequest):
+    """确保某个内核的依赖就绪，缺失则自动安装。
+
+    这是「用户选了就触发安装，而不是手动敲命令」的实现点。
+    安装是阻塞操作（npm install 可能几十秒），所以丢线程池，避免卡住事件循环
+    ——与 list_skills 里 167 个 SKILL.md 同样的教训。
+    """
+    import asyncio
+
+    from ethan.kernel.deps import ensure_installed
+    from ethan.kernel.runtime import KernelKind
+
+    try:
+        kind = KernelKind.parse(req.kind)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not req.auto_install:
+        from ethan.kernel.deps import detect
+
+        ok, reason = detect(kind)
+        return {"ok": ok, "kind": kind.value, "installed": ok, "reason": reason}
+
+    status = await asyncio.to_thread(ensure_installed, kind)
+    return {"ok": status.installed, **status.to_dict()}
+
+
+@router.post("/kernels/select", dependencies=[Depends(verify_token)])
+async def select_kernel(req: KernelSelectRequest):
+    """设为默认内核。
+
+    顺序很重要：**先确保依赖就绪，再写配置**。若先写配置再装依赖，装失败就会
+    留下「配置指向一个不可用内核」的状态，导致后续所有对话降级 + 每次打警告。
+    """
+    import asyncio
+
+    from ethan.kernel.deps import detect, ensure_installed
+    from ethan.kernel.runtime import KernelKind
+
+    try:
+        kind = KernelKind.parse(req.kind)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if req.auto_install:
+        status = await asyncio.to_thread(ensure_installed, kind)
+        if not status.installed:
+            # 关键：不写配置，保持用户原来的内核。明确告知原因。
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f"{kind.value} 依赖未就绪，未切换（已保留原内核）",
+                    "reason": status.last_error,
+                    "install_command": status.install_command,
+                    "hint": status.hint,
+                },
+            )
+    else:
+        ok, reason = detect(kind)
+        if not ok:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": f"{kind.value} 不可用，未切换", "reason": reason},
+            )
+
+    # 用 update_config 而不是「get_config() 改字段 + save_config」：
+    # 后者会把内存单例也改掉，导致 save_config 的「变更集」恒为空
+    # （基线 == 待写对象），表现为「接口返回成功但没落盘」——实测踩到。
+    # update_config 在锁内重新读盘、应用变更、写回，语义正确。
+    target = "" if kind == KernelKind.ETHAN else kind.value
+
+    def _apply(c):
+        c.defaults.kernel.default = target
+
+    update_config(_apply)
+    return {"ok": True, "default": target or "ethan"}
+
+
+class KernelTaskRulesRequest(BaseModel):
+    task_rules: dict[str, str]
+
+
+@router.post("/kernels/task-rules", dependencies=[Depends(verify_token)])
+async def set_kernel_task_rules(req: KernelTaskRulesRequest):
+    """设置「按任务类型选内核」的映射。空字符串 value 表示删除该规则。"""
+    from ethan.kernel.runtime import KernelKind
+
+    cleaned: dict[str, str] = {}
+    for task, kind_raw in (req.task_rules or {}).items():
+        if not kind_raw:
+            continue
+        try:
+            kind = KernelKind.parse(kind_raw)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"任务 {task!r}: {e}")
+        if kind != KernelKind.ETHAN:
+            # 原生是默认值，不需要显式写规则
+            cleaned[task] = kind.value
+
+    cfg = get_config()
+    cfg.defaults.kernel.task_rules = cleaned
+    save_config(cfg)
+    reload_config()
+    return {"ok": True, "task_rules": cleaned}

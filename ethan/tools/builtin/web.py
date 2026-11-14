@@ -1,5 +1,6 @@
 """Web Fetch Tool — 获取网页内容并提取文本。"""
 import hashlib
+import logging
 import re
 import time
 from pathlib import Path
@@ -7,6 +8,8 @@ from pathlib import Path
 import httpx
 
 from ethan.tools.base import BaseTool
+
+logger = logging.getLogger(__name__)
 
 
 class WebFetchTool(BaseTool):
@@ -44,6 +47,25 @@ class WebFetchTool(BaseTool):
     }
 
     async def run(self, url: str, method: str = "GET", body: str = "", content_type: str = "") -> str:
+        # 配置了 DeepSeek Fetch 后端且是纯 GET 时优先走它。
+        # 为什么只在 GET 时走：DeepSeek Fetch 的语义是「抓一个网页返回 Markdown」，
+        # 而本工具还承担「调 REST API / POST 结构化数据」的职责，那种请求不能
+        # 被替换成网页抓取，否则会静默丢掉请求体。
+        cfg = self._fetch_cfg()
+        if (
+            cfg
+            and cfg.backend == "deepseek"
+            and cfg.api_key
+            and method.upper() == "GET"
+            and not body
+        ):
+            text = await self._deepseek_fetch(url, cfg)
+            if text is not None:
+                return text
+            if not cfg.fallback_to_http:
+                return f"Fetch failed: DeepSeek Fetch 未能取到内容（{url}）"
+            # fallback_to_http：继续走下面的内置路径，多一条路总比直接失败好
+
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -107,6 +129,79 @@ class WebFetchTool(BaseTool):
             return f"Fetch failed: HTTP {e.response.status_code} for {url}"
         except Exception as e:
             return f"Fetch failed: {e}"
+
+
+    # ── DeepSeek Fetch 后端 ──────────────────────────────────────────
+
+    @staticmethod
+    def _fetch_cfg():
+        try:
+            from ethan.core.config import load_config
+
+            return load_config().tools.web_fetch
+        except Exception:
+            return None
+
+    async def _deepseek_fetch(self, url: str, cfg) -> str | None:
+        """用 DeepSeek Fetch 抓页面。失败返回 None（交给调用方决定是否 fallback）。
+
+        失败**不抛异常**：这个后端的定位是「增强」，内置 httpx 路径还在后面兜着。
+        抛出去只会让一次抓取变成一次报错，对用户没有好处。
+
+        保留既有约定的两点：
+          · 超长正文落 /tmp 返回预览（否则 10 万字原文灌进上下文）
+          · 返回的是 Markdown 正文，调用方按 text/html 之外的类型直接使用
+        """
+        base = (cfg.base_url or "https://api.deepseek.com").rstrip("/")
+        try:
+            # 代理：与内置路径一致，只认 config 的 network.proxy，不读环境变量
+            proxy_url = None
+            try:
+                from ethan.core.config import load_config
+
+                proxy_url = load_config().network.proxy or None
+            except Exception:
+                pass
+            async with httpx.AsyncClient(
+                timeout=45.0, proxy=proxy_url, trust_env=False
+            ) as client:
+                resp = await client.post(
+                    f"{base}/v1/tools/fetch",
+                    headers={
+                        "Authorization": f"Bearer {cfg.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"url": url},
+                )
+                if resp.status_code != 200:
+                    # 402 余额不足 / 403 安全策略拒绝 / 404 取不到内容 / 429 超 QPS
+                    logger.debug(
+                        "[web_fetch] DeepSeek fetch %s -> HTTP %s", url, resp.status_code
+                    )
+                    return None
+                data = resp.json()
+        except Exception as e:  # noqa: BLE001 - 增强后端失败不该让抓取失败
+            logger.debug("[web_fetch] DeepSeek fetch 异常 %s: %s", url, e)
+            return None
+
+        content = (data.get("content") or "").strip()
+        title = (data.get("title") or "").strip()
+        if not content:
+            return None
+
+        if len(content) > 8000:
+            ts = int(time.time())
+            url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+            filepath = f"/tmp/web_fetch_{ts}_{url_hash}.md"
+            header = f"# {title}\n\n" if title else f"# Source: {url}\n\n"
+            Path(filepath).write_text(header + content, encoding="utf-8")
+            return (
+                f"[网页内容过长（{len(content)} 字），已保存到文件 {filepath}]\n\n"
+                f"如需使用完整内容，请用 file_read 读取该文件。\n"
+                f"如仅需特定信息，可用 rg_search 搜索关键词。\n\n"
+                f"页面标题和前 500 字预览：\n{content[:500]}"
+            )
+        return f"{title}\n\n{content}" if title else content
 
     def _extract_text(self, html: str) -> str:
         """从 HTML 中提取可读文本 + 图片 URL 列表。
