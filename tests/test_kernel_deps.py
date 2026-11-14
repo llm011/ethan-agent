@@ -216,3 +216,116 @@ def test_all_deps_status_shape():
         assert set(row) >= {
             "kind", "binary", "installed", "reason", "install_command", "hint",
         }
+
+
+# ── PATH 探测：daemon 进程看不到交互 shell 的 PATH ─────────────────
+
+
+def test_locate_finds_binary_outside_process_path(monkeypatch, tmp_path):
+    """核心场景：服务进程 PATH 很短，但 CLI 装在 ~/.npm-global/bin 之类的目录。
+
+    真实踩到过：命令行 `which claude` 正常，Web UI 却显示「未安装」——
+    因为 `ethan serve` 被 launchd 拉起，PATH 里没有 nvm / npm-global。
+    """
+    import os
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    exe = fake_bin / "pi"
+    exe.write_text("#!/bin/sh\necho ok\n")
+    exe.chmod(0o755)
+
+    # 进程 PATH 里没有它
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    # 候选目录只留我们的临时目录（否则会搜到开发者机器上真实的 pi）
+    monkeypatch.setattr(kdeps, "_COMMON_BIN_DIRS", (str(fake_bin),))
+    monkeypatch.setattr(kdeps, "_NVM_GLOB", str(tmp_path / "nope" / "*" / "bin"))
+
+    assert kdeps.locate(KernelKind.PI) == str(exe)
+    # 找到后必须把目录补进 PATH，否则后续 subprocess 起不来
+    assert str(fake_bin) in os.environ["PATH"]
+
+
+def test_locate_returns_none_when_really_missing(monkeypatch, tmp_path):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setattr(kdeps, "_COMMON_BIN_DIRS", (str(tmp_path),))
+    monkeypatch.setattr(kdeps, "_NVM_GLOB", str(tmp_path / "nope" / "*" / "bin"))
+    assert kdeps.locate(KernelKind.PI) is None
+
+
+def test_locate_finds_non_executable_file_as_missing(monkeypatch, tmp_path):
+    """不是可执行文件的同名文件不能被当成 CLI。"""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "pi").write_text("data")  # 无执行权限
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setattr(kdeps, "_COMMON_BIN_DIRS", (str(fake_bin),))
+    monkeypatch.setattr(kdeps, "_NVM_GLOB", str(tmp_path / "nope" / "*" / "bin"))
+    assert kdeps.locate(KernelKind.PI) is None
+
+
+# ── Codex 内核：不能覆盖用户自己的 provider 配置 ──────────────
+
+
+def test_codex_kernel_skips_provider_override(monkeypatch):
+    """ACP 的 codex 层会强制改 provider（为委派场景设计）。
+
+    作为**内核**用时必须尊重用户 ~/.codex/config.toml 里的配置，
+    否则会报 `unknown provider for model gpt-5.5`（实测踩到）。
+    """
+
+    from ethan.acp.agent_codex import _codex_provider_overrides
+
+    monkeypatch.delenv("ETHAN_CODEX_NO_PROVIDER_OVERRIDE", raising=False)
+    monkeypatch.setenv("ETHAN_CODEX_NO_PROVIDER_OVERRIDE", "1")
+    args, env, model = _codex_provider_overrides()
+    assert args == [], "内核模式不该注入 provider 覆盖参数"
+    assert env == {}
+    assert model == ""
+
+
+def test_codex_kernel_restores_env_after_run(monkeypatch):
+    """跑完要恢复原值——委派工具（delegate_coding）还要用覆盖逻辑。"""
+    import os
+
+    from ethan.kernel.acp_kernel import CodexKernel
+    from ethan.kernel.runtime import KernelRequest
+
+    monkeypatch.delenv("ETHAN_CODEX_NO_PROVIDER_OVERRIDE", raising=False)
+
+    captured = {}
+
+    async def _fake_super_run(self, request, context=None):
+        captured["during"] = os.environ.get("ETHAN_CODEX_NO_PROVIDER_OVERRIDE")
+        yield "ok"
+
+    monkeypatch.setattr(
+        "ethan.kernel.claude_kernel.ACPKernelBase.run", _fake_super_run
+    )
+
+    async def go():
+        return [e async for e in CodexKernel().run(KernelRequest())]
+
+    import asyncio
+
+    assert asyncio.run(go()) == ["ok"]
+    assert captured["during"] == "1", "执行期间必须置位"
+    assert "ETHAN_CODEX_NO_PROVIDER_OVERRIDE" not in os.environ, "执行完必须清理"
+
+
+# ── working_dir：绝不能是根目录 ────────────────────────────
+
+
+def test_kernel_working_dir_never_empty_when_workspace_set():
+    """进程 cwd 是 "/" 时（launchd 拉起的常见情况），外部 CLI 会失败。
+
+    实测：codex 报 `Not inside a trusted directory`。所以必须兜到 workspace。
+    """
+    from ethan.interface.routers.producers import _kernel_working_dir
+
+    class _Agent:
+        _working_dir = ""
+
+    wd = _kernel_working_dir(_Agent())
+    assert wd, "不应返回空串（会让外部 CLI 落到 /）"
+    assert wd != "/"

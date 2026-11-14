@@ -191,13 +191,22 @@ def test_external_kernels_declare_no_ethan_context():
         assert rt.capabilities.consent is False
 
 
-def test_external_kernel_unavailable_when_cli_missing(monkeypatch):
-    """CLI 不在时 available() 必须明确返回 False + 原因（含安装提示）。"""
+def test_external_kernel_unavailable_when_cli_missing(monkeypatch, tmp_path):
+    """CLI 不在时 available() 必须明确返回 False + 原因（含安装提示）。
+
+    注意：不能只 mock `shutil.which`——`detect()` 走的是 `deps.locate()`，
+    它还会额外扫候选目录（~/.npm-global/bin、nvm 各版本…）。所以这里把
+    候选目录也清空，否则会扫到开发者机器上真实安装的 CLI。
+    """
     import shutil
 
+    from ethan.kernel import deps as kdeps
     from ethan.kernel.claude_kernel import ClaudeCodeKernel
 
     monkeypatch.setattr(shutil, "which", lambda _: None)
+    monkeypatch.setattr(kdeps, "_COMMON_BIN_DIRS", (str(tmp_path),))
+    monkeypatch.setattr(kdeps, "_NVM_GLOB", str(tmp_path / "nope" / "*" / "bin"))
+
     ok, reason = ClaudeCodeKernel().available()
     assert ok is False
     assert "claude" in reason

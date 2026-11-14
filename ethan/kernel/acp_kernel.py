@@ -23,6 +23,35 @@ class CodexKernel(ACPKernelBase):
     def install_hint(self) -> str:
         return "npm i -g @openai/codex"
 
+    async def run(self, request, context=None):
+        """Codex 内核在执行前先关掉 ACP 层的 provider 覆盖。
+
+        ACP 的 `_codex_provider_overrides` 是为「委派编码任务」设计的：它强制把
+        codex 指向 Ethan 自己的 cliproxy provider，并写死 `ETHAN_CODEX_MODEL`
+        （默认 gpt-5.5）。这在委派场景是对的——要复用 Ethan 的额度。
+
+        但作为**内核**用时这是错的：
+          · 用户自己的 ~/.codex/config.toml 里已经配好了 provider/model，
+            覆盖它等于无视用户配置
+          · 写死的 gpt-5.5 在 cliproxy 上没有 → 实测报
+            `unknown provider for model gpt-5.5`
+
+        所以用环境变量让 ACP 层跳过覆盖，走用户原生配置。
+        """
+        import os
+
+        old = os.environ.get("ETHAN_CODEX_NO_PROVIDER_OVERRIDE")
+        os.environ["ETHAN_CODEX_NO_PROVIDER_OVERRIDE"] = "1"
+        try:
+            async for event in super().run(request, context):
+                yield event
+        finally:
+            # 恢复原值：委派工具（delegate_coding）还要用覆盖逻辑
+            if old is None:
+                os.environ.pop("ETHAN_CODEX_NO_PROVIDER_OVERRIDE", None)
+            else:
+                os.environ["ETHAN_CODEX_NO_PROVIDER_OVERRIDE"] = old
+
 
 class OpenCodeKernel(ACPKernelBase):
     kind = KernelKind.OPENCODE

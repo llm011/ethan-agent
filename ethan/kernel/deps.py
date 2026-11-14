@@ -132,12 +132,96 @@ def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+# 外部 CLI 的常见安装位置。
+#
+# 为什么必须自己找而不能只信 `shutil.which`：**服务进程的 PATH 和我们交互式 shell
+# 的 PATH 不一样**。`ethan serve` 常由 launchd / systemd / watchdog 拉起，PATH 往往只有
+# /usr/bin:/bin:/opt/homebrew/bin 这几条，而 npm 全局包在 ~/.npm-global/bin、
+# nvm 管理的 node 在 ~/.nvm/versions/node/<ver>/bin、opencode 在 ~/.opencode/bin。
+#
+# 实测踩到过：命令行里 `which claude` 正常，但 Web UI 的内核列表显示「未安装」——
+# 因为服务进程根本看不到那个目录。这会让用户以为装失败，然后重复安装。
+_COMMON_BIN_DIRS: tuple[str, ...] = (
+    "~/.npm-global/bin",
+    "~/.local/bin",
+    "~/.bun/bin",
+    "~/.opencode/bin",
+    "~/.volta/bin",
+    "~/.pnpm-global/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+)
+
+# nvm 的目录带版本号，需要 glob 展开
+_NVM_GLOB = "~/.nvm/versions/node/*/bin"
+
+
+def _candidate_dirs() -> list[str]:
+    """所有可能藏着外部 CLI 的目录（已展开、去重、只保留存在的）。"""
+    import glob
+
+    out: list[str] = []
+    for raw in _COMMON_BIN_DIRS:
+        d = os.path.expanduser(raw)
+        if os.path.isdir(d):
+            out.append(d)
+    for d in glob.glob(os.path.expanduser(_NVM_GLOB)):
+        if os.path.isdir(d):
+            out.append(d)
+    # 版本号大的排前面（新版本优先），避免同时装了 v22/v24 时命中旧的
+    out.sort(key=lambda p: ("node" in p, p), reverse=True)
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for d in out:
+        if d not in seen:
+            seen.add(d)
+            uniq.append(d)
+    return uniq
+
+
 def _with_extra_paths(spec: KernelDepsSpec) -> None:
-    """把内核自带的 bin 目录补进当前进程 PATH（opencode 是典型例子）。"""
+    """把内核自带的与常见的 bin 目录补进当前进程 PATH。
+
+    这不仅是探测需要——找到之后**必须真的写进 os.environ["PATH"]**，
+    否则后面 `subprocess` 起 CLI 时照样找不到可执行文件。
+    """
+    wanted: list[str] = []
     for p in spec.extra_paths:
-        expanded = os.path.expanduser(p)
-        if os.path.isdir(expanded) and expanded not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = expanded + os.pathsep + os.environ.get("PATH", "")
+        wanted.append(os.path.expanduser(p))
+    wanted.extend(_candidate_dirs())
+
+    cur = os.environ.get("PATH", "")
+    cur_parts = cur.split(os.pathsep)
+    prepend = [d for d in wanted if os.path.isdir(d) and d not in cur_parts]
+    if prepend:
+        os.environ["PATH"] = os.pathsep.join(prepend + [cur])
+
+
+def locate(kind: KernelKind) -> str | None:
+    """定位内核 CLI 的绝对路径；找不到返回 None。
+
+    先用补全后的 PATH 走 `shutil.which`，再逐个候选目录直接找文件——后者能兜住
+    「目录在候选表里但没进 PATH」的情况（`_with_extra_paths` 有幂等判断，
+    理论上已经补过，这里再兜一层）。
+    """
+    spec = KERNEL_DEPS.get(kind)
+    if spec is None:
+        return None
+    _with_extra_paths(spec)
+
+    found = shutil.which(spec.binary)
+    if found:
+        return found
+
+    for d in _candidate_dirs():
+        cand = os.path.join(d, spec.binary)
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            # 找到了顺手把这个目录放进 PATH，供后续子进程启动
+            cur = os.environ.get("PATH", "")
+            if d not in cur.split(os.pathsep):
+                os.environ["PATH"] = d + os.pathsep + cur
+            return cand
+    return None
 
 
 def detect(kind: KernelKind) -> tuple[bool, str]:
@@ -146,8 +230,7 @@ def detect(kind: KernelKind) -> tuple[bool, str]:
     if spec is None:
         return True, ""  # 无依赖声明的内核（如原生）永远可用
 
-    _with_extra_paths(spec)
-    if shutil.which(spec.binary) is None:
+    if locate(kind) is None:
         return False, f"未安装 {spec.binary}（{spec.hint}）" if spec.hint else f"未安装 {spec.binary}"
     return True, ""
 

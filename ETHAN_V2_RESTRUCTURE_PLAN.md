@@ -237,30 +237,60 @@ kernel:
 选择顺序：显式 > `task_rules[task_kind]` > `default` > Ethan 兜底。
 选到不可用的内核会记警告并继续降级——**绝不因此让对话失败**。
 
-### 已实测（真机）
+### 已实测（真机端到端）
 
-**Claude Code**（`/tmp/kernel-test`，验证工具事件 + 非流式文本）：
+**验证方式**：`scripts/e2e_kernels.py` —— 打真实 HTTP、走真实 SSE、真起外部 CLI
+子进程。单测只能验证逻辑，验证不了「用户点一下之后到底发生了什么」。
 
-```
-[ToolEvent] state=start tool=Read args=file_path=.../calc.py
-[ToolEvent] state=done  tool=Read preview=1  def add(a,b): return a-b
-[TEXT] 不对，`add` 里写成了 `a-b`（减法），应该返回 `a+b`。
-```
-
-**Pi**（`/tmp/pi-test`，验证 token 级流式 + 工具事件）：
-
-```
-[ToolEvent] state=start tool=read args=path=m.py
-[ToolEvent] state=done  tool=read preview=def mul(a,b): return a+b
-[ThinkingEvent]
-[TEXT] 不对  [TEXT] ，  [TEXT] mul  ... （逐 delta 流式）
+```bash
+python scripts/e2e_kernels.py --quick     # 只查列表
+python scripts/e2e_kernels.py             # 全量（切内核 + 真对话）
+python scripts/e2e_kernels.py --kernel pi # 单个
 ```
 
-Pi 的粒度比 Claude Code 细——`text_delta` 是真 token 级，Claude Code 的
-stream-json 是按 message 粒度。
+结果（2026-11-14）：
 
-**踩到的坑**：Pi 的参数是 `--mode json`，不是 Claude Code 那族的
-`--output-format json`。写错会得到 `Unknown option: --output-format`。
+| 内核 | 耗时(total) | 结果 |
+|---|---|---|
+| ethan | 3.5s | ✓ |
+| claude_code | 6.4s | ✓ |
+| codex | 2.8s | ✓ |
+| opencode | 5.6s | ✓ |
+| pi | 2.2s | ✓ |
+| dsh | 1.7s | ✗ 缺凭证（环境问题，见下） |
+
+**端到端发现的三个 bug（单测完全没暴露）**：
+
+1. **服务进程 PATH 与交互 shell 不同**。`ethan serve` 由 launchd 拉起，PATH 只有
+   `/opt/homebrew/bin:/usr/bin:/bin`，看不到 `~/.npm-global/bin` 和 nvm 目录。
+   Web UI 显示「未安装」，但命令行 `which claude` 明明正常。修法：`deps.locate()`
+   主动扫候选目录（含 nvm 通配），找到后把目录写进 `os.environ["PATH"]`
+   （否则子进程照样起不来）。
+
+2. **codex 的 provider 被 ACP 层强行覆盖**。ACP 的 `_codex_provider_overrides`
+   是为委派场景设计的（复用 Ethan 的 cliproxy，写死 `gpt-5.5`），但那个模型在
+   cliproxy 上不存在 → `unknown provider for model gpt-5.5`。作为内核用时必须
+   尊重用户自己的 `~/.codex/config.toml`，加了 `ETHAN_CODEX_NO_PROVIDER_OVERRIDE`
+   开关（跑完恢复，委派工具不受影响）。另外补了 `--skip-git-repo-check`：
+   codex 默认拒绝在非 git 目录跑。
+
+3. **working_dir 落到了 `/`**。进程 cwd 是根目录时，codex 直接
+   `Not inside a trusted directory`，claude 行为也不可预期。修法：
+   `_kernel_working_dir` 兜底到用户 workspace，绝不返回空串。
+
+**会话污染（我的失误，已修）**：第一版 E2E 脚本没传 `session_id`，每发一条
+就在用户会话列表里新建一条「1+1 等于几」——跑完留了 7 个垃圾会话，已全部清理。
+现在脚本用固定测试会话 + `finally` 自动删除，实测跑前跑后会话数都是 777。
+
+### DSH 需要自己的凭证（环境问题，非代码 bug）
+
+```
+[DSH 错误] llm-deepseek: no API key for provider route "deepseek-official"
+```
+
+`~/.dsh/profiles/headless/` 没配 provider（`dsh-tui` profile 配了 `BUDDY_PROXY_API_KEY`，
+headless 没有）。这是用户侧配置，不该由代码擅自改用户的 profile。
+正确做法是 UI 把原始错误透出来 + 给配置指引。
 
 ### 已知取舍
 
@@ -273,8 +303,11 @@ stream-json 是按 message 粒度。
 
 ### 待做
 
-- **UI**：设置页加内核选择器（`KernelRegistry.list_status()` 已提供数据）
-- **对比可观测**：`KernelStats` 已记录耗时/工具数/token，还需落库 + 前端展示
+- **Android 端内核 Tab**：desktop/web 已接，Android 的 `SettingsScreen` 需要先确认
+  它那套 `SettingsUiState` 的数据通路（刚恢复成能编译的版本，40+ 回调里哪些是真通路
+  还没逐个核实）
+- **对比可观测**：`KernelStats` 已记录耗时/工具数/token，但还没落库 + 前端展示。
+  `usage` 对外部内核恒为 0（CLI 不返回 token），做对比时要标注这个局限
 - **按任务自动选**：`_infer_task_kind` 目前是关键词粗判，可换成模型分类
 
 ## 六、教训

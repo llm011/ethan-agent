@@ -524,7 +524,7 @@ async def _run_generation(
                             ttfb_ms=collector.ttfb_ms,
                             total_ms=collector.total_ms,
                             status="stopped",
-                            model=agent._provider.model,
+                            model=runner.model,
                         ),
                     )
                     await store.touch(session_id, mark_read=bool(run.subscribers))
@@ -549,7 +549,7 @@ async def _run_generation(
                     ttfb_ms=collector.ttfb_ms,
                     total_ms=collector.total_ms,
                     status="stopped",
-                    model=agent._provider.model,
+                    model=runner.model,
                 )
                 await store.save_message(session_id, stopped_msg)
                 await store.touch(session_id, mark_read=bool(run.subscribers))
@@ -607,7 +607,7 @@ async def _run_generation(
                 ttfb_ms=collector.ttfb_ms,
                 total_ms=collector.total_ms,
                 status="interrupted",
-                model=agent._provider.model,
+                model=runner.model,
                 error=err_text,
             )
             try:
@@ -689,7 +689,7 @@ async def _run_generation(
             matched_skills=collector.matched_skills or None,
             ttfb_ms=collector.ttfb_ms,
             total_ms=collector.total_ms,
-            model=agent._provider.model,
+            model=runner.model,
         )
         # 正常结束：把实时进度行就地更新为最终回复（content/usage/tool_steps/a2ui 全写全），
         # 复用同一行，避免「占位行 + 最终行」重复两条 assistant 消息。无进度行则照常新建。
@@ -720,8 +720,8 @@ async def _run_generation(
             if agent._skills and agent.last_matched_skills:
                 for _name in agent.last_matched_skills:
                     asyncio.create_task(asyncio.to_thread(agent._skills.record_hit, _name))
-            asyncio.create_task(_maybe_consolidate(session_id, agent._provider.model, user_id, mode=mode))
-            asyncio.create_task(_maybe_generate_skill(session_id, agent._provider.model, user_id))
+            asyncio.create_task(_maybe_consolidate(session_id, runner.model, user_id, mode=mode))
+            asyncio.create_task(_maybe_generate_skill(session_id, runner.model, user_id))
 
         # touch 只更新会话列表的 updated_at 排序时间戳，与主消息落库解耦：
         # 极端情况下主消息已保存成功、touch 撞锁重试耗尽时，不该给前端报
@@ -814,7 +814,7 @@ async def _run_generation(
         "ttfb_ms": collector.ttfb_ms,
         "total_ms": collector.total_ms,
         "message_id": msg_id,
-        "model": agent._provider.model,
+        "model": runner.model,
     }
     if new_title:
         done_evt["title"] = new_title
@@ -858,9 +858,14 @@ def _infer_task_kind(messages: list) -> str:
 def _kernel_working_dir(agent) -> str:
     """外部内核的工作目录。
 
-    优先级：会话级 working_dir（ACP client 传入） > agent 上记录的值 > 空。
-    空值让 ACP 用进程 cwd（通常是安装目录），虽然不理想但至少不会崩；
-    真正的正确做法是由渠道层设置 `ethan.core.context.set_working_dir`。
+    **绝不能返回空串让 ACP 落到进程 cwd**：`ethan serve` 被人为以 `/` 为 cwd 启动
+    （launchd/watchdog 拉起时的常见情况），外部 CLI 在根目录下跑会立刻失败——
+    实测 codex 报 `Not inside a trusted directory`，claude 的行为也不可预期。
+
+    优先级：
+      1. 会话级 working_dir（ACP client / 渠道层显式设置）
+      2. agent 上记录的值
+      3. 用户 workspace（`~/.ethan`）—— 一个确定可写、非根的位置
     """
     try:
         from ethan.core.context import get_working_dir
@@ -870,4 +875,20 @@ def _kernel_working_dir(agent) -> str:
             return wd
     except Exception:
         pass
-    return getattr(agent, "_working_dir", "") or ""
+
+    wd = getattr(agent, "_working_dir", "") or ""
+    if wd:
+        return wd
+
+    # 兜底到 workspace：外部 CLI 需要一个真实目录，而不是 "/" 或安装目录
+    try:
+        from ethan.core.config import get_config
+
+        ws = get_config().defaults.workspace
+        if ws:
+            import os
+
+            return os.path.expanduser(ws)
+    except Exception:
+        pass
+    return ""

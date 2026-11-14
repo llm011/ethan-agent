@@ -67,6 +67,12 @@ def _codex_provider_overrides() -> tuple[list[str], dict, str]:
     无 cliproxy 配置时返回空 → 退回 codex 自身 config，不破坏既有行为。
     模型默认 gpt-5.5，可用 ETHAN_CODEX_MODEL 覆盖。
     """
+    # 内核模式（ethan/kernel/acp_kernel.py 的 CodexKernel）会设这个变量跳过覆盖：
+    # 作为内核用时必须尊重用户自己的 ~/.codex/config.toml，不能强行改 provider。
+    # 委派工具（delegate_coding）不设它，继续复用 Ethan 的 cliproxy。
+    if os.environ.get("ETHAN_CODEX_NO_PROVIDER_OVERRIDE") == "1":
+        return [], {}, ""
+
     try:
         from ethan.core.config import get_config
         p = get_config().providers.get("cliproxy")
@@ -111,7 +117,16 @@ async def _run_codex(
     work_dir = cwd or str(Path.cwd())
     prov_args, prov_env, model = _codex_provider_overrides()
     model_args = ["-m", model] if model else []
-    base_flags = ["--json", "--dangerously-bypass-approvals-and-sandbox", *prov_args, *model_args]
+    # --skip-git-repo-check：codex 默认拒绝在非 git 目录里跑（报
+    # "Not inside a trusted directory"）。作为内核用时 working_dir 可能是任意目录
+    # （甚至没传、用了进程 cwd），不加这个参数会直接失败且信息很晦涩。
+    base_flags = [
+        "--json",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--skip-git-repo-check",
+        *prov_args,
+        *model_args,
+    ]
     # --dangerously-bypass-approvals-and-sandbox：非交互委派场景跳审批与沙箱
     if resume_session_id:
         cmd = [codex_bin, "exec", "resume", resume_session_id, *base_flags, prompt]
