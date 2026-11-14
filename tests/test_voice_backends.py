@@ -148,7 +148,12 @@ def test_probe_not_available_when_doctor_has_error(monkeypatch):
 
 
 def test_probe_handles_doctor_crash(monkeypatch):
-    """doctor 挂了不能抛异常，要变成一条可读的检查项。"""
+    """doctor 挂了不能抛异常，要变成一条可读的检查项。
+
+    注意状态是 **warn 而非 error**：自检跑不起来 ≠ 后端不能用（用户自制 shim
+    可能根本不实现 doctor）。此时以「服务是否活着」为准；这里服务也没跑，
+    所以整体判不可用，但检查项本身只是警告。
+    """
     monkeypatch.setattr(vb, "is_apple_silicon", lambda: True)
     monkeypatch.setattr(vb, "_find_cli", lambda *a: "/fake/ethan-tts")
     monkeypatch.setattr(vb, "_service_alive", lambda *a, **kw: False)
@@ -158,8 +163,8 @@ def test_probe_handles_doctor_crash(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", _boom)
     probe = vb.probe_ethan_tts()
-    assert probe.available is False
-    assert any(c.name == "自检" and c.status == "error" for c in probe.checks)
+    assert probe.available is False, "自检不可用且服务没跑，无法确认能用"
+    assert any(c.name == "自检" and c.status == "warn" for c in probe.checks)
 
 
 # ── ASR 与 TTS 的关系 ────────────────────────────────────────
@@ -278,3 +283,71 @@ def test_select_accepts_edge_tts_without_probe(monkeypatch):
     # 复原，避免影响其他用例读到的配置
     cfg = get_config()
     cfg.tts.backend = "ethan-tts"
+
+
+# ── 自制 shim：不支持 doctor 但服务能跑 ──────────────────────
+
+
+def test_custom_shim_without_doctor_is_still_available(monkeypatch):
+    """用户自配的 command 可能只实现 `say`，不支持 doctor 子命令。
+
+    实测踩到：`ethan-tts-rest`（用户自制 shim，原 CLI 有导入错误）收到
+    `doctor` 会 exit=2 输出 `{"ok": false, "error": "shim 只支持 say..."}`。
+    若把 doctor 当唯一判据，会把「明明能用」的后端判成不可用，进而拒绝切换。
+    """
+    monkeypatch.setattr(vb, "is_apple_silicon", lambda: True)
+    monkeypatch.setattr(vb, "_find_cli", lambda *a: "/fake/shim")
+    monkeypatch.setattr(vb, "_service_alive", lambda *a, **kw: True)
+
+    import json as _json
+
+    class _P:
+        stdout = _json.dumps({"ok": False, "error": "shim 只支持 say，收到 doctor"})
+        returncode = 2
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _P())
+
+    probe = vb.probe_ethan_tts()
+    assert probe.available is True, "doctor 不可用不该让后端判死"
+    # 但要留下 warn，别假装自检通过
+    assert any(c.name == "自检" and c.status == "warn" for c in probe.checks)
+
+
+def test_shim_without_doctor_and_service_down_is_unavailable(monkeypatch):
+    """自检不可用 + 服务没跑 → 无法确认能用，判不可用并提示去配置。"""
+    monkeypatch.setattr(vb, "is_apple_silicon", lambda: True)
+    monkeypatch.setattr(vb, "_find_cli", lambda *a: "/fake/shim")
+    monkeypatch.setattr(vb, "_service_alive", lambda *a, **kw: False)
+
+    import json as _json
+
+    class _P:
+        stdout = _json.dumps({"ok": False, "error": "no doctor"})
+        returncode = 2
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _P())
+
+    probe = vb.probe_ethan_tts()
+    assert probe.available is False
+    assert "服务" in probe.reason
+
+
+def test_doctor_reported_error_still_wins(monkeypatch):
+    """doctor 明确报 error 时仍判不可用——那是可信的具体失败项。"""
+    monkeypatch.setattr(vb, "is_apple_silicon", lambda: True)
+    monkeypatch.setattr(vb, "_find_cli", lambda *a: "/fake/cli")
+    monkeypatch.setattr(vb, "_service_alive", lambda *a, **kw: True)
+
+    import json as _json
+
+    class _P:
+        stdout = _json.dumps({
+            "ok": False,
+            "checks": [{"name": "依赖", "status": "error", "detail": "mlx 缺失", "fix": "重装"}],
+        })
+        returncode = 0
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _P())
+    probe = vb.probe_ethan_tts()
+    assert probe.available is False
+    assert "依赖" in probe.reason

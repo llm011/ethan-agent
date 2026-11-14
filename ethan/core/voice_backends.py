@@ -211,9 +211,18 @@ def probe_ethan_tts(cli_hint: str = "", base_url: str = "") -> BackendProbe:
         )
 
     checks: list[CheckItem] = [CheckItem("安装", "ok", cli)]
-    doctor_ok = True
+
+    # 关键判断顺序：**先看服务活没活**，再决定要不要信 doctor 的结论。
+    #
+    # 原因：用户常自配 `tts.command`（比如一个只实现 `say` 子命令的自制 shim
+    # ——实测踩到：`ethan-tts-rest` 收到 doctor 会 exit=2）。这种 shim 完全能
+    # 正常合成，只是不实现自检命令。若把 doctor 当唯一判据，会把「明明能用」
+    # 的后端判成不可用，进而拒绝用户切换到它。
+    running = _service_alive(url)
+
+    doctor_unavailable = False
     try:
-        # ethan-tts doctor --json 输出结构化检查结果，直接复用它的判断标准，
+        # ethan-tts doctor --json 输出结构化检查结果，尽量复用它的判断标准，
         # 避免我们和它各有一套「能跑吗」的定义。
         proc = subprocess.run(
             [cli, "doctor", "--json"],
@@ -222,7 +231,20 @@ def probe_ethan_tts(cli_hint: str = "", base_url: str = "") -> BackendProbe:
             timeout=60,
         )
         data = json.loads(proc.stdout or "{}")
-        for raw in data.get("checks", []):
+        raw_checks = data.get("checks") or []
+        if not raw_checks:
+            # 没有 checks 数组（自制 shim / 版本差异）→ 不是「检查失败」，
+            # 而是「这个 CLI 不支持自检」。这种情况下别拿它当判据。
+            doctor_unavailable = True
+            checks.append(
+                CheckItem(
+                    "自检",
+                    "warn",
+                    str(data.get("error") or "该 CLI 不支持 doctor 子命令"),
+                    "自检不可用，改用服务连通性判断",
+                )
+            )
+        for raw in raw_checks:
             item = CheckItem(
                 name=str(raw.get("name", "")),
                 status=str(raw.get("status", "")),
@@ -230,18 +252,32 @@ def probe_ethan_tts(cli_hint: str = "", base_url: str = "") -> BackendProbe:
                 fix=str(raw.get("fix", "")),
             )
             checks.append(item)
-            if item.status == "error":
-                doctor_ok = False
     except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as e:
-        doctor_ok = False
-        checks.append(CheckItem("自检", "error", f"doctor 执行失败：{e}", "重装 ethan-tts"))
+        # 同上的道理：自检跑不起来 ≠ 后端不能用
+        doctor_unavailable = True
+        checks.append(CheckItem("自检", "warn", f"doctor 未执行：{e}", "改用服务连通性判断"))
 
-    running = _service_alive(url)
     failed = [c for c in checks if c.status == "error"]
+
+    # 可用性判定：
+    #   · doctor 明确报错 → 不可用（有具体检查项失败，可信）
+    #   · doctor 不可用（不支持/崩了）→ **以服务是否活着为准**
+    #   · 都没问题 → 可用
+    if failed:
+        available = False
+        reason = f"{len(failed)} 项检查未通过：{failed[0].name}（{failed[0].detail}）"
+    elif doctor_unavailable:
+        available = running
+        reason = "" if running else "自检不可用，且服务未启动（试试点「一键配置」）"
+    else:
+        available = True
+        reason = ""
+
+    # 服务没跑但 doctor 说环境没问题 → 仍然算可用（能一键拉起）
     return BackendProbe(
         backend="ethan-tts",
-        available=doctor_ok,
-        reason="" if doctor_ok else f"{len(failed)} 项检查未通过：{failed[0].name}（{failed[0].detail}）",
+        available=available,
+        reason=reason,
         cli_path=cli,
         service_url=url,
         service_running=running,
