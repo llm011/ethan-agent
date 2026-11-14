@@ -445,13 +445,18 @@ def build_system_prompt(
         parts.append(_image_priority_protocol())
 
     if skills:
-        # 分级注入：高频技能（fast_path 或历史命中过）给描述，冷门技能只列名字。
+        # 技能索引全放在同一个 <available_skills> 块里，且位于「Current time:」之前——
+        # 即 Anthropic prompt cache 的稳定层。历史上这里和动态层各拼了一个同名块，
+        # 内容重叠、标签重复，还让 discoverable 触发词表每轮重新计费。合并后信息不丢：
+        #   - default 类：高频技能（fast_path 或历史命中）给描述，冷门技能只列名字
+        #   - discoverable 类：给触发词，命中时用 skill_read 拉全文
         # 160+ 个技能全带描述时这一块要 12.5K 字符；分级后约 4K，其余靠 skill_list /
         # skill_read 现取（模型只需知道「有这个技能」，不需要默写描述）。
         hot_lines, cold_names = skills.build_index_block()
-        if hot_lines or cold_names:
+        discoverable = [s for s in skills.all() if getattr(s, "category", "default") == "discoverable"]
+        if hot_lines or cold_names or discoverable:
             lines = [
-                "[默认技能简表 — 完整清单、分类和描述请调 skill_list 工具，"
+                "[技能简表 — 完整清单、分类和描述请调 skill_list 工具，"
                 "读某个技能全文用 skill_read(name=...)。不要直接念本块回答用户「你有哪些技能」]"
             ]
             lines.extend(hot_lines)
@@ -460,6 +465,15 @@ def build_system_prompt(
                     f"[以下 {len(cold_names)} 个技能本轮未列描述，按需用 skill_list 查全貌或直接 skill_read：]"
                 )
                 lines.append("- " + " | ".join(cold_names))
+            if discoverable:
+                lines.append("[按需技能 — 命中触发词时用 skill_read 拉全文：]")
+                with_trig = [s for s in discoverable if s.trigger]
+                no_trig = [s for s in discoverable if not s.trigger]
+                lines.extend(f"- {s.name}: {' | '.join(s.trigger[:5])}" for s in with_trig)
+                if no_trig:
+                    lines.append(
+                        f"- （另有 {len(no_trig)} 个工具型技能无触发词，如 bytedance-*/lark-*，调 skill_list 查看完整清单）"
+                    )
             parts.append("<available_skills>\n" + "\n".join(lines) + "\n</available_skills>")
 
     parts.append(f"Current time: {now}")
@@ -507,22 +521,8 @@ def build_system_prompt(
         if skill_ctx:
             parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
 
-    if skills:
-        discoverable = [s for s in skills.all() if getattr(s, "category", "default") == "discoverable"]
-        if discoverable:
-            with_trig = [s for s in discoverable if s.trigger]
-            no_trig = [s for s in discoverable if not s.trigger]
-            lines = [f"- {s.name}: {' | '.join(s.trigger[:5])}" for s in with_trig]
-            if no_trig:
-                lines.append(
-                    f"- （另有 {len(no_trig)} 个工具型技能无触发词，如 bytedance-*/lark-*，调 skill_list 查看完整清单）"
-                )
-            parts.append(
-                "<available_skills>\n"
-                "[按需技能简表 — 命中触发词时用 skill_read 拉全文；完整清单和分类请调 skill_list，不要念本块回答「你有哪些技能」]\n"
-                + "\n".join(lines)
-                + "\n</available_skills>"
-            )
+    # 注意：discoverable 触发词表已并入上方稳定层的 <available_skills>，
+    # 此处不再重复拼第二个同名块（曾导致标签重复 + 动态层每轮重新计费）。
 
     mode_hint = build_mode_install_hint(mode, skills, messages)
     if mode_hint:

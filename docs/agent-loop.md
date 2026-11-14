@@ -68,26 +68,41 @@ for i in range(max_iters):
 
 ## 系统提示词构建（`_build_system`）
 
-Full / Medium Path 按以下顺序拼接，`Current time:` 是稳定层与动态层的分界点（用于 Prompt Caching）：
+Full / Medium Path 按以下顺序拼接，`Current time:` 是稳定层与动态层的分界点（用于 Prompt Caching）。以 `ethan/core/system_prompt.py` 的 `build_system_prompt()` 为准：
 
 ```
-<soul>                  ← system/soul.md（CRITICAL，最高优先级，稳定，可缓存）
-<identity>              ← system/identity.md（稳定）
-<agent_protocols>       ← system/agent.md（稳定）
-<tools_reference>       ← system/tools.md（稳定）
-<available_skills>      ← 所有 Skill 名称列表（稳定）
-─── Current time: ───   ← 缓存分割线
-workspace 路径
-定时任务摘要
-<memory_signal>         ← 信号检测命中时注入 hint + 激活 memory_write
-<memory_context>        ← build_structured_recall(query)（FTS5 + BGE 向量混合召回，RRF 融合，无命中回退 importance）
-<user_profile>          ← ~/.ethan/memory/user_profile.md（用户画像，仅 full path）
-<behavioral_guidelines> ← ProcedureStore（纠正准则 + 成功路径）
-<proactive_suggestion>  ← FDE 建议（首轮、未拒绝的）
-<relevant_skills>       ← 关键词匹配的 Skill 正文
+─── 稳定层（可缓存，cache_control: ephemeral）───
+<soul>                    ← system/soul.md（CRITICAL，最高优先级）
+<identity>                ← system/identity.md
+<persona_override>        ← 当前 mode 绑定 persona 时才注入
+<mode_identity>           ← 当前 mode 声明 identity 时才注入
+<agent_protocols>         ← system/agent.md
+<tools_reference>         ← system/tools.md（全文，当前 34.3K 字符，最大单一来源）
+<documents_protocol>      ← 产出文档的落盘约定
+<image_protocol>          ← 仅当 OCR 工具已注册时注入
+<available_skills>        ← 技能简表：default 类分级索引 + discoverable 触发词表，
+                             合并为**一个**块（稳定层 + 动态层曾各拼一个同名块，已修复）
+─── Current time: ───     ← 缓存分割线
+─── 动态层（每轮变化，不缓存）───
+workspace 路径 / Current model
+<memory_recall_hint>      ← 仅 owner
+<user_profile>            ← 用户画像
+<behavioral_guidelines>   ← ProcedureStore（纠正准则 + 成功路径）
+<relevant_skills>         ← 命中触发词的技能正文（按 query 变化，故在动态层）
+<mode_setup>              ← mode 依赖技能未安装时才注入
+<memory_signal>           ← 信号检测命中时注入 hint + 激活 memory_write
+<runtime_context>         ← 渠道注入的会话上下文
+<previous_run_summary>    ← 上一轮工具步骤摘要
 ```
 
-Fast Path 保留：`soul + identity + 当前时间 + workspace 路径 + user_profile + behavioral_guidelines + 匹配到的 Skill`（不带结构化记忆召回，省成本）。
+> 体积实测：`python -m tests.bench_prompt_size`。当前 full 档 system prompt 约 51,954 字符
+> （≈17.3K tokens），不含历史消息，也不含 API `tools` 参数里的工具 schema（广播 41 个
+> 工具时约 12.4K tokens）。**工具循环每一次迭代都会把这两部分重新发送一遍**；
+> Anthropic 的 prompt cache 只降低费用，不减少实际传输量或首 token 延迟。
+
+Fast Path 保留：`soul + identity + persona/mode 覆盖 + agent_protocols + 时间/workspace/model +
+文档协议 + 工具提示 + memory_recall_hint + user_profile + behavioral_guidelines +
+匹配到的 Skill 简表/摘要`，约 13K 字符（≈4.4K tokens），不带 `tools_reference`、不带结构化记忆召回。
 
 > `system/naming.md` **不进主 system prompt**：它只在生成会话标题时注入廉价模型的标题 prompt
 > （见 `ethan/memory/session.py` 的 `_build_title_system_prompt`），零常驻 token 成本。

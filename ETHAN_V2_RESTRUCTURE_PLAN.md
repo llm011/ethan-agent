@@ -47,23 +47,49 @@
 - **`SettingsScreen.kt` 恢复到 `cf53d363^`**：已验证签名与 `EthanApp.kt` 调用完全匹配、
   28 个 import 全部可解析
 
-### Step 1 ✅ prompt 瘦身（这是本次最有价值的产出）
+### Step 1 ⚠️ prompt 瘦身（只落地了一半，别被上面的数字误导）
 
 先纠正需求文档的一个前提错误：文档说「Context 占用 ~6KB → ~300B」。实测的 6KB 级别
 占用根本不在技能包，而在两处：
 
 ```
-块                     改前      改后
-tools_reference       34317    16209   ← ~/.ethan/system/tools.md，是工具经验笔记不是工具清单
-available_skills      12860     4498   ← 167 个技能的触发词/描述全量罗列
+块                     改前     当时改后   ← 注意：这是 2026-11-14 当时的中间态
+tools_reference       34317    16209      ← ~/.ethan/system/tools.md，是工具经验笔记不是工具清单
+available_skills      12860     4498      ← 167 个技能的触发词/描述全量罗列
 ------------------------------------------------
-TOTAL                 60397    33576   (-44%, 约 20K → 11K tokens)
+TOTAL                 60397    33576      (-44%, 约 20K → 11K tokens)
 ```
 
-做法：
-1. **`tools.md` 合并去重**（34.3K → 16.2K）：把 gws 凭证 7 节、Edge TTS 4 节、
-   EigenFlux 13 个批次日志、lark-cli docs 3 节各自合并成一份手册，删掉重复条目和
-   「本轮一切正常」类运行日志。**信息没有丢，只是不再重复述**。
+**重要更正**：上表里的 `tools_reference 16209` 和 `TOTAL 33576` **没有保留下来**。
+按「压缩日志」思路合并 tools.md 时误删了 `docs +fetch`、`--content-limit 4000`、
+`Interrupted system call`、`_synthesize_once` 等下次踩坑能直接抄的内容，**已恢复原文件**
+（详见下方 P1 的「本次教训」）。所以 Step 1 真正落地的只有第 2 项技能分级。
+
+当前实测基线（2026-11-14 复核，`python -m tests.bench_prompt_size`）：
+
+```
+块                     字符     占比
+tools_reference       34317    66%   ← 仍是未拆分的全量，P1 待办由另一分支负责
+agent_protocols        4634     9%
+available_skills       4520     9%   ← 分级后（原 12860）
+behavioral_guidelines  3777     7%
+soul                   2794     5%
+其余 6 块合计          1912     4%
+------------------------------------------------
+TOTAL                 ~52K           ≈ 17K tokens（不含历史消息、不含 tools schema）
+```
+
+> 表中字符数会随 `Current time:` 等动态内容小幅浮动，精确值以
+> `python -m tests.bench_prompt_size` 实时输出为准，不要在文档里写死具体数字。
+
+另外，Full Path 曾在稳定层和动态层各拼一个 `<available_skills>`（标签重复、内容重叠），
+现已合并为一个块并整体放进 `Current time:` 之前的缓存稳定层；预览页的 tools token
+估算也从写死的 `tool_count * 70` 改为按真实 schema 长度计算。这两项属于代码层清理，
+不改变 tools.md 本身。
+
+做法（落地项）：
+1. ~~**`tools.md` 合并去重**（34.3K → 16.2K）~~ —— **已回退，见上方更正**。
+   正确做法不是压缩，而是按检索需要结构性拆分，留作 P1。
 2. **技能分级**：`SkillRegistry.build_index_block()`——高频技能（`fast_path` 或
    `stats.hit_count > 0`）保留描述，其余 142 个只列名字，细节用 `skill_list` /
    `skill_read` 现取。
@@ -113,8 +139,14 @@ TOTAL                 60397    33576   (-44%, 约 20K → 11K tokens)
 .venv/bin/python -m pytest tests/test_code_assistant.py -q
 ```
 
-`tests/test_prompt_budget.py` 锁住了各块上限（`tools_reference` 20K、`available_skills`
-6K、总计 40K），再有人往每轮 prompt 里塞整块内容会直接测试失败。
+`tests/test_prompt_budget.py` 锁住了各块上限（以 `tests/bench_prompt_size.py` 的
+`BUDGETS` 为准：`tools_reference` 36K、`available_skills` 6K、`agent_protocols` 6K、
+`soul` 4K、`behavioral_guidelines` 5K，总计 `TOTAL_BUDGET` 55K），再有人往每轮 prompt
+里塞整块内容会直接测试失败。另有 3 条断言守结构：xml 块不得重复、预览 prompt 必须与
+真实典型一轮完全一致、tools token 估算必须取自真实 schema 长度。
+
+**注意**：这些阈值是「防止继续增长」的护栏，按当前实测值留少量余量设定，**不代表
+prompt 已经够小**。`tools_reference` 仍是 34.3K 全量，拆分是 P1 待办。
 
 ---
 
@@ -124,12 +156,24 @@ TOTAL                 60397    33576   (-44%, 约 20K → 11K tokens)
 
 已按「事件流对齐」重写，详见下方专章。
 
-### P1：`tools.md` 的结构性拆分（**高优先级，本次踩过坑**）
+### P1：`tools.md` 的结构性拆分（**高优先级，本次踩过坑 · 由另一分支负责，本轮不动**）
 
 **先说清楚它的定位**：`tools.md` 不是日志，是**操作手册**——教 agent 怎么用工具。
 机制是 `Agent._load_system_files()` → `<tools_reference>` → 每轮全量进 system prompt。
 （工具 schema 走 API 的 `tools` 参数，那是「工具叫什么、什么参数」；
 `tools.md` 是「这工具的坑在哪、怎么用才对」，两者互补。）
+
+**为什么值得单独做**：`_load_system_files()` 只在启动时读盘，但
+`build_system_prompt()` **每次都把全文重新拼进 system 字符串**；而工具循环里
+`provider.chat(working, tools=tools, system=sys)` 每轮迭代都带同一份 system + 工具
+schema。实测 full 档单次调用的固定开销约 **29.7K tokens**（system 17.3K + 41 个
+广播工具的 schema 12.4K），不含历史消息，且随每次工具迭代重复发送。Anthropic 的
+prompt cache（`docs/caching.md`）能省**费用**（稳定层命中 0.1×），但不省上下文窗口、
+不省首 token 延迟；OpenAI 兼容协议不走这套分割。所以减体积本身仍有价值。
+
+**范围约定**：53KB 的 `~/.ethan/system/tools.md` 是用户运行时文件、不在 git 里
+（git 内的 `ethan/defaults/system/tools.md` 模板仅 4.7K 且所有分支一致）。本轮的代码层
+清理不触碰它的内容，P1 的拆分由另一分支进行，避免重复改动。
 
 **本次教训**：我一度按「压缩日志」的思路把它从 34K 合并到 16K，结果误删了
 `docs +fetch`、`--content-limit 4000`、`Interrupted system call`、

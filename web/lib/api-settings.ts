@@ -229,8 +229,12 @@ export interface SystemPromptPreview {
   tools: ToolSchema[];
   approx_tokens: number;
   approx_tools_tokens: number;
+  approx_tools_chars: number;
   tool_count: number;
   approx_total_tokens: number;
+  broadcast_tool_count: number;
+  approx_broadcast_tools_tokens: number;
+  approx_broadcast_total_tokens: number;
   chars: number;
 }
 

@@ -595,21 +595,54 @@ async def install_lark_deps():
 
 @router.get("/system-prompt-preview", dependencies=[Depends(verify_token)])
 async def system_prompt_preview(model: str | None = None):
+    import json
+
     from ethan.providers.base import Message
+
     agent = create_agent(model)
-    dummy_messages = [Message(role="user", content="(preview)")]
+    # 用一条不含技能触发词的中性消息：预览应反映「典型一轮」的 system prompt。
+    # 曾用 "(preview)"，它意外命中技能匹配，多注入一块 <relevant_skills>（约 3.2K 字符），
+    # 导致预览比真实对话还长。
+    dummy_messages = [Message(role="user", content="hello")]
     system = agent._build_system(dummy_messages, fast=False)
-    approx_tokens = len(system) // 2
+    # 中文为主，按 3 字符/token 估算比 //2 更接近真实；system 与 tools 用同一口径。
+    approx_tokens = len(system) // 3
     tools = agent._registry.all()
     tool_count = len(tools)
+    # 旧实现写死 tool_count * 70，把 67 个工具估成 ~4.7K tokens，而真实 schema
+    # 序列化后是 55K+ 字符（~18K tokens）——低估 4 倍。改为按真实 schema 长度算。
+    schema_chars = len(json.dumps(
+        [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in tools],
+        ensure_ascii=False,
+    ))
+    approx_tools_tokens = schema_chars // 3
+
+    # 上面是「注册表全量」口径（工具列表展示用）。真实对话只广播当前路由档的工具，
+    # 两者差很多（实测 full 档 41 个 vs 全量 67 个）。单独算一份，避免 Total 被误读成
+    # 真实每轮开销。_select_route 返回的 tools 可能是名字或对象，统一取对象。
+    _route, _sys, _names, _iters = agent._select_route(dummy_messages)
+    broadcast_tools = []
+    for _n in _names:
+        _t = agent._registry.get(_n) if isinstance(_n, str) else _n
+        if _t is not None:
+            broadcast_tools.append(_t)
+    broadcast_chars = len(json.dumps(
+        [{"name": t.name, "description": t.description, "parameters": t.parameters} for t in broadcast_tools],
+        ensure_ascii=False,
+    ))
     return {
         "system_prompt": system,
         "tools": [{"name": t.name, "description": t.description, "parameters": t.parameters, "fast_path": t.fast_path} for t in tools],
         "approx_tokens": approx_tokens,
-        "approx_tools_tokens": tool_count * 70,
+        "approx_tools_tokens": approx_tools_tokens,
+        "approx_tools_chars": schema_chars,
         "tool_count": tool_count,
-        "approx_total_tokens": approx_tokens + tool_count * 70,
+        "approx_total_tokens": approx_tokens + approx_tools_tokens,
         "chars": len(system),
+        # 真实广播档口径
+        "broadcast_tool_count": len(broadcast_tools),
+        "approx_broadcast_tools_tokens": broadcast_chars // 3,
+        "approx_broadcast_total_tokens": approx_tokens + broadcast_chars // 3,
     }
 
 
