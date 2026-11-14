@@ -295,6 +295,29 @@ async def _run_generation(
     # 关联 ChatRun 到 ToolExecutor：使外部可通过 run.cancel_tool(tool_call_id) 取消单个工具。
     agent._executor.current_run = run
 
+    # 内核选择：默认 ethan（原生），行为与引入多内核前完全一致；配置了外部内核
+    # （claude_code / codex / opencode）时本轮执行权交给对应 runtime。
+    # runner 对 agent 是鸭子类型兼容的（有 stream_chat/.usage/.model），所以下面
+    # 的消费逻辑一行都不用改。
+    runner = agent
+    try:
+        from ethan.kernel.dispatch import build_runner
+
+        runner = build_runner(
+            agent,
+            task_kind=_infer_task_kind(messages),
+            working_dir=_kernel_working_dir(agent),
+            channel=getattr(agent, "_channel", ""),
+            user_id=user_id,
+            mode=mode,
+        )
+        if runner.kernel_kind != "ethan":
+            # 让前端知道本轮换了内核（真实模型由外部 CLI 决定，model 事件据实报内核名）
+            run.emit({"kernel": runner.kernel_kind, "kernel_name": runner.kernel_name})
+    except Exception:
+        logger.debug("kernel 选择失败，回退原生内核", exc_info=True)
+        runner = agent
+
     # consent provider 经 ContextVar 注入；本任务有独立 context，需在任务内设置。
     set_consent_provider(consent)
     # 「运行中补充信息」drainer 也经 ContextVar 注入：agent loop 每轮开头调它取走 inbox 内容。
@@ -306,7 +329,7 @@ async def _run_generation(
     # 让气泡底部「开始时间」旁立即显示所用模型，而不是等到 done 事件才出现。
     # 前端会在收到该事件时把 model 写进当前 assistant 气泡并即时重渲染。
     try:
-        run.emit({"model": agent.model})
+        run.emit({"model": runner.model})
     except Exception:
         logger.debug("emit model event failed session=%s", session_id, exc_info=True)
 
@@ -321,7 +344,7 @@ async def _run_generation(
         except Exception:
             logger.debug("恢复遗留补充信息失败 session=%s", session_id, exc_info=True)
 
-    collector = StreamCollector().bind(agent)
+    collector = StreamCollector().bind(runner)
     # 工具过程实时持久化：每条工具事件 emit 给前端的同时，也把步骤快照落库。
     # 这样即便后续 finalize 失败 / 进程崩溃 / 用户关页面，工具调用过程也留存，不会白干。
     # 落的是一条 role=assistant、content 为占位、tool_steps 为当前全部步骤的「进度消息」，
@@ -329,7 +352,7 @@ async def _run_generation(
     # 流结束后把同一条更新为最终内容（content/usage/a2ui），避免「占位行 + 最终行」重复两条。
     progress_msg_id: int | None = None
     try:
-        async for item in agent.stream_chat(messages):
+        async for item in runner.stream_chat(messages):
             if isinstance(item, ConsentEvent):
                 run.interaction_ids.add(item.request_id)
                 evt = {
@@ -798,3 +821,53 @@ async def _run_generation(
     run.emit(done_evt)
     run.finish()
     _RunManager_schedule_removal(run.session_id)
+
+
+# ── 内核选择相关的小工具 ──────────────────────────────────────────────
+
+
+def _infer_task_kind(messages: list) -> str:
+    """粗粒度任务类型推断，供 `kernel.task_rules` 的按任务选内核使用。
+
+    刻意保持极简：只区分 coding / research / chat 三类，且只做关键词判断——
+    真正的意图理解由模型自己做（有个 `classify.py` 在 acp 里，但那是为委派服务的，
+    代价太大，不适合每轮都跑）。猜错的代价很小：回退到 `kernel.default`。
+    """
+    text = ""
+    for m in reversed(messages or []):
+        if getattr(m, "role", "") == "user":
+            text = (getattr(m, "content", "") or "")[:500].lower()
+            break
+    if not text:
+        return "chat"
+
+    coding_kw = (
+        "代码", "重构", "实现", "修复", "bug", "debug", "测试", "编译",
+        "函数", "类", "接口", "api", "commit", "pr ", "merge",
+        "refactor", "implement", "fix", "test", "python", "typescript",
+    )
+    research_kw = ("调研", "分析", "对比", "论文", "研究", "report", "research", "survey")
+
+    if any(k in text for k in coding_kw):
+        return "coding"
+    if any(k in text for k in research_kw):
+        return "research"
+    return "chat"
+
+
+def _kernel_working_dir(agent) -> str:
+    """外部内核的工作目录。
+
+    优先级：会话级 working_dir（ACP client 传入） > agent 上记录的值 > 空。
+    空值让 ACP 用进程 cwd（通常是安装目录），虽然不理想但至少不会崩；
+    真正的正确做法是由渠道层设置 `ethan.core.context.set_working_dir`。
+    """
+    try:
+        from ethan.core.context import get_working_dir
+
+        wd = get_working_dir()
+        if wd:
+            return wd
+    except Exception:
+        pass
+    return getattr(agent, "_working_dir", "") or ""

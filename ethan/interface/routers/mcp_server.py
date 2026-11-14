@@ -138,10 +138,27 @@ async def ask_ethan(prompt: str, session_id: str | None = None, ctx: Context | N
 
     messages = memory.build_context() + [user_msg]
 
-    collector = StreamCollector().bind(agent)
+    # 与 producers._run_generation 保持一致：MCP 入口同样要能按配置选内核，
+    # 否则「配置了外部内核但 MCP 仍走原生」会造成同一 agent 两套行为。
+    runner = agent
+    try:
+        from ethan.interface.routers.producers import _infer_task_kind, _kernel_working_dir
+        from ethan.kernel.dispatch import build_runner
+
+        runner = build_runner(
+            agent,
+            task_kind=_infer_task_kind(messages),
+            working_dir=_kernel_working_dir(agent),
+            channel="mcp",
+        )
+    except Exception:
+        logger.debug("MCP 内核选择失败，回退原生内核", exc_info=True)
+        runner = agent
+
+    collector = StreamCollector().bind(runner)
     streamer = _ProgressStreamer(ctx)
     try:
-        async for item in agent.stream_chat(messages):
+        async for item in runner.stream_chat(messages):
             if isinstance(item, (ToolEvent, ThinkingEvent, SkillsMatchedEvent, InjectEvent)):
                 collector.feed(item)
                 if isinstance(item, ToolEvent):

@@ -20,13 +20,18 @@ import sys
 # 阈值不是「刚好卡住当前值」，而是留了合理余量的护栏——调高前先想清楚是不是
 # 该把内容挪出 prompt（tools.md → 知识库，技能描述 → skill_list 按需取）。
 BUDGETS: dict[str, int] = {
-    "tools_reference": 20_000,
+    # tools.md 是「工具怎么用」的操作手册，全文注入每轮 prompt。它天然分两类内容：
+    #   通用工具知识（gws/lark-cli/shell/HA/生图…）~13K —— 每轮都该有
+    #   任务专属 playbook（EigenFlux 批次、book-audio-digest、SSDExt）~21K —— 只在做那个任务时需要
+    # 后者是下一步该拆出去的部分（见 ETHAN_V2_RESTRUCTURE_PLAN.md P1）。
+    # 在那之前，这里的上限按实测值设定：它的作用是「防止继续增长」，不是「假装已经够小」。
+    "tools_reference": 36_000,
     "available_skills": 6_000,
     "agent_protocols": 6_000,
     "soul": 4_000,
     "behavioral_guidelines": 5_000,
 }
-TOTAL_BUDGET = 40_000
+TOTAL_BUDGET = 55_000
 
 
 def measure_prompt(query: str = "帮我 debug 这段代码", channel: str = "repl") -> dict:

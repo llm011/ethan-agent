@@ -118,6 +118,21 @@ class FastRule(BaseModel):
     skills: list[str] = Field(default_factory=list)    # 强制注入 prompt 的技能名
 
 
+class KernelSelectionConfig(BaseModel):
+    """内核选择配置（见 ethan/kernel/runtime.py）。
+
+    默认 `default=""` 等价于 ethan 原生内核，行为与引入多内核之前完全一致。
+    配成外部内核（claude_code / codex / opencode）时，那一轮对话的执行权交给
+    对应的外部 runtime —— 注意它不走 Ethan 的工具/技能/记忆，也不做中途授权，
+    详见 ethan/kernel/claude_kernel.py 的取舍说明。
+
+    task_rules 是「按任务类型选内核」的映射，key 为 task_kind
+    （coding / chat / research ...），value 为内核名。未命中的走 default。
+    """
+    default: str = ""  # "" = 原生 Ethan；可选 ethan | claude_code | codex | opencode
+    task_rules: dict[str, str] = Field(default_factory=dict)  # {"coding": "claude_code"}
+
+
 class RoutingConfig(BaseModel):
     """任务路由配置：命中某条 fast_rule 的关键字 → 走 Fast Path（受限工具集 + 可选 lite 模型）。
 
@@ -265,6 +280,7 @@ class DefaultsConfig(BaseModel):
     # 切默认模型二者一起变；false 时二者各自独立配置（留空仍等于跟随默认）。
     model_sync: bool = True
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
+    kernel: KernelSelectionConfig = Field(default_factory=KernelSelectionConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
