@@ -369,3 +369,110 @@ export async function restartServer(): Promise<{ ok: boolean; message: string }>
   if (!res.ok) throw new Error("Failed to restart server");
   return res.json();
 }
+
+// ── 多内核（Kernel）────────────────────────────────────────────────
+//
+// 语义要点：**默认不安装任何外部内核依赖**。用户选中某个内核时才触发安装
+// （见后端 ethan/kernel/deps.py）。所以：
+//   fetchKernels()      只探测，不发安装
+//   installKernel(kind) 「选中即安装」：装不上的话后端不写配置，保留原内核
+//   selectKernel(kind)  切换默认内核（内部同样会确保依赖就绪）
+
+export interface KernelCapabilities {
+  streaming: boolean;
+  tools: boolean;
+  /** 能否执行中途向用户请求授权。外部 runtime 多为 false（权限模型不同源）。 */
+  consent: boolean;
+  /** 是否沿用 Ethan 的技能/记忆/系统提示词。外部 runtime 为 false。 */
+  ethan_context: boolean;
+  resumable: boolean;
+}
+
+export interface KernelInfo {
+  kind: string;
+  name: string;
+  available: boolean;
+  /** 不可用原因（如「未安装 claude」） */
+  reason: string;
+  capabilities: KernelCapabilities;
+  install_command: string;
+  install_hint: string;
+}
+
+export interface KernelsResponse {
+  kernels: KernelInfo[];
+  default: string;
+  task_rules: Record<string, string>;
+  last_install: {
+    kind: string;
+    installed: boolean;
+    installing: boolean;
+    last_error: string;
+    last_run_at: string;
+    install_command: string;
+    hint: string;
+  } | null;
+}
+
+export async function fetchKernels(): Promise<KernelsResponse> {
+  const res = await fetchWithTimeout(`${API_URL}/kernels`, { headers: headers() });
+  if (!res.ok) throw new Error("Failed to fetch kernels");
+  return res.json();
+}
+
+export interface KernelInstallResult {
+  ok: boolean;
+  kind: string;
+  installed: boolean;
+  installing?: boolean;
+  last_error?: string;
+  last_run_at?: string;
+  install_command?: string;
+  hint?: string;
+  reason?: string;
+}
+
+/** 选中并安装。这是「用户选了就装，不用手敲命令」的入口。 */
+export async function installKernel(kind: string): Promise<KernelInstallResult> {
+  const res = await fetchWithTimeout(`${API_URL}/kernels/install`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ kind, auto_install: true }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail?.message || detail?.detail || "安装失败");
+  }
+  return res.json();
+}
+
+/** 切换默认内核。依赖装不上时后端返回 409，这里抛出带原因的错误。 */
+export async function selectKernel(kind: string): Promise<{ ok: boolean; default: string }> {
+  const res = await fetchWithTimeout(`${API_URL}/kernels/select`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ kind, auto_install: true }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const d = body?.detail;
+    const msg = typeof d === "string" ? d : d?.message || "切换失败";
+    const reason = typeof d === "object" ? d?.reason : "";
+    throw new Error(reason ? `${msg}：${reason}` : msg);
+  }
+  const out = await res.json();
+  return out;
+}
+
+export async function setKernelTaskRules(
+  taskRules: Record<string, string>,
+): Promise<{ ok: boolean; task_rules: Record<string, string> }> {
+  const res = await fetchWithTimeout(`${API_URL}/kernels/task-rules`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ task_rules: taskRules }),
+  });
+  if (!res.ok) throw new Error("设置失败");
+  const out = await res.json();
+  return out;
+}

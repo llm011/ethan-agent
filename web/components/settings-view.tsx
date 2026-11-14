@@ -27,6 +27,7 @@ import { PromptPreview } from "./settings/prompt-preview";
 import { ProfileEditor } from "./settings/profile-editor";
 import { FastRulesTab } from "./settings/fast-rules-tab";
 import { DataTab } from "./settings/data-tab";
+import { KernelTab } from "./settings/kernel-tab";
 import { PluginsTab } from "./settings/plugins-tab";
 import { ToolTiersView } from "./tool-tiers-view";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -36,7 +37,7 @@ interface SettingsViewProps {
   initialTab?: TabId;
 }
 
-type TabId = "general" | "data" | "fast-rules" | "providers" | "channels" | "plugins" | "identity" | "soul" | "tools" | "heartbeat" | "naming" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers";
+type TabId = "general" | "data" | "fast-rules" | "providers" | "channels" | "plugins" | "identity" | "soul" | "tools" | "heartbeat" | "naming" | "profile" | "prompt-preview" | "api-keys" | "tool-tiers" | "kernel";
 
 const TAB_GROUPS = [
   {
@@ -46,6 +47,7 @@ const TAB_GROUPS = [
       { id: "data" as TabId, label: "数据管理" },
       { id: "fast-rules" as TabId, label: "快捷路由" },
       { id: "providers" as TabId, label: "模型 provider" },
+      { id: "kernel" as TabId, label: "AI 内核" },
       { id: "channels" as TabId, label: "渠道" },
       { id: "plugins" as TabId, label: "插件" },
     ],
@@ -1123,6 +1125,7 @@ export function SettingsView({ models, initialTab = "general" }: SettingsViewPro
               </div>
             )}
 
+            {activeTab === "kernel" && <KernelTab />}
             {activeTab === "plugins" && <PluginsTab />}
 
             {activeTab === "api-keys" && (

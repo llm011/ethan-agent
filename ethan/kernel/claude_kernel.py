@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shutil
 from typing import Any, AsyncIterator
 
 from ethan.kernel.runtime import (
@@ -81,11 +80,13 @@ class ACPKernelBase(KernelRuntime):
     )
 
     def available(self) -> tuple[bool, str]:
+        """可用性统一走 `ethan.kernel.deps`——它会把内核自带的 bin 目录补进 PATH，
+        也能给出可执行的安装说明。检测逻辑只维护一份，避免各处口径漂移。"""
         if not self.cli_binary:
             return False, "未配置 CLI 名"
-        if shutil.which(self.cli_binary) is None:
-            return False, f"未安装 {self.cli_binary} CLI（{self.install_hint}）"
-        return True, ""
+        from ethan.kernel.deps import detect
+
+        return detect(self.kind)
 
     @property
     def install_hint(self) -> str:

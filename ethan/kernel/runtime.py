@@ -57,6 +57,8 @@ class KernelKind(str, Enum):
     CLAUDE_CODE = "claude_code"    # Claude Code CLI（经 ACP）
     CODEX = "codex"                # Codex CLI（经 ACP）
     OPENCODE = "opencode"          # OpenCode CLI（经 ACP）
+    DSH = "dsh"                    # DeepSeek Harness headless
+    PI = "pi"                      # Pi Coding Agent
 
     @classmethod
     def parse(cls, raw: str, default: "KernelKind" = None) -> "KernelKind":
@@ -300,17 +302,22 @@ def get_kernel_registry() -> KernelRegistry:
     except Exception:  # pragma: no cover - 环境差异
         logger.debug("ClaudeCodeKernel 注册失败", exc_info=True)
 
-    for kind, module_path, class_name in (
+    # 其余外部内核：一律延迟导入 + 失败不影响启动。
+    # 依赖未安装时不阻止注册——`available()` 会返回 False 并给出安装说明，
+    # 用户在设置页选中时会触发自动安装（见 ethan/kernel/deps.py）。
+    for _kind, _module_path, _class_name in (
         (KernelKind.CODEX, "ethan.kernel.acp_kernel", "CodexKernel"),
         (KernelKind.OPENCODE, "ethan.kernel.acp_kernel", "OpenCodeKernel"),
+        (KernelKind.DSH, "ethan.kernel.dsh_kernel", "DSHKernel"),
+        (KernelKind.PI, "ethan.kernel.pi_kernel", "PiKernel"),
     ):
         try:
             import importlib
 
-            mod = importlib.import_module(module_path)
-            registry.register(getattr(mod, class_name)())
+            mod = importlib.import_module(_module_path)
+            registry.register(getattr(mod, _class_name)())
         except Exception:  # pragma: no cover - 环境差异
-            logger.debug("%s 注册失败", kind.value, exc_info=True)
+            logger.debug("%s 注册失败", _kind.value, exc_info=True)
 
     _registry = registry
     return _registry

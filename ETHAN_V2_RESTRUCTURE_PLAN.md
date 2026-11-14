@@ -193,21 +193,53 @@ ethan/kernel/
 └── dispatch.py      KernelRunner：对 Agent 鸭子类型兼容的句柄
 ```
 
+### 六个内核
+
+| kind | 名称 | 实现方式 |
+|---|---|---|
+| `ethan` | Ethan 原生 | 直接转发 `Agent.stream_chat`（默认，零行为变化） |
+| `claude_code` | Claude Code | ACP → `claude -p --output-format stream-json` |
+| `codex` | Codex | ACP → `codex` |
+| `opencode` | OpenCode | ACP → `opencode` |
+| `dsh` | DSH | `dsh --profile headless --json`（NDJSON） |
+| `pi` | Pi Agent | `pi -p --mode json`（token 级流式） |
+
+DSH 和 Pi 不复用 ACP 基类——它们的 CLI 参数与事件 schema 与 claude 那族完全不同
+（强行塞进去会让基类长出三个 if 分支）。各自实现、共享同一套 `KernelRuntime` 契约。
+
+### 依赖按需安装（默认不装）
+
+**默认不安装任何外部内核依赖。** 用户在设置页选中某个内核时才触发安装：
+
+```
+GET  /api/kernels            → 列出所有内核 + 可用性 + 安装状态（只探测，不发安装）
+POST /api/kernels/install    → 确保依赖就绪，缺失则自动 npm install
+POST /api/kernels/select     → 设为默认内核（内部同样先确保依赖）
+POST /api/kernels/task-rules → 设置按任务选内核
+```
+
+关键设计：`select` **先装依赖再写配置**。若反过来，装失败会留下「配置指向
+不可用内核」的脏状态，导致后续每轮对话降级 + 刷警告。实测验证过：依赖装不上时
+返回 409，配置保持原值。
+
+npm 权限不足（EACCES）时不擅自 sudo，而是给出 `npm config set prefix ~/.npm-global`
+的建议。
+
 ### 配置
 
 ```yaml
 kernel:
-  default: ""            # "" = 原生 Ethan；可选 ethan | claude_code | codex | opencode
+  default: ""            # "" = 原生 Ethan
   task_rules:            # 按任务类型选内核
     coding: claude_code
 ```
 
 选择顺序：显式 > `task_rules[task_kind]` > `default` > Ethan 兜底。
-选到不可用的内核（如没装 `claude` CLI）会记警告并继续降级——**绝不因此让对话失败**。
+选到不可用的内核会记警告并继续降级——**绝不因此让对话失败**。
 
-### 已实测
+### 已实测（真机）
 
-真机跑 Claude Code 内核（`/tmp/kernel-test`）：
+**Claude Code**（`/tmp/kernel-test`，验证工具事件 + 非流式文本）：
 
 ```
 [ToolEvent] state=start tool=Read args=file_path=.../calc.py
@@ -215,7 +247,20 @@ kernel:
 [TEXT] 不对，`add` 里写成了 `a-b`（减法），应该返回 `a+b`。
 ```
 
-事件映射完整、实时性正常（工具调用先到，文本随后）。
+**Pi**（`/tmp/pi-test`，验证 token 级流式 + 工具事件）：
+
+```
+[ToolEvent] state=start tool=read args=path=m.py
+[ToolEvent] state=done  tool=read preview=def mul(a,b): return a+b
+[ThinkingEvent]
+[TEXT] 不对  [TEXT] ，  [TEXT] mul  ... （逐 delta 流式）
+```
+
+Pi 的粒度比 Claude Code 细——`text_delta` 是真 token 级，Claude Code 的
+stream-json 是按 message 粒度。
+
+**踩到的坑**：Pi 的参数是 `--mode json`，不是 Claude Code 那族的
+`--output-format json`。写错会得到 `Unknown option: --output-format`。
 
 ### 已知取舍
 

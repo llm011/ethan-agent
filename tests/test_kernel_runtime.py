@@ -62,8 +62,10 @@ class _FakeUsage:
         ("ETHAN", KernelKind.ETHAN),
         ("claude_code", KernelKind.CLAUDE_CODE),
         ("claude-code", KernelKind.CLAUDE_CODE),  # 连字符也接受
+        ("dsh", KernelKind.DSH),
+        ("pi", KernelKind.PI),
         ("CLAUDE_CODE", KernelKind.CLAUDE_CODE),
-        ("dsh", None),  # 不存在，走 default
+        ("totally_unknown", None),  # 不存在，走 default
     ],
 )
 def test_kind_parse(raw, expected):
@@ -532,3 +534,153 @@ def test_runner_passes_agent_into_context():
 
     asyncio.run(go())
     assert captured["agent"] is agent
+
+
+# ── Pi 内核事件映射（基于 0.73.x 实测的真实 schema）──────────────
+
+
+def test_pi_maps_text_delta_as_str():
+    """Pi 的 text_delta 是 token 级流式，必须原样作为正文增量。"""
+    from ethan.kernel.pi_kernel import PiKernel
+
+    out = PiKernel()._handle_event(
+        {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "你好"}},
+        KernelRequest(),
+    )
+    assert out == ["你好"]
+
+
+def test_pi_maps_tool_execution_to_tool_events():
+    """真实 schema：tool_execution_start / tool_execution_end（顶层事件）。
+
+    start 和 end 必须共用同一个 tool_call_id，否则前端配不上对。
+    """
+    from ethan.kernel.pi_kernel import PiKernel
+
+    k = PiKernel()
+    start = k._handle_event({
+        "type": "tool_execution_start",
+        "toolCallId": "call_00_abc",
+        "toolName": "read",
+        "args": {"path": "m.py"},
+    }, KernelRequest())
+    end = k._handle_event({
+        "type": "tool_execution_end",
+        "toolCallId": "call_00_abc",
+        "toolName": "read",
+        "result": {"content": [{"type": "text", "text": "file body"}]},
+        "isError": False,
+    }, KernelRequest())
+
+    assert len(start) == 1 and len(end) == 1
+    assert start[0].state == "start"
+    assert end[0].state == "done"
+    assert start[0].tool_call_id == end[0].tool_call_id
+    assert "path=m.py" in start[0].args_summary
+    assert "file body" in end[0].result_preview
+
+
+def test_pi_tool_error_maps_to_error_state():
+    from ethan.kernel.pi_kernel import PiKernel
+
+    out = PiKernel()._handle_event({
+        "type": "tool_execution_end",
+        "toolCallId": "c1",
+        "toolName": "read",
+        "result": {"content": [{"type": "text", "text": "ENOENT"}]},
+        "isError": True,
+    }, KernelRequest())
+    assert out[0].state == "error"
+
+
+def test_pi_session_id_captured():
+    """session 事件里的 id 要落回 request，供下次 --session 续接。"""
+    from ethan.kernel.pi_kernel import PiKernel
+
+    req = KernelRequest()
+    PiKernel()._handle_event({"type": "session", "id": "01a1d8de-3e60"}, req)
+    assert req.session_id == "01a1d8de-3e60"
+
+
+def test_pi_flow_markers_emit_nothing():
+    """流程标记不该重复吐正文（正文已通过 text_delta 发过）。"""
+    from ethan.kernel.pi_kernel import PiKernel
+
+    k = PiKernel()
+    for t in ("turn_start", "turn_end", "agent_start", "agent_end",
+              "message_start", "message_end", "toolcall_start", "toolcall_end"):
+        assert k._handle_event({"type": t}, KernelRequest()) == [], f"{t} 不该产生事件"
+
+
+def test_pi_does_not_passthrough_full_message():
+    """message_end 里嵌着完整 message（含 usage/cost），透传会导致重复输出。"""
+    from ethan.kernel.pi_kernel import PiKernel
+
+    out = PiKernel()._handle_event({
+        "type": "message_end",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "这段不该被再发一次"}],
+            "usage": {"input": 7555, "output": 2, "cost": {"total": 0.003}},
+        },
+    }, KernelRequest())
+    assert out == []
+
+
+def test_pi_session_guard_rejects_bogus_id():
+    """不是 Pi 的 session id 就不要传给 --session，否则 pi 直接报错退出。"""
+    from ethan.kernel.pi_kernel import PiKernel
+
+    k = PiKernel()
+    assert k._looks_like_pi_session("01a1d8de-3e60-7240-a07f-98b0c7859dff") is True
+    assert k._looks_like_pi_session("/tmp/x/session.jsonl") is True
+    assert k._looks_like_pi_session("s_20261114_1200_abcd") is False
+    assert k._looks_like_pi_session("") is False
+
+
+# ── DSH 内核事件映射 ─────────────────────────────────────────
+
+
+def test_dsh_final_text():
+    from ethan.kernel.dsh_kernel import DSHKernel
+
+    out = DSHKernel()._handle_event(
+        {"type": "final", "text": "完成", "reason": {"kind": "stop"}}, KernelRequest()
+    )
+    assert out == ["完成"]
+
+
+def test_dsh_final_error_surfaces_message():
+    from ethan.kernel.dsh_kernel import DSHKernel
+
+    out = DSHKernel()._handle_event({
+        "type": "final",
+        "text": "",
+        "reason": {"kind": "error", "error": {"message": "no API key", "code": "MISSING_CREDENTIAL"}},
+    }, KernelRequest())
+    assert any("no API key" in str(x) for x in out)
+
+
+def test_dsh_session_id_captured():
+    from ethan.kernel.dsh_kernel import DSHKernel
+
+    req = KernelRequest()
+    DSHKernel()._handle_event({"type": "session", "sessionId": "session-abc"}, req)
+    assert req.session_id == "session-abc"
+
+
+def test_dsh_step_start_emits_thinking():
+    from ethan.kernel.dsh_kernel import DSHKernel
+
+    out = DSHKernel()._handle_event(
+        {"type": "status", "phase": "step_start", "turn": 1, "step": 1}, KernelRequest()
+    )
+    assert len(out) == 1
+    assert type(out[0]).__name__ == "ThinkingEvent"
+
+
+def test_dsh_unknown_event_does_not_crash():
+    """DSH 迭代快，新增事件类型不该让整轮失败。"""
+    from ethan.kernel.dsh_kernel import DSHKernel
+
+    assert DSHKernel()._handle_event({"type": "brand_new_thing"}, KernelRequest()) == []

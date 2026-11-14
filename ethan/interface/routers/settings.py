@@ -1,5 +1,4 @@
 """settings 路由：agent/system/provider/channel 配置 + onboarding + upload + prompt preview。"""
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -736,3 +735,153 @@ async def validate_knowledge_backend(req: KnowledgeValidateRequest):
         return {"ok": ok, "message": message}
     except Exception as e:
         return {"ok": False, "message": f"验证失败: {e}"}
+
+
+# ── 多内核管理 ─────────────────────────────────────────────────────
+#
+# 设计要点：**默认不装任何外部内核依赖**。用户在设置页选中某个内核时才触发安装
+# （见 ethan/kernel/deps.py 的模块 docstring）。所以这里的语义是：
+#   GET  /kernels          → 列出所有内核及其可用性/安装状态（不发安装）
+#   POST /kernels/install  → 「选中即安装」：确保依赖就绪，失败则返回原因
+#   POST /kernels/select   → 设为默认内核（会先确保依赖就绪）
+
+
+class KernelSelectRequest(BaseModel):
+    kind: str
+    # 依赖缺失时是否自动安装。默认 True——这就是「选了就触发安装」。
+    # 显式传 False 可只做能力探测，不发安装。
+    auto_install: bool = True
+
+
+@router.get("/kernels", dependencies=[Depends(verify_token)])
+async def list_kernels():
+    """列出所有内核：可用性、能力声明、依赖安装状态。
+
+    前端据此渲染内核选择器：不可用的显示「点击安装」，已安装的显示可切换。
+    """
+    from ethan.kernel.deps import all_deps_status, latest_status
+    from ethan.kernel.runtime import get_kernel_registry
+
+    registry = get_kernel_registry()
+    deps_by_kind = {d["kind"]: d for d in all_deps_status()}
+
+    items = []
+    for item in registry.list_status():
+        kind = item["kind"]
+        dep = deps_by_kind.get(kind)
+        item = dict(item)
+        # 原生内核没有外部依赖；其余把安装命令和提示一并给前端
+        item["install_command"] = dep["install_command"] if dep else ""
+        item["install_hint"] = dep["hint"] if dep else ""
+        items.append(item)
+
+    import ethan.core.config as _cfg
+    current = _cfg.get_config().defaults.kernel
+    latest = latest_status()
+    return {
+        "kernels": items,
+        "default": current.default or "ethan",
+        "task_rules": current.task_rules,
+        "last_install": latest.to_dict() if latest else None,
+    }
+
+
+@router.post("/kernels/install", dependencies=[Depends(verify_token)])
+async def install_kernel(req: KernelSelectRequest):
+    """确保某个内核的依赖就绪，缺失则自动安装。
+
+    这是「用户选了就触发安装，而不是手动敲命令」的实现点。
+    安装是阻塞操作（npm install 可能几十秒），所以丢线程池，避免卡住事件循环
+    ——与 list_skills 里 167 个 SKILL.md 同样的教训。
+    """
+    import asyncio
+
+    from ethan.kernel.deps import ensure_installed
+    from ethan.kernel.runtime import KernelKind
+
+    try:
+        kind = KernelKind.parse(req.kind)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not req.auto_install:
+        from ethan.kernel.deps import detect
+
+        ok, reason = detect(kind)
+        return {"ok": ok, "kind": kind.value, "installed": ok, "reason": reason}
+
+    status = await asyncio.to_thread(ensure_installed, kind)
+    return {"ok": status.installed, **status.to_dict()}
+
+
+@router.post("/kernels/select", dependencies=[Depends(verify_token)])
+async def select_kernel(req: KernelSelectRequest):
+    """设为默认内核。
+
+    顺序很重要：**先确保依赖就绪，再写配置**。若先写配置再装依赖，装失败就会
+    留下「配置指向一个不可用内核」的状态，导致后续所有对话降级 + 每次打警告。
+    """
+    import asyncio
+
+    from ethan.kernel.deps import detect, ensure_installed
+    from ethan.kernel.runtime import KernelKind
+
+    try:
+        kind = KernelKind.parse(req.kind)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if req.auto_install:
+        status = await asyncio.to_thread(ensure_installed, kind)
+        if not status.installed:
+            # 关键：不写配置，保持用户原来的内核。明确告知原因。
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f"{kind.value} 依赖未就绪，未切换（已保留原内核）",
+                    "reason": status.last_error,
+                    "install_command": status.install_command,
+                    "hint": status.hint,
+                },
+            )
+    else:
+        ok, reason = detect(kind)
+        if not ok:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": f"{kind.value} 不可用，未切换", "reason": reason},
+            )
+
+    cfg = get_config()
+    cfg.defaults.kernel.default = "" if kind == KernelKind.ETHAN else kind.value
+    save_config(cfg)
+    reload_config()
+    return {"ok": True, "default": cfg.defaults.kernel.default or "ethan"}
+
+
+class KernelTaskRulesRequest(BaseModel):
+    task_rules: dict[str, str]
+
+
+@router.post("/kernels/task-rules", dependencies=[Depends(verify_token)])
+async def set_kernel_task_rules(req: KernelTaskRulesRequest):
+    """设置「按任务类型选内核」的映射。空字符串 value 表示删除该规则。"""
+    from ethan.kernel.runtime import KernelKind
+
+    cleaned: dict[str, str] = {}
+    for task, kind_raw in (req.task_rules or {}).items():
+        if not kind_raw:
+            continue
+        try:
+            kind = KernelKind.parse(kind_raw)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"任务 {task!r}: {e}")
+        if kind != KernelKind.ETHAN:
+            # 原生是默认值，不需要显式写规则
+            cleaned[task] = kind.value
+
+    cfg = get_config()
+    cfg.defaults.kernel.task_rules = cleaned
+    save_config(cfg)
+    reload_config()
+    return {"ok": True, "task_rules": cleaned}
