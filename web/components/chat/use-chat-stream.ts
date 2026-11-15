@@ -419,6 +419,7 @@ export async function consumeStream(
             state: chunk.state as "done" | "error",
             duration_ms: chunk.duration_ms,
             gen_ms: chunk.gen_ms ?? undefined,
+            ended_at: chunk.ended_at ?? undefined,
             result_preview: chunk.result_preview,
             result_detail: chunk.result_detail,
             cards: (chunk.cards as ToolStep["cards"]) || currentToolSteps[matchedIdx].cards,
@@ -589,6 +590,7 @@ export async function consumeStream(
                       state: chunk.state as "running" | "done" | "error",
                       duration_ms: chunk.duration_ms ?? updated[idx].duration_ms,
                       gen_ms: chunk.gen_ms ?? updated[idx].gen_ms,
+                      ended_at: chunk.ended_at ?? updated[idx].ended_at,
                       result_preview: chunk.result_preview ?? updated[idx].result_preview,
                       result_detail: chunk.result_detail ?? updated[idx].result_detail,
                     };
