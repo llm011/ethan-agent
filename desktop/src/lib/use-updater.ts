@@ -94,6 +94,8 @@ function isAutoUpdateEnabled(): boolean {
 
 const STARTUP_DELAY_MS = 5_000;
 const CHECK_INTERVAL_MS = 60 * 60_000; // 1 小时
+// 状态允许停留的最长时间。超过就认为卡死（下载挂起 / 回调丢失），允许重置。
+const STUCK_STATE_MS = 6 * 60_000;
 
 /**
  * 检查并下载更新（如果有）。
@@ -112,8 +114,27 @@ async function getCurrentVersion(): Promise<string> {
 }
 
 export async function checkForUpdate(): Promise<void> {
-  if (currentState.state === "checking" || currentState.state === "downloading" || currentState.state === "installing") return;
+  // `ready` / `installed` 是「已经下好了，等用户重启」，这时再检查没有意义。
   if (currentState.state === "ready" || currentState.state === "installed") return;
+
+  // 但 `checking` / `downloading` / `installing` 不该无条件拦截——
+  // 一旦某次下载挂起，状态会卡在 downloading，之后所有检查都静默 return，
+  // 用户看到的就是「点检查没反应」。这里加时间闸：超过 6 分钟视为僵尸状态，强行重置。
+  if (
+    currentState.state === "checking" ||
+    currentState.state === "downloading" ||
+    currentState.state === "installing"
+  ) {
+    const stuck = Date.now() - (currentState.checkedAt ?? 0);
+    if (stuck < STUCK_STATE_MS) {
+      // 确实是「刚发起，还在进行中」——安静返回，不打扰
+      return;
+    }
+    console.warn(
+      `[updater] 检测到状态卡在 ${currentState.state} 已 ${Math.round(stuck / 1000)}s，强制重置后重试`,
+    );
+    setState({ state: "idle", error: null, progress: 0 });
+  }
 
   const mod = await loadUpdater();
   if (!mod) {
@@ -123,7 +144,7 @@ export async function checkForUpdate(): Promise<void> {
     return;
   }
 
-  setState({ state: "checking", error: null, progress: 0 });
+  setState({ state: "checking", error: null, progress: 0, checkedAt: Date.now(), upToDate: false });
   try {
     // 打印检查结果，方便用户/我们判断「为什么没检测到」：
     //   · 返回 null        → 真的没有更新（或版本号相等/更旧）
@@ -145,11 +166,22 @@ export async function checkForUpdate(): Promise<void> {
       notes: update.body ?? "",
       pubDate: update.date ?? "",
     };
-    setState({ state: "downloading", update: info, progress: 0 });
+    setState({ state: "downloading", update: info, progress: 0, checkedAt: Date.now() });
     pendingDownload = update;
     let total = 0;
     let downloaded = 0;
-    await update.download((event: any) => {
+    // 下载超时保护。
+    //
+    // 没有它的话，`update.download()` 一旦挂起（网络抖动、CDN 卡住），
+    // 状态会永远停在 `downloading`；而 `checkForUpdate()` 开头有
+    //   if (state === "downloading") return;
+    // 于是**之后每次点「检查更新」都静默返回**——用户看到的就是「点了没反应」，
+    // 而且界面上那条 1.5px 进度条几乎看不见。实测踩到。
+    //
+    // 5 分钟对 8MB 的桌面更新包足够；超时后主动抛错走 catch，状态回到 error → idle，
+    // 下次检查就能重新开始。
+    const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
+    const downloadPromise = update.download((event: any) => {
       if (event.event === "Started" && event.data.contentLength) {
         total = event.data.contentLength;
       } else if (event.event === "Progress") {
@@ -162,6 +194,15 @@ export async function checkForUpdate(): Promise<void> {
         setState({ progress: 100 });
       }
     });
+    await Promise.race([
+      downloadPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`下载超时（${DOWNLOAD_TIMEOUT_MS / 1000}s），请稍后重试`)),
+          DOWNLOAD_TIMEOUT_MS,
+        ),
+      ),
+    ]);
     setState({ state: "ready", progress: 100 });
   } catch (e: any) {
     pendingDownload = null;

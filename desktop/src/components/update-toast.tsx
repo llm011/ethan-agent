@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { RefreshCw, X } from "lucide-react";
+import { RefreshCw, X, Download} from "lucide-react";
 import { useUpdater } from "@/lib/use-updater";
 
 export function UpdateToast() {
@@ -21,15 +21,28 @@ export function UpdateToast() {
     setDismissed(false);
   }, [state, update?.version]);
 
-  // 下载中：极细进度条，无文字
+  // 下载中：带文字的卡片，不再是「一条几乎看不见的细线」。
+  //
+  // 之前这里是 pointer-events-none + 1.5px 细线 + 无文字，用户根本注意不到，
+  // 而下载一旦卡住，`checkForUpdate()` 会因为状态是 downloading 直接 return——
+  // 表现就是「点检查更新没反应」。现在明确告诉用户正在下载、下载到哪了。
   if (state === "downloading" && progress < 100) {
     return (
-      <div className="fixed bottom-4 right-4 z-50 pointer-events-none">
-        <div className="w-48 h-1.5 bg-muted/60 rounded-full overflow-hidden shadow-sm">
-          <div
-            className="h-full bg-primary/60 transition-all duration-200"
-            style={{ width: `${progress}%` }}
-          />
+      <div className="fixed bottom-4 right-4 z-50 pointer-events-auto">
+        <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-background border border-border shadow-lg">
+          <Download className="h-3.5 w-3.5 text-primary shrink-0 animate-pulse" />
+          <div className="min-w-0">
+            <div className="text-xs font-medium whitespace-nowrap">
+              正在下载{update?.version ? ` v${update.version}` : "新版本"}
+              <span className="text-muted-foreground ml-1 tabular-nums">{progress}%</span>
+            </div>
+            <div className="mt-1 w-40 h-1 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-200"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
         </div>
       </div>
     );
