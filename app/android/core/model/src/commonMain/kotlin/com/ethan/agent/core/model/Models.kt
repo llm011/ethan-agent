@@ -158,6 +158,8 @@ data class ToolStep(
     val state: String = "",
     @SerialName("duration_ms") val durationMs: Long? = null,
     @SerialName("gen_ms") val genMs: Long? = null,
+    /** 工具执行完成时刻（epoch 秒）。done/error 后才有，历史消息无此字段时为 null */
+    @SerialName("ended_at") @Serializable(with = NullableEpochSecondsSerializer::class) val endedAt: Long? = null,
     @SerialName("result_preview") val resultPreview: String? = null,
     @SerialName("result_detail") val resultDetail: String? = null,
     val thought: String? = null,
@@ -609,6 +611,8 @@ data class ChatStreamEvent(
     val id: String? = null,
     @SerialName("duration_ms") val durationMs: Long? = null,
     @SerialName("gen_ms") val genMs: Long? = null,
+    /** 工具执行完成时刻（epoch 秒）。done/error 事件下发 */
+    @SerialName("ended_at") @Serializable(with = NullableEpochSecondsSerializer::class) val endedAt: Long? = null,
     @SerialName("result_preview") val resultPreview: String? = null,
     @SerialName("result_detail") val resultDetail: String? = null,
     @SerialName("sub_steps") val subSteps: List<SubToolStep>? = null,
