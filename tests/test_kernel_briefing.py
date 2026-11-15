@@ -298,7 +298,28 @@ def test_empty_request_yields_empty_prompt():
 # ── 附图：落盘 + 路径（不走 inline） ─────────────────────────
 
 
-def test_image_only_message_is_not_dropped():
+@pytest.fixture
+def real_images(monkeypatch, tmp_path):
+    """把附图目录指到 tmp，并提供一个「真的存在」的图片文件。
+
+    为什么必须真造文件：`_image_paths()` 会校验文件是否存在（历史消息的 path
+    可能指向已清理的会话资产，死路径交给内核等于让它去读不存在的文件）。
+    用假路径的测试会被这道校验挡掉，测不到真正要测的东西。
+    """
+    import ethan.core.assets as assets
+
+    monkeypatch.setattr(assets, "IMAGES_DIR", tmp_path)
+
+    def make(rel_path: str) -> str:
+        f = tmp_path / rel_path
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"\x89PNG\r\n\x1a\n")
+        return rel_path
+
+    return make
+
+
+def test_image_only_message_is_not_dropped(real_images):
     """只发一张图、不打字的消息必须保留。
 
     原实现是 `if not text: continue`，把「只发图」整条丢掉——内核连图存在都
@@ -307,15 +328,10 @@ def test_image_only_message_is_not_dropped():
     """
     from ethan.kernel.acp_client_kernel import DshAcpKernel
 
+    rel = real_images("s1/img_0.png")
     k = DshAcpKernel()
     req = KernelRequest(
-        messages=[
-            Message(
-                role="user",
-                content="",
-                images=[{"path": "s1/img_0.png", "media_type": "image/png"}],
-            )
-        ],
+        messages=[Message(role="user", content="", images=[{"path": rel}])],
         session_id="s1",
     )
     prompt = k._build_prompt(req)
@@ -323,29 +339,55 @@ def test_image_only_message_is_not_dropped():
     assert "img_0.png" in prompt
 
 
-def test_image_paths_are_absolute_and_readable():
+def test_image_paths_are_absolute_and_readable(real_images):
     """给的是可直接读取的绝对路径，不是相对引用。
 
     外部 CLI 的 cwd 是 workspace，不是 ~/.ethan/assets；给相对路径它读不到。
     """
+    import os
+
     from ethan.kernel.acp_client_kernel import DshAcpKernel
 
+    rel = real_images("s2/a.png")
     k = DshAcpKernel()
     req = KernelRequest(
-        messages=[Message(role="user", content="看图", images=[{"path": "s2/a.png"}])],
+        messages=[Message(role="user", content="看图", images=[{"path": rel}])],
         session_id="s2",
     )
     prompt = k._build_prompt(req)
-    assert "a.png" in prompt
-    # 抽出一行路径验证是绝对路径
     line = next(ln for ln in prompt.splitlines() if "a.png" in ln)
     path_str = line.lstrip("- ").strip()
-    import os
-
     assert os.path.isabs(path_str), f"应该是绝对路径，实际 {path_str!r}"
+    assert os.path.exists(path_str), "给的路径必须真实存在，否则内核读到的是死链"
 
 
-def test_image_prompt_does_not_dictate_a_tool():
+def test_stale_image_path_is_skipped(real_images):
+    """失效的附图引用（会话资产已清理）不交给内核。
+
+    把死路径写进 prompt 比不写更糟：内核会去读、读不到，然后把失败当工具有问题
+    反复重试。
+    """
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+    from ethan.kernel.runtime import KernelRequest as KR
+
+    real_images("s5/ok.png")  # 只让 ok.png 存在
+    k = DshAcpKernel()
+    req = KR(
+        messages=[
+            Message(
+                role="user",
+                content="看图",
+                images=[{"path": "s5/ok.png"}, {"path": "s5/gone.png"}],
+            )
+        ],
+        session_id="s5",
+    )
+    prompt = k._build_prompt(req)
+    assert "ok.png" in prompt
+    assert "gone.png" not in prompt, "失效引用不该出现在 prompt 里"
+
+
+def test_image_prompt_does_not_dictate_a_tool(real_images):
     """不要在提示里替内核指定用哪个工具读图。
 
     模型本身大多有识图能力；写「用 ocr_extract_text 读」既越权又可能在
@@ -353,9 +395,10 @@ def test_image_prompt_does_not_dictate_a_tool():
     """
     from ethan.kernel.acp_client_kernel import DshAcpKernel
 
+    rel = real_images("s3/b.png")
     k = DshAcpKernel()
     req = KernelRequest(
-        messages=[Message(role="user", content="", images=[{"path": "s3/b.png"}])],
+        messages=[Message(role="user", content="", images=[{"path": rel}])],
         session_id="s3",
     )
     prompt = k._build_prompt(req)
@@ -363,14 +406,13 @@ def test_image_prompt_does_not_dictate_a_tool():
         assert tool_name not in prompt, f"提示里不该指定工具 {tool_name}"
 
 
-def test_text_and_image_both_preserved():
+def test_text_and_image_both_preserved(real_images):
     from ethan.kernel.acp_client_kernel import DshAcpKernel
 
+    rel = real_images("s4/e.png")
     k = DshAcpKernel()
     req = KernelRequest(
-        messages=[
-            Message(role="user", content="这个报错怎么修", images=[{"path": "s4/e.png"}])
-        ],
+        messages=[Message(role="user", content="这个报错怎么修", images=[{"path": rel}])],
         session_id="s4",
     )
     prompt = k._build_prompt(req)

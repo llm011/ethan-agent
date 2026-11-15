@@ -313,15 +313,19 @@ class KernelRuntime:
 
         `{data: ...}` 那条走 `save_image()`：它顺带做了长图切分与超限缩放，
         和 Ethan 原生链路是同一份落盘逻辑，不另起一套。
+
+        **只返回磁盘上真实存在的文件**。历史消息的 `path` 可能指向已被清理的
+        会话资产（会话删除/归档后图片目录会没），把死路径交给内核等于让它去读
+        一个不存在的文件——比不告诉它更糟，它会把失败当工具有问题反复重试。
         """
         images = getattr(msg, "images", None) or []
         if not images:
             return []
 
-        out: list[str] = []
         try:
             from ethan.core.assets import image_file_path, save_image
 
+            out: list[str] = []
             for idx, img in enumerate(images):
                 data = (img or {}).get("data", "")
                 if data:
@@ -330,11 +334,15 @@ class KernelRuntime:
                     for rel_path, _ in save_image(sid, idx, data, media_type):
                         out.append(str(image_file_path(rel_path)))
                 elif img.get("path"):
-                    out.append(str(image_file_path(img["path"])))
+                    abs_path = image_file_path(img["path"])
+                    if abs_path.exists():
+                        out.append(str(abs_path))
+                    else:
+                        logger.debug("内核 prompt 跳过已失效的附图引用：%s", abs_path)
+            return out
         except Exception:  # noqa: BLE001 - 图片处理失败不该让整轮对话失败
             logger.warning("内核 prompt 解析附图失败，本轮按无图处理", exc_info=True)
             return []
-        return out
 
 
 class KernelRegistry:
