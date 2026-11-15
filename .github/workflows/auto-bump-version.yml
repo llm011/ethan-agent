@@ -51,11 +51,53 @@ jobs:
 
       - name: Bump patch version
         id: bump
+        shell: bash
         run: |
           OLD=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$OLD"
-          NEW="$MAJOR.$MINOR.$((PATCH + 1))"
-          sed -i "s/^version = \"$OLD\"/version = \"$NEW\"/" pyproject.toml
+          echo "current=$OLD"
+
+          # 必须用 Python 解析，不能用 bash 的 IFS='.' + 算术展开。
+          #
+          # 实测踩到：版本是 `1.0.0b4`（PEP 440 预发布）时，
+          #   IFS='.' read -r MAJOR MINOR PATCH  → PATCH="0b4"
+          #   $((PATCH + 1))                      → bash 报错、展开成空串
+          #   NEW="1.0.0"                         → 版本号被写坏
+          # 然后 `uv lock` 报 `TOML parse error: expected version to start with
+          # a number`，整个 auto-bump 失败。
+          #
+          # 规则：
+          #   · 正式版    1.0.0    → 1.0.1    （补丁 +1）
+          #   · 预发布版  1.0.0b4  → 1.0.0b5  （序号 +1，不跨到正式版）
+          NEW=$(OLD="$OLD" python3 - <<'PYEOF'
+          import os, re, sys
+          v = os.environ["OLD"]
+          m = re.match(r"^(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?$", v)
+          if not m:
+              print(v)
+              sys.stderr.write("unsupported version: " + v + "\n")
+              sys.exit(0)
+          major, minor, patch, tag, num = m.groups()
+          if tag:
+              print(f"{major}.{minor}.{patch}{tag}{int(num) + 1}")
+          else:
+              print(f"{major}.{minor}.{int(patch) + 1}")
+          PYEOF
+          )
+          echo "new=$NEW"
+
+          OLD="$OLD" NEW="$NEW" python3 - <<'PYEOF'
+          import os, re, sys
+          old, new = os.environ["OLD"], os.environ["NEW"]
+          p = "pyproject.toml"
+          s = open(p, encoding="utf-8").read()
+          s2, n = re.subn(r'^version = ".*"$', 'version = "' + new + '"',
+                          s, count=1, flags=re.M)
+          if not n:
+              sys.exit("version line not found in pyproject.toml")
+          open(p, "w", encoding="utf-8").write(s2)
+          print(f"pyproject.toml: {old} -> {new}")
+          PYEOF
+
           echo "version=$NEW" >> $GITHUB_OUTPUT
 
       - name: Install uv
