@@ -42,6 +42,11 @@ keystore.properties
 .coverage
 htmlcov/
 .pytest_cache/
+# pytest 临时目录。正常应在系统 TMPDIR 下，但某些运行方式
+# （--basetemp 指到当前目录、或 TMPDIR 被覆盖）会让它落在仓库根，
+# 一次全量测试就能堆出几百 MB。实测踩到 356MB。
+pytest-of-*/
+.pytest_tmp/
 
 # Distribution
 *.tar.gz
