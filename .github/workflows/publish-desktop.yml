@@ -185,7 +185,18 @@ jobs:
           print('Verified:', [l for l in content.splitlines() if l.startswith('version')][:1])
           "
 
+      # 构建失败自动重试一次。
+      #
+      # 实测踩到：macOS arm64 因为 GitHub API 瞬时超时（Connect Timeout Error
+      # api.github.com:443）失败，导致 release 里只有 x64 产物、latest.json 缺
+      # darwin-aarch64 条目，Apple Silicon 用户检测更新时报
+      # "None of the fallback platforms [darwin-aarch64-app, darwin-aarch64] were found"。
+      #
+      # 这类网络抖动重试一次基本就好。用 continue-on-error + 判断 outcome 实现，
+      # 因为 composite action 本身不支持 retry。
       - name: Build Tauri app
+        id: build1
+        continue-on-error: true
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -206,6 +217,32 @@ jobs:
           # Windows 用 NSIS（生成 .exe）而非 .msi，便于 updater 静默安装
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
+
+      # 第一次失败时重试一次（原因见上：网络抖动）
+      - name: Build Tauri app (retry)
+        id: build2
+        if: steps.build1.outcome == 'failure'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: ./desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Ethan Agent ${{ github.ref_name }}'
+          releaseBody: '桌面端应用，下载对应平台的安装包即可使用。'
+          releaseDraft: false
+          prerelease: false
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}
+
+      # 两次都失败才真的失败
+      - name: Fail if both build attempts failed
+        if: steps.build1.outcome == 'failure' && steps.build2.outcome == 'failure'
+        run: |
+          echo "::error::Tauri build failed twice (first attempt and retry)"
+          exit 1
 
       - name: Upload artifacts (macOS)
         if: matrix.platform != 'windows-latest'
@@ -379,6 +416,60 @@ jobs:
               check=True,
           )
           print(f"Rewrote {changed} URLs to direct links and uploaded")
+          PYEOF
+
+      # 发布后校验：latest.json 必须同时覆盖 Apple Silicon 和 Intel。
+      #
+      # 实测踩到：macOS arm64 构建因网络超时失败，release 里只有 x64 产物，
+      # latest.json 的 platforms 缺 darwin-aarch64 → M 系列 Mac 检测更新时报
+      #   "None of the fallback platforms [darwin-aarch64-app, darwin-aarch64]
+      #    were found in the response platforms object"
+      # 而 workflow 本身是"部分成功"，没人会注意。这个校验让它显性失败。
+      - name: Verify latest.json covers all macOS arches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, subprocess, sys
+
+          repo, tag = os.environ["REPO"], os.environ["TAG"]
+          r = subprocess.run(
+              ["gh", "api", f"repos/{repo}/releases/tags/{tag}"],
+              capture_output=True, text=True,
+          )
+          if r.returncode != 0:
+              print(f"::warning::取不到 release {tag}，跳过校验")
+              sys.exit(0)
+
+          assets = json.loads(r.stdout).get("assets", [])
+          lj = next((a for a in assets if a["name"] == "latest.json"), None)
+          if not lj:
+              print("::warning::release 里没有 latest.json，跳过校验")
+              sys.exit(0)
+
+          dl = subprocess.run(
+              ["gh", "api", f"repos/{repo}/releases/assets/{lj['id']}",
+               "-H", "Accept: application/octet-stream"],
+              capture_output=True, text=True,
+          )
+          platforms = json.loads(dl.stdout).get("platforms", {})
+          print(f"latest.json platforms: {sorted(platforms)}")
+
+          # 两个 macOS 架构都必须有，否则对应机器收不到更新
+          missing = []
+          for arch in ("aarch64", "x86_64"):
+              if not any(f"darwin-{arch}" in k for k in platforms):
+                  missing.append(f"darwin-{arch}")
+
+          if missing:
+              print(f"::error::latest.json 缺少平台 {missing}——"
+                    f"对应架构的用户收不到更新。多半是那个 build job 失败了，"
+                    f"去 Actions 看 build 矩阵的哪个 job 报错。")
+              sys.exit(1)
+
+          print("✅ 两个 macOS 架构都在")
           PYEOF
 
   # 触发 Pages 重新部署，deploy-docs 会自动从 release 拉取 latest.json。
