@@ -232,9 +232,12 @@ private fun FlowRowLikeBadges(
                 fg = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        // ethanContext 只表示「不注入 Ethan 的人格/画像/系统提示词」。技能与记忆能不能用
+        // 由上面的 sharesTools 决定（经 MCP 注入，附带技能索引与记忆召回提示）。
+        // 这里以前写「不共享技能/记忆」，和绿色徽章自相矛盾。
         if (!ethanContext) {
             SmallChip(
-                text = "不共享技能/记忆",
+                text = "不注入人格/画像",
                 bg = MaterialTheme.colorScheme.surfaceVariant,
                 fg = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -255,8 +255,18 @@ def test_kernel_usage_shape_matches_agent_usage():
 # ── 默认路径：ethan 内核原样转发 ─────────────────────────────
 
 
-def test_default_kernel_is_ethan():
-    """未配置 kernel 时必须是原生内核——这是「不破坏现有行为」的底线。"""
+def test_default_kernel_is_ethan(monkeypatch):
+    """未配置 kernel 时必须是原生内核——这是「不破坏现有行为」的底线。
+
+    必须显式清掉 `kernel.default`：这条测的是「未配置」，而 conftest 会拷一份
+    真实配置当基线，用户自己把默认内核设成了 dsh 的机器上它会假失败
+    （实测踩到：本机 config.yaml 里 `kernel.default: dsh`）。
+    """
+    import ethan.core.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod.get_config().defaults.kernel, "default", "", raising=False)
+    monkeypatch.setattr(cfg_mod.get_config().defaults.kernel, "task_rules", {}, raising=False)
+
     stub = _FakeStub(usage=_FakeUsage())
     runner = build_runner(stub, channel="web")
     assert runner.kernel_kind == "ethan"

@@ -100,7 +100,7 @@ class PiKernel(KernelRuntime):
             yield f"[内核不可用] {reason}"
             return
 
-        prompt = self._build_prompt(request)
+        prompt = self._compose_prompt(request)
         if not prompt:
             yield "[空输入] 没有可执行的内容"
             return
@@ -292,22 +292,5 @@ class PiKernel(KernelRuntime):
         # 含 / 说明是路径形式，直接可用；纯 UUID 也认
         return "/" in s or s.count("-") >= 4
 
-    def _build_prompt(self, request: KernelRequest) -> str:
-        msgs = request.messages or []
-        if not msgs:
-            return ""
-        turns: list[str] = []
-        for m in msgs:
-            role = getattr(m, "role", "")
-            content = getattr(m, "content", "") or ""
-            if role not in ("user", "assistant"):
-                continue
-            text = content.strip()
-            if not text:
-                continue
-            turns.append(text if role == "user" else f"[你之前的回复]\n{text}")
-        if not turns:
-            return ""
-        if len(turns) == 1:
-            return turns[0]
-        return "以下是对话历史，请接着回答最后一条用户消息：\n\n" + "\n\n".join(turns)
+    # `_build_prompt` 沿用基类实现（压消息历史）；Pi 不共享 Ethan 工具，
+    # 所以基类的 `_compose_prompt` 不会给它拼简报表。

@@ -37,8 +37,22 @@ def test_self_modifying_tools_never_exposed():
     外部 agent 误触的代价远高于收益（比如它"贴心地"把 lark.app_id 清空）。
     """
     names = {t.name for t in build_mcp_tools()}
-    for dangerous in ("config_set", "profile_update", "procedure_write", "memory_write"):
+    for dangerous in ("config_set", "profile_update", "procedure_write"):
         assert dangerous not in names, f"{dangerous} 不该暴露"
+
+
+def test_memory_write_is_exposed():
+    """memory_write **要**暴露，与 profile_update / procedure_write 区别对待。
+
+    记忆是「对话产生的事实」，不是「Ethan 的自我定义」：用户在外部内核（DSH）
+    里说「以后都叫我阿凌」，记不住才是 bug。写入怎么落库（证据等级、supersede）
+    由 memory_write 内部的准入管道决定，外部内核无从指定。
+
+    这条与上面那条是成对的：不许把 memory_write 又塞回 NEVER_EXPOSE。
+    """
+    names = {t.name for t in build_mcp_tools()}
+    assert "memory_write" in names
+    assert "memory_write" not in NEVER_EXPOSE
 
 
 def test_secrets_tools_exposed():

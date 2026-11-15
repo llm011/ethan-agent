@@ -158,7 +158,7 @@ class AcpClientKernel(KernelRuntime):
             yield f"[内核不可用] {reason}"
             return
 
-        prompt = self._build_prompt(request)
+        prompt = self._compose_prompt(request)
         if not prompt:
             yield "[空输入] 没有可执行的内容"
             return
@@ -512,25 +512,8 @@ class AcpClientKernel(KernelRuntime):
         """
         return 300 if (request.task_kind or "") == "coding" else 120
 
-    def _build_prompt(self, request: KernelRequest) -> str:
-        msgs = request.messages or []
-        if not msgs:
-            return ""
-        turns: list[str] = []
-        for m in msgs:
-            role = getattr(m, "role", "")
-            content = getattr(m, "content", "") or ""
-            if role not in ("user", "assistant"):
-                continue
-            text = content.strip()
-            if not text:
-                continue
-            turns.append(text if role == "user" else f"[你之前的回复]\n{text}")
-        if not turns:
-            return ""
-        if len(turns) == 1:
-            return turns[0]
-        return "以下是对话历史，请接着回答最后一条用户消息：\n\n" + "\n\n".join(turns)
+    # `_build_prompt` 沿用基类实现（压消息历史），简报由基类 `_compose_prompt` 拼。
+    # 这里不重复定义——三份同样的实现迟早会漂移。
 
 
 _DONE = object()
