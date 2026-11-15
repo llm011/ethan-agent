@@ -35,6 +35,7 @@ git branch -d feature/<feature-name>
 **问题**：ethan 的 watchdog 机制通过 `/tmp/ethan/server.pid` 管理服务进程。多个 worktree 同时启动 `ethan serve` 会互相冲突——watchdog 会杀掉 PID 文件指向的进程，导致非主实例被误杀。
 
 **已落地的缓解措施**：
+- **`ethan serve` 启动前先拿 `flock` 单实例锁**（`ethan/interface/serve_lock.py`，锁文件 `/tmp/ethan/serve-<port>.lock`）：上面的检测都是「先查后做」，两个进程同时启动会同时查到「没人」，然后一起跑完数十秒 lifespan 才在 bind 撞 Errno 48，而 uvicorn 绑失败不退出 → 僵尸进程。锁把「检查 + 启动」变成原子区间，后到者立刻以退出码 1 失败并报出持有者 pid。锁由内核随进程退出释放，无陈旧锁；`ETHAN_NO_WATCHDOG=1` 时按「端口 + 数据目录」分桶；`--force` 不加锁；Windows 无 `fcntl` 自动降级。
 - **`ethan serve` 启动前会检测重复实例**（`cli.py` 的 `_find_conflicting_servers()`）：判据是「**是否打开同一个 `sessions.db`**」（不是同端口——两个实例用不同端口照样互锁），命中就报错退出并列出冲突 PID，避免多个实例并发写导致 `database is locked`（历史上表现为「对话卡住没响应」，其实不是性能问题）。
   - **`ETHAN_NO_WATCHDOG=1` 会跳过这个检测**——它的语义就是「我在开发/测试，别管我」。worktree 里跑测试时 `sessions.db` 和已 install 的常驻服务是同一个文件，不放行会把下面的开发流程整个堵死。
   - 不想设环境变量时也可用 `ethan serve --force`（不推荐，真的会锁冲突）。
