@@ -141,6 +141,9 @@ jobs:
               print(f'{base}-{full}.{num}')
           ")
           echo "PEP440 $VERSION → semver $SEMVER for desktop files"
+          # Windows MSI 只接受纯数字的预发布标识（不能有 beta/alpha 字样），
+          # 报错：optional pre-release identifier must be numeric-only。
+          # 所以 Windows 单独算一个 4 段式版本（见下面的 Override 步骤）。
           # tauri.conf.json / package.json / Cargo.toml 统一用 Python 跨平台处理
           python3 -c "
           import json, re
@@ -166,6 +169,29 @@ jobs:
           content = re.sub(r'^version = \".*?\"', f'version = \"{version}\"', content, count=1, flags=re.MULTILINE)
           open(f, 'w', encoding='utf-8').write(content)
           print('Verified:', [l for l in content.splitlines() if l.startswith('version')][:1])
+          "
+
+      # Windows MSI 对版本号的限制比 semver 更严：预发布标识必须纯数字，
+      # 且 ≤65535。`1.0.0-beta.1` 里的 `beta` 不合法，只能用 `1.0.0.1` 这种 4 段式。
+      # macOS 保持标准 semver 不变，只在 Windows 上覆写。
+      - name: Override version for Windows MSI
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          python3 -c "
+          import json, re
+          ver = ''
+          for line in open('pyproject.toml', encoding='utf-8'):
+              if line.startswith('version = '):
+                  ver = line.split('\"')[1]; break
+          m = re.match(r'^(\d+\.\d+\.\d+)(?:(?:a|b|rc)(\d+))?$', ver)
+          winver = f'{m.group(1)}.{m.group(2) or 0}' if m else '0.0.0.0'
+          f = 'desktop/src-tauri/tauri.conf.json'
+          d = json.load(open(f, encoding='utf-8'))
+          d['version'] = winver
+          with open(f, 'w', encoding='utf-8') as fh:
+              json.dump(d, fh, indent=2, ensure_ascii=False); fh.write('\n')
+          print(f'Windows MSI version -> {winver}')
           "
 
       - name: Build Tauri app
