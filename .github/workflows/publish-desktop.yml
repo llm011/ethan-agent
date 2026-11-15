@@ -120,11 +120,31 @@ jobs:
         run: |
           # pyproject.toml 是唯一版本源，构建前把版本号同步到 desktop 各文件
           VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
-          echo "Syncing desktop version files to $VERSION"
+          # PEP 440 → semver：Tauri 只认 semver，不认 `1.0.0b1` 这种写法
+          # （报错 `tauri.conf.json > version must be a semver string`）。
+          #   1.0.0b1  → 1.0.0-beta.1
+          #   1.0.0a2  → 1.0.0-alpha.2
+          #   1.0.0rc1 → 1.0.0-rc.1
+          # 无预发布后缀的正式版原样保留。
+          SEMVER=$(python3 -c "
+          import re, sys
+          v = '$VERSION'
+          m = re.match(r'^(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+))?$', v)
+          if not m:
+              # 已经是 semver 或无法识别 → 原样用
+              print(v); sys.exit()
+          base, tag, num = m.group(1), m.group(2), m.group(3)
+          if not tag:
+              print(base)
+          else:
+              full = {'a': 'alpha', 'b': 'beta', 'rc': 'rc'}[tag]
+              print(f'{base}-{full}.{num}')
+          ")
+          echo "PEP440 $VERSION → semver $SEMVER for desktop files"
           # tauri.conf.json / package.json / Cargo.toml 统一用 Python 跨平台处理
           python3 -c "
           import json, re
-          version = '$VERSION'
+          version = '$SEMVER'
           # Windows 默认 cp1252，读不了 UTF-8 中文注释（Cargo.toml 等），必须显式 utf-8
           # tauri.conf.json
           f = 'desktop/src-tauri/tauri.conf.json'

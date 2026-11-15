@@ -379,29 +379,6 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        # (1) 沉浸式工具模式：会话 mode 解析出 delegate_agent 时，整条会话的每句话都
-        #     直接续接该 coding agent（同一工具 session），不走 Ethan chat 模型。
-        #     工作目录按会话隔离（~/.ethan/agent-sessions/<会话id>）。
-        from ethan.core.modes import resolve_mode
-        from ethan.core.paths import user_agent_session_dir
-        from ethan.core.run_manager import RunManager
-        _mode = resolve_mode(req.mode)
-        if _mode.delegate_agent and req.session_id:
-            import os as _os
-            cwd = str(user_agent_session_dir(req.session_id))
-            _os.makedirs(cwd, exist_ok=True)
-            prompt = (req.messages[-1].get("content", "") if req.messages else "").strip()
-            run = RunManager.instance().create(req.session_id, user_id=user_id)
-            run.task = asyncio.create_task(
-                _run_delegate_generation(run, prompt, _mode.delegate_agent, cwd,
-                                         store, req.session_id, user_id)
-            )
-            return StreamingResponse(
-                _sse_from_run(run),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-            )
-
         # (2) 镜像会话续接：source=codex/claude/opencode 的临时委派会话，用户直接发消息
         #     时把消息当新 prompt 续接对应 coding agent（resume），过程实时推回该会话。
         from ethan.acp import get_mirror_info
