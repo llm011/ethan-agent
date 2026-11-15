@@ -96,6 +96,10 @@ def _data_dir_tag() -> str:
     **必须用 sha256 而不是内置 ``hash()``**：``str`` 的 ``hash()`` 受
     ``PYTHONHASHSEED`` 影响、每个进程随机化，两个进程算出不同标签就各自建了
     一把锁，互斥直接失效（实测过：两个 serve 抢同一端口都"拿到锁"）。
+
+    取 12 位而不是 8 位：截断的唯一目的是「换个数据目录就能并存」，一旦撞了会
+    表现成两个不同目录互相阻塞、报错里还是一个莫名其妙的 pid，非常难排查。
+    多留 4 位几乎不增加可读成本，却把碰撞率再降 65536 倍。
     """
     try:
         from ethan.core.paths import user_data_dir
@@ -103,11 +107,16 @@ def _data_dir_tag() -> str:
         raw = str(user_data_dir().resolve())
     except Exception:
         raw = os.environ.get("ETHAN_DATA_DIR", "") or os.path.expanduser("~/.ethan")
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
 
 def lock_path(port: int) -> Path:
-    """该 serve 实例对应的锁文件路径。"""
+    """该 serve 实例对应的锁文件路径。
+
+    「是否按数据目录分桶」的判断**只在这里**，``_data_dir_tag`` 保持成纯粹的
+    路径 → 标签函数：将来若想换分桶维度（按 venv、按 profile…），改这一处即可，
+    不会因为别处顺手复用它而意外触发。
+    """
     dev = _watchdog_disabled()
     suffix = f"-{_data_dir_tag()}" if dev else ""
     return _lock_dir() / f"serve-{port}{suffix}.lock"
@@ -120,12 +129,16 @@ def acquire(port: int) -> tuple[bool, int | None]:
     ``holder_pid`` 是从锁文件里读到的持有者 pid（可能为 None——对方还没写进去，
     或不是本程序写的；只用于给用户看的提示，不作为判据）。
 
-    平台不支持 ``fcntl``（Windows）时直接返回 ``(True, None)``，保持旧行为。
+    平台不支持 ``fcntl``（Windows）或锁文件建不出来时返回 ``(True, None)``，
+    保持旧行为。这两种降级会打日志：``fcntl`` 缺失是 info（启动时打一次就够），
+    锁文件不可写是 warning（环境异常，值得排查）。
     """
     try:
         import fcntl
     except ImportError:  # pragma: no cover - 仅在 Windows 上走到
-        logger.debug("[ServeLock] 当前平台无 fcntl，跳过单实例锁")
+        # info 而不是 debug：这时单实例保护是**真的没有**，排查并发启动问题时
+        # 必须能在日志里看到这一行，否则会误以为锁生效了。
+        logger.info("[ServeLock] 当前平台无 fcntl，单实例锁未启用")
         return True, None
 
     path = lock_path(port)

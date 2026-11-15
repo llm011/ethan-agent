@@ -69,10 +69,11 @@ def test_dev_mode_buckets_by_data_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("ETHAN_NO_WATCHDOG", "1")
     calls = {"n": 0}
 
-    monkeypatch.setattr(
-        serve_lock, "_data_dir_tag", lambda: (calls.__setitem__("n", calls["n"] + 1),
-                                             f"dir{calls['n']}")[1]
-    )
+    def _next_tag() -> str:
+        calls["n"] += 1
+        return f"dir{calls['n']}"
+
+    monkeypatch.setattr(serve_lock, "_data_dir_tag", _next_tag)
     # 同一进程内两次 acquire 用的是不同标签 → 对应两个不同数据目录
     assert serve_lock.acquire(8900)[0] is True
     assert serve_lock.acquire(8900)[0] is True
@@ -236,8 +237,13 @@ def test_acquire_degrades_when_lock_file_unwritable(monkeypatch, tmp_path):
     assert ok is True and holder is None
 
 
-def test_acquire_degrades_without_fcntl(monkeypatch):
-    """Windows 没有 fcntl：必须返回「拿到」，保持旧行为而不是崩。"""
+def test_acquire_degrades_without_fcntl(monkeypatch, caplog):
+    """Windows 没有 fcntl：必须返回「拿到」，保持旧行为而不是崩。
+
+    降级必须留一条不是 debug 的日志——否则运维会以为单实例保护还在。
+    """
     monkeypatch.setitem(sys.modules, "fcntl", None)
-    ok, holder = serve_lock.acquire(8989)
+    with caplog.at_level("INFO", logger="ethan.interface.serve_lock"):
+        ok, holder = serve_lock.acquire(8989)
     assert ok is True and holder is None
+    assert any("单实例锁未启用" in r.message for r in caplog.records)
