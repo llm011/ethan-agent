@@ -73,6 +73,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ethan.agent.core.model.ToolStep
+import com.ethan.agent.core.model.formatToolEndedAt
 
 @Composable
 fun LoadingBox(modifier: Modifier = Modifier) {
@@ -447,6 +448,10 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
     val isError = step.state == "error"
     val isCancelled = step.state == "cancelled"
     val isRunning = step.state == "running"
+    val isInFlight = isRunning || step.state == "start"
+    val endedAt = remember(step.endedAt, isInFlight) {
+        if (isInFlight) null else formatToolEndedAt(step.endedAt)
+    }
     val statusColor = when {
         isError -> StatusError
         isDone -> StatusSuccess
@@ -466,7 +471,7 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
     Column(modifier = Modifier.fillMaxWidth()) {
         // 点击行展开执行详情（对齐 Web detailOpen）：完整参数全文 + 思考 + 结果详情。
         // 运行中也允许展开——args 从 start 起就有，此时点开是为了看完整命令。
-        val hasDetailContent = !step.thought.isNullOrBlank() || !step.resultDetail.isNullOrBlank()
+        val hasDetailContent = !step.thought.isNullOrBlank() || !step.resultDetail.isNullOrBlank() || endedAt != null
         val expandable = step.args.isNotBlank() || (!isRunning && hasDetailContent)
         var detailOpen by remember { mutableStateOf(false) }
         val toggleDetail: () -> Unit = { detailOpen = !detailOpen }
@@ -506,7 +511,7 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
                 modifier = Modifier.weight(1f),
             )
 
-            // 双耗时：✨模型生成耗时（start 即有，running 态也显示）+ 🕐工具执行耗时（done 后显示）
+            // 双耗时 + 完成时刻：✨模型生成耗时（start 即有）+ 🕐工具执行耗时（done 后显示）+ 完成时刻（done 后显示）
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 val genMs = step.genMs
                 if (genMs != null) {
@@ -518,9 +523,17 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
                     )
                 }
                 val durationMs = step.durationMs
-                if (durationMs != null) {
+                if (durationMs != null && !isInFlight) {
                     Text(
                         "🕐${formatMs(durationMs)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                }
+                if (endedAt != null) {
+                    Text(
+                        endedAt.label,
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
@@ -611,6 +624,9 @@ private fun ToolStepRow(step: ToolStep, indent: Int) {
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                if (endedAt != null) {
+                    ToolDetailSection("完成于", endedAt.full)
+                }
                 if (step.args.isNotBlank()) {
                     ToolDetailSection("参数", step.args)
                 }

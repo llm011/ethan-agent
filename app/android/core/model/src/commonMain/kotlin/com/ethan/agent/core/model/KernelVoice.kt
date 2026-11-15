@@ -25,7 +25,7 @@ data class KernelCapabilitiesDto(
     val resumable: Boolean = false,
     /**
      * 能否共享 Ethan 的工具/技能（经 MCP 注入）。
-     * 实测：ethan / dsh / claude_code 可用；codex / opencode / pi 不可用。
+     * 实测：ethan / dsh / claude_code / opencode / antigravity 可用；codex / pi 不可用。
      */
     @SerialName("shares_ethan_tools") val sharesEthanTools: Boolean = false,
     /** 不能共享时的原因（可操作说明，不是「暂不支持」）。 */

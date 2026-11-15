@@ -1316,12 +1316,14 @@ class ChatViewModel(
                         // 否则一结束 thought 就丢了。
                         val existingIdx = toolSteps.indexOfFirst { event.id != null && it.id == event.id }
                         val existing = if (existingIdx >= 0) toolSteps[existingIdx] else null
+                        val isRunningStep = stepState == "start" || stepState == "running"
                         val step = ToolStep(
                             tool = tool,
                             args = event.args ?: "",
                             state = stepState,
                             durationMs = event.durationMs,
                             genMs = event.genMs,
+                            endedAt = if (isRunningStep) null else event.endedAt,
                             resultPreview = event.resultPreview,
                             resultDetail = event.resultDetail,
                             thought = existing?.thought ?: event.thought ?: preToolThought,
