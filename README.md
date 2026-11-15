@@ -71,8 +71,16 @@ docker compose up -d
 | `pi` | `pi` CLI | ❌ 仅自带工具 |
 
 **「可用 Ethan 的工具」是什么意思**：外部内核保留自己的大脑（规划/推理），但通过
-`/kernel-tools` 这个 MCP 端点拿到 Ethan 的 58 个工具——搜索、知识库、文件、OCR 等。
+`/kernel-tools` 这个 MCP 端点拿到 Ethan 的 58 个工具——搜索、知识库、文件、OCR、
+技能与记忆（`skill_list` / `skill_read` / `recall_memory` / `memory_write`）等。
 于是它既能用自己擅长的能力，又能用 Ethan 的手脚干活。
+
+光把工具挂上去还不够：外部内核看不到 Ethan 的系统提示词，不知道「有这些技能」
+「该在什么时候召回记忆」。所以派发时还会前置一张**简报表**——技能索引 +
+「涉及个人上下文先调 `ethan_recall_memory`」+「值得长期记住的事调
+`ethan_memory_write`」。人格与用户画像**不注入**（两份人格会打架），这是
+`ethan_context=False` 的取舍。没共享工具的内核（Codex / Pi）不带简报，
+免得教它们调不存在的工具。
 
 注入不污染用户环境：`mcp_servers` 是 ACP `new_session()` 的每次调用参数，
 不写入 `~/.dsh` / `~/.claude`。DSH 自带的工具全部保留，只多出 `mcp__ethan__*` 前缀的那批。

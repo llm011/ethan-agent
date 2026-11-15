@@ -110,7 +110,7 @@ class ACPKernelBase(KernelRuntime):
             yield f"[内核不可用] {reason}"
             return
 
-        prompt = self._build_prompt(request)
+        prompt = self._compose_prompt(request)
         if not prompt:
             yield "[空输入] 没有可执行的内容"
             return
@@ -332,36 +332,8 @@ class ACPKernelBase(KernelRuntime):
             logger.warning("构造 Claude MCP 配置失败，本次不注入 Ethan 工具", exc_info=True)
             return "", {}
 
-    def _build_prompt(self, request: KernelRequest) -> str:
-        """把消息历史压成单条 prompt。
-
-        外部 CLI 每次 `-p` 是无状态调用，多轮历史必须自己拼进去。ACP 层的
-        `--resume` 续接的是「同一个 CLI 会话自己的上下文」，不能替代我们这边
-        按 request.messages 组织的对话——所以两个都用：历史展开 + resume 保留
-        CLI 侧上一轮的工具上下文。
-        """
-        msgs = request.messages or []
-        if not msgs:
-            return ""
-
-        # 只取 user/assistant 的文本；tool 消息是 Ethan 侧的中间产物，喂给 CLI 会干扰
-        turns: list[str] = []
-        for m in msgs:
-            role = getattr(m, "role", "")
-            content = getattr(m, "content", "") or ""
-            if role not in ("user", "assistant"):
-                continue
-            text = content.strip()
-            if not text:
-                continue
-            turns.append(text if role == "user" else f"[你之前的回复]\n{text}")
-
-        if not turns:
-            return ""
-        # 单轮直接用原文，避免给 CLI 加无谓前缀干扰理解
-        if len(turns) == 1:
-            return turns[0]
-        return "以下是对话历史，请接着回答最后一条用户消息：\n\n" + "\n\n".join(turns)
+    # `_build_prompt` 沿用基类实现（展开历史 + 单轮不加前缀），
+    # 简报由基类 `_compose_prompt` 前置拼上。
 
     def _idle_timeout(self, request: KernelRequest) -> int:
         """多久没事件算卡死（秒）。coding 任务放宽，跑构建时静默是常态。"""

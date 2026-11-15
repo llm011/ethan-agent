@@ -93,7 +93,15 @@ NEVER_EXPOSE: frozenset[str] = frozenset({
     "config_set",
     "profile_update",
     "procedure_write",
-    "memory_write",
+    # ⚠️ memory_write **不在**这里（与上面三项区别对待）。
+    #
+    # 理由：记忆是「对话产生的事实」，不是「Ethan 的自我定义」。用户在外部内核里
+    # 说「以后都叫我阿凌」，记不住才是 bug；而外部内核只写内容，写哪张表、用什么
+    # 证据等级、怎么 supersede 旧记忆，全部由 memory_write 内部的准入管道决定
+    # （它不接受调用方指定 confidence/evidence_level，固定 EXPLICIT）。
+    #
+    # 反例仍然拦截：profile_update 改的是 user_profile.md 人格画像，
+    # procedure_write 改的是 behavioral_guidelines，那才属于"自我修改"。
     # 递归委派：delegate_coding 会再起一个外部 coding agent，
     # A->B->A 的嵌套没有意义且会放大资源占用
     "delegate_coding",

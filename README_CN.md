@@ -8,6 +8,13 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 ## 特性
 
+**多内核**
+- 内核决定「由谁执行这一轮对话」：原生内核用 Ethan 的全部能力，外部内核（DSH / Claude Code / OpenCode / Antigravity / Codex / Pi）把执行权交给对应 CLI
+- **外部内核能用 Ethan 的工具**：经 `/kernel-tools` MCP 端点注入 58 个工具（搜索、知识库、文件、OCR、技能、记忆），`shell` 与改人格/配置的工具永不暴露
+- **简报表**：光挂工具不够——外部内核看不到 Ethan 的系统提示词，不知道「有哪些技能」「何时该召回记忆」。派发时前置技能索引 + 记忆召回/写入提示，人格与画像不注入（两份人格会打架）
+- 注入不污染用户环境：`mcp_servers` 是 ACP `new_session()` 的每次调用参数，不写入 `~/.dsh` / `~/.claude`
+- 详见 [内核架构](docs/kernel-architecture.md)
+
 **记忆体系**
 - **结构化长期记忆**（`memory.db`，用户事实的唯一事实源）：短会话（<3 轮）即时提取、之后每 3 轮增量提取带原文 quote 佐证的候选（quote 必须是用户消息精确子串），确定性准入——explicit 立即生效，observed 需 ≥2 个独立 session 复证才晋升。64 个维度 × 7 大类（个人信息/偏好/活动/决定/关系/方法论/陪伴），支持 TTL 过期、supersede 纠正链、遗忘脱敏
 - **语义召回与去重**：FTS5 + BGE 向量双通道（RRF 融合）供给唯一的 `<memory_context>` 注入块；准入时向量近邻配对，按确定性规则 merge/supersede（"住在深圳"和"家在深圳南山"不会各存一条）

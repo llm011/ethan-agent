@@ -212,6 +212,86 @@ class KernelRuntime:
         """释放资源。默认无事可做。"""
         return None
 
+    def _briefing_prefix(self, request: KernelRequest) -> str:
+        """Ethan 侧索引与提示（技能简表 + 记忆召回/写入约定）。
+
+        外部内核用自己的系统提示词，收不到 Ethan 的 `<available_skills>` 与
+        `<memory_recall_hint>`——于是手上挂着 `recall_memory` 却不知道要调，
+        表现为「换内核后记忆/技能就不生效了」。这里补的正是那两块。
+
+        门控有两层，缺一个就会「教模型调它没有的工具」：
+
+        · `capabilities.shares_ethan_tools` —— 这个内核能不能接 MCP
+          （Codex / Pi 是 False，直接不注入）
+        · 配置里的 `kernel.share_tools` —— 这次到底给了多少工具。设成 `off` 时
+          `_build_mcp_servers()` 返回空列表，一个工具都没挂；这时再发简报就是
+          让模型去调不存在的东西。`readonly` 下没有 `memory_write`，write hint
+          也随之不发（细节见 `build_kernel_briefing`）。
+
+        人格/画像（soul、identity、user_profile）仍然不注入，`ethan_context`
+        的取舍不变。
+        """
+        from ethan.kernel.briefing import build_kernel_briefing
+
+        try:
+            from ethan.core.config import get_config
+
+            share = getattr(get_config().defaults.kernel, "share_tools", "all") or "all"
+        except Exception:
+            share = "all"
+
+        try:
+            return build_kernel_briefing(
+                mode=getattr(request, "mode", "") or "",
+                shares_tools=bool(self.capabilities.shares_ethan_tools),
+                share=share,
+            )
+        except Exception:  # noqa: BLE001 - 简报构造失败不该让整轮对话失败
+            logger.warning("%s 内核简报构造失败，本轮按原样派发", self.display_name, exc_info=True)
+            return ""
+
+    def _compose_prompt(self, request: KernelRequest) -> str:
+        """最终派发给外部 CLI 的 prompt = 简报表 + 对话历史。
+
+        `_build_prompt` 保持「只压消息历史」的纯粹语义（测试直接断言它的输出），
+        简报在这里拼——这样「历史怎么展开」和「额外注入什么」两件事不纠缠。
+        """
+        text = self._build_prompt(request)
+        if not text:
+            return ""
+        briefing = self._briefing_prefix(request)
+        if not briefing:
+            return text
+        return briefing + "\n\n" + text
+
+    def _build_prompt(self, request: KernelRequest) -> str:
+        """把消息历史压成单条 prompt。子类一般不用覆写。
+
+        为什么必须自己拼历史：外部 CLI 每次调用是无状态的（`claude -p` /
+        `dsh headless`），多轮历史只能由我们展开。CLI 侧的 `--resume` 续接的是
+        **它自己**的会话上下文，不能替代这里的 `request.messages`——所以两者并用：
+        历史在这里展开，resume 保留 CLI 侧的工具上下文。
+
+        只取 user/assistant 文本：tool 消息是 Ethan 侧的中间产物，喂给外部 CLI
+        会干扰它对「谁说了什么」的判断。单轮直接用原文，不加历史前缀。
+        """
+        msgs = request.messages or []
+        turns: list[str] = []
+        for m in msgs:
+            role = getattr(m, "role", "")
+            content = getattr(m, "content", "") or ""
+            if role not in ("user", "assistant"):
+                continue
+            text = content.strip()
+            if not text:
+                continue
+            turns.append(text if role == "user" else f"[你之前的回复]\n{text}")
+        if not turns:
+            return ""
+        if len(turns) == 1:
+            return turns[0]
+        return "以下是对话历史，请接着回答最后一条用户消息：\n\n" + "\n\n".join(turns)
+
 
 class KernelRegistry:
     """内核注册表 + 选择逻辑。

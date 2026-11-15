@@ -187,9 +187,14 @@ export function KernelSelector({
                             仅自带工具
                           </Badge>
                         )}
+                        {/* ethan_context 只表示「不注入 Ethan 的人格/画像/系统提示词」，
+                            与「能不能用 Ethan 的技能/记忆」是两件事——后者由
+                            shares_ethan_tools 决定（经 MCP 注入，还会附带技能索引与
+                            记忆召回提示）。以前这里写成「不共享 Ethan 技能/记忆」，
+                            和上面那条绿色徽章自相矛盾，被当成 bug 报过。 */}
                         {!k.capabilities.ethan_context && (
                           <Badge variant="outline" className="text-[10px]">
-                            不共享 Ethan 技能/记忆
+                            不注入 Ethan 人格/画像
                           </Badge>
                         )}
                         {!k.capabilities.consent && (
