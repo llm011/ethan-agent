@@ -31,7 +31,7 @@
 
 ## 只有真的共享了工具才注入
 
-Codex / OpenCode / Pi 拿不到 Ethan 的工具（各自有硬阻碍，见 `runtime.py` 的
+Codex / Pi 拿不到 Ethan 的工具（各自有硬阻碍，见 `runtime.py` 的
 `shares_ethan_tools`）。对它们注入「你有 recall_memory 可以调」等于教模型调一个
 不存在的工具——和 `_ocr_available()` 那个坑同源。所以调用方必须传 `shares_tools`，
 为 False 时本模块直接返回空串。
@@ -213,7 +213,7 @@ def build_kernel_briefing(
 
     两个门控必须同时看，缺一个就会「教模型调它没有的工具」：
 
-    · `shares_tools` —— 这个内核能不能接 MCP。False（Codex / OpenCode / Pi）
+    · `shares_tools` —— 这个内核能不能接 MCP。False（Codex / Pi）
       直接返回空串。
     · `share` —— 配置里 `kernel.share_tools` 给了多少工具：
         - `"off"`      → `_build_mcp_servers()` 返回空列表，实际一个工具都没有，

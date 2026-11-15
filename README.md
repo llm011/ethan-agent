@@ -58,15 +58,16 @@ docker compose up -d
 ## 🧠 多内核
 
 内核决定「由谁执行这一轮对话」。原生内核用 Ethan 的全部能力；外部内核把执行权
-交给对应 CLI（Claude Code / Codex / DSH / Pi …），各有自己的模型与工具。
+交给对应 CLI（Claude Code / Codex / OpenCode / Antigravity / DSH / Pi），各有自己的模型与工具。
 
 | 内核 | 需要 | 可用 Ethan 的工具 |
 |---|---|---|
 | `ethan` | 内置 | ✅ 原生 |
 | `claude_code` | `claude` CLI | ✅ 经 MCP 注入 |
-| `dsh` | `dsh` CLI | ✅ 经 MCP 注入 |
+| `dsh` | `dsh` CLI | ✅ 经 ACP `mcp_servers` 注入 |
+| `opencode` | `opencode` CLI | ✅ 经 ACP `mcp_servers` 注入 |
+| `antigravity` | `agy` CLI | ✅ 经 ACP `mcp_servers` 注入 |
 | `codex` | `codex` CLI | ❌ 仅自带工具 |
-| `opencode` | `opencode` CLI | ❌ 仅自带工具 |
 | `pi` | `pi` CLI | ❌ 仅自带工具 |
 
 **「可用 Ethan 的工具」是什么意思**：外部内核保留自己的大脑（规划/推理），但通过
@@ -78,7 +79,7 @@ docker compose up -d
 「该在什么时候召回记忆」。所以派发时还会前置一张**简报表**——技能索引 +
 「涉及个人上下文先调 `ethan_recall_memory`」+「值得长期记住的事调
 `ethan_memory_write`」。人格与用户画像**不注入**（两份人格会打架），这是
-`ethan_context=False` 的取舍。没共享工具的内核（Codex / OpenCode / Pi）不带简报，
+`ethan_context=False` 的取舍。没共享工具的内核（Codex / Pi）不带简报，
 免得教它们调不存在的工具。
 
 注入不污染用户环境：`mcp_servers` 是 ACP `new_session()` 的每次调用参数，
@@ -220,7 +221,7 @@ POST /tts/select                  # 切换语音后端
 defaults:
   model: provider/model-id
   kernel:
-    default: ""            # "" = 原生 Ethan；可选 dsh / claude_code / codex / opencode / pi
+    default: ""            # "" = 原生 Ethan；可选 dsh / claude_code / opencode / antigravity / codex / pi
     task_rules: {}         # {"coding": "claude_code"} 按任务类型选内核
     share_tools: all       # all | readonly | off —— 外部内核能用多少 Ethan 的工具
 
@@ -288,7 +289,7 @@ cd app/android
 - Prompt Caching（Anthropic 稳定层 `cache_control`，命中部分成本 0.1×）
 - 分层记忆（工作记忆压缩 → 结构化 fact → 叙事画像）+ 语义召回
 - Skill 系统（内置 + 用户自定义 + 渠道过滤）
-- 多内核运行时（6 个内核，DSH / Claude Code 可共享 Ethan 工具）
+- 多内核运行时（7 个内核，DSH / Claude Code / OpenCode / Antigravity 可共享 Ethan 工具）
 - 定时任务、心跳、后台任务
 - 多渠道（Web / Desktop / Android / 飞书 / 微信 / CLI / ACP）
 - TTS / ASR 可配置后端（在线 edge-tts / 本地 ethan-tts）
@@ -296,7 +297,7 @@ cd app/android
 ### 待办
 
 - `tools.md` 结构性拆分（当前全文注入，占 prompt 六成）
-- Codex / OpenCode / Pi 的 Ethan 工具共享（各自有硬阻碍，详见内核文档）
+- Codex / Pi 的 Ethan 工具共享（各自有硬阻碍，详见内核文档）
 - Android 端真机验证
 
 ---

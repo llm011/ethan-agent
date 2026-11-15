@@ -261,11 +261,13 @@ def test_pi_prompt_has_no_briefing():
 def test_briefing_gate_follows_shares_ethan_tools(fake_skills):
     """简报只跟 `shares_ethan_tools` 走，与 `ethan_context` 无关。
 
-    这张表是本次改动的核心断言：能共享工具的（DSH / Claude）必须拿到简报，
-    不能共享的（Codex / OpenCode / Pi）必须拿不到。新增内核时若忘了声明
-    `shares_ethan_tools`，这里会立刻暴露。
+    这张表是本次改动的核心断言：能共享工具的必须拿到简报，不能共享的必须拿不到。
+    新增内核时若忘了声明 `shares_ethan_tools`，这里会立刻暴露。
+
+    别把它写成「外部内核一律 False」——#464 之后 OpenCode 也能共享了，
+    这类能力是会变的，表要跟着真实声明走。
     """
-    from ethan.kernel.acp_client_kernel import DshAcpKernel
+    from ethan.kernel.acp_client_kernel import AntigravityAcpKernel, DshAcpKernel
     from ethan.kernel.acp_kernel import CodexKernel, OpenCodeKernel
     from ethan.kernel.claude_kernel import ClaudeCodeKernel
     from ethan.kernel.pi_kernel import PiKernel
@@ -274,8 +276,9 @@ def test_briefing_gate_follows_shares_ethan_tools(fake_skills):
     expected = {
         DshAcpKernel: True,
         ClaudeCodeKernel: True,
+        OpenCodeKernel: True,
+        AntigravityAcpKernel: True,
         CodexKernel: False,
-        OpenCodeKernel: False,
         PiKernel: False,
     }
     for cls, want in expected.items():

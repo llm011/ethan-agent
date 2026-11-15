@@ -183,12 +183,22 @@ def test_ethan_kernel_always_available():
 def test_external_kernels_declare_no_ethan_context():
     """外部 runtime 有自己的系统提示词/工具，声明 ethan_context=False 是有意的取舍。"""
     reg = get_kernel_registry()
-    for kind in (KernelKind.CLAUDE_CODE, KernelKind.CODEX, KernelKind.OPENCODE):
+    for kind in (
+        KernelKind.CLAUDE_CODE,
+        KernelKind.CODEX,
+        KernelKind.OPENCODE,
+        KernelKind.DSH,
+        KernelKind.PI,
+        KernelKind.ANTIGRAVITY,
+    ):
         rt = reg.get(kind)
         if rt is None:
             continue
         assert rt.capabilities.ethan_context is False
-        assert rt.capabilities.consent is False
+        # 非 ACP-client 内核绕开 ACP request_permission，不对齐授权；
+        # AcpClientKernel（dsh/opencode/antigravity）走 ACP 协议支持中途授权。
+        expected_consent = kind in (KernelKind.DSH, KernelKind.OPENCODE, KernelKind.ANTIGRAVITY)
+        assert rt.capabilities.consent is expected_consent
 
 
 def test_external_kernel_unavailable_when_cli_missing(monkeypatch, tmp_path):
@@ -264,9 +274,9 @@ def test_default_kernel_is_ethan(monkeypatch):
     """
     import ethan.core.config as cfg_mod
 
-    monkeypatch.setattr(cfg_mod.get_config().defaults.kernel, "default", "", raising=False)
-    monkeypatch.setattr(cfg_mod.get_config().defaults.kernel, "task_rules", {}, raising=False)
-
+    cfg = cfg_mod.get_config()
+    monkeypatch.setattr(cfg.defaults.kernel, "default", "")
+    monkeypatch.setattr(cfg.defaults.kernel, "task_rules", {})
     stub = _FakeStub(usage=_FakeUsage())
     runner = build_runner(stub, channel="web")
     assert runner.kernel_kind == "ethan"
@@ -1027,3 +1037,138 @@ def test_idle_timeout_aborts_stalled_kernel(monkeypatch):
     events = asyncio.run(collect())
     text = "".join(e for e in events if isinstance(e, str))
     assert "没有任何输出" in text, f"没有给出卡死提示：{text!r}"
+
+
+# ── OpenCode / Antigravity ACP 内核与重复 in_progress 去重 ─────
+
+
+def test_opencode_and_antigravity_acp_specs():
+    """OpenCode 走 `opencode acp`，Antigravity 走 `agy acp --process-per-session`。"""
+    from ethan.kernel import deps as kdeps
+    from ethan.kernel.acp_client_kernel import AntigravityAcpKernel, OpenCodeAcpKernel
+
+    reset_kernel_registry()
+    reg = get_kernel_registry()
+
+    oc = reg.get(KernelKind.OPENCODE)
+    assert isinstance(oc, OpenCodeAcpKernel)
+    assert oc.spec.cmd == ["opencode", "acp"]
+    assert oc.spec.binary == "opencode"
+    assert oc.capabilities.shares_ethan_tools is True
+
+    agy = reg.get(KernelKind.ANTIGRAVITY)
+    assert isinstance(agy, AntigravityAcpKernel)
+    assert agy.spec.cmd == ["agy", "acp", "--process-per-session"]
+    assert agy.spec.binary == "agy"
+    assert agy.capabilities.shares_ethan_tools is True
+
+    spec = kdeps.KERNEL_DEPS[KernelKind.ANTIGRAVITY]
+    assert spec.binary == "agy"
+    assert "antigravity.google/cli/install.sh" in " ".join(spec.install_cmd)
+
+
+def test_acp_repeated_in_progress_updates_do_not_duplicate_start():
+    """实测 OpenCode v2.3 ACP 会先发 tool_call(pending)，再连发多次 in_progress。
+
+    如果每次 in_progress 都 emit start，StreamCollector 会追加多条永远关不掉的
+    幽灵 running 步骤。去重后只能有一条 step，且应保留 in_progress 补来的参数。
+    """
+    from acp.schema import (
+        ContentToolCallContent,
+        TextContentBlock,
+        ToolCallProgress,
+        ToolCallStart,
+    )
+
+    from ethan.core.stream_collector import StreamCollector
+    from ethan.kernel.acp_client_kernel import OpenCodeAcpKernel
+
+    k = OpenCodeAcpKernel()
+    updates = [
+        ToolCallStart(
+            sessionUpdate="tool_call",
+            toolCallId="call-oc-1",
+            title="execute",
+            kind="other",
+            status="pending",
+            rawInput={},
+        ),
+        ToolCallProgress(
+            sessionUpdate="tool_call_update",
+            toolCallId="call-oc-1",
+            kind="other",
+            status="in_progress",
+            title="execute",
+            rawInput={"code": "return await tools.ethan.ethan_ping({});"},
+        ),
+        ToolCallProgress(
+            sessionUpdate="tool_call_update",
+            toolCallId="call-oc-1",
+            kind="other",
+            status="in_progress",
+            title="execute",
+            rawInput={"code": "return await tools.ethan.ethan_ping({});"},
+        ),
+        ToolCallProgress(
+            sessionUpdate="tool_call_update",
+            toolCallId="call-oc-1",
+            status="completed",
+            content=[
+                ContentToolCallContent(
+                    type="content",
+                    content=TextContentBlock(type="text", text="ETHAN_PONG"),
+                )
+            ],
+        ),
+    ]
+
+    collector = StreamCollector()
+    emitted = []
+    for u in updates:
+        for ev in k._map_update(u, queue=None):
+            emitted.append(ev)
+            collector.feed(ev)
+
+    assert [e.state for e in emitted] == ["start", "done"]
+    assert "ethan_ping" in emitted[1].args_summary
+    assert len(collector.tool_steps) == 1
+    assert collector.tool_steps[0]["state"] == "done"
+    assert collector.tool_steps[0]["result_preview"] == "ETHAN_PONG"
+
+
+def test_acp_in_progress_without_initial_tool_call_emits_start_once():
+    """若某 ACP agent 跳过了 tool_call 直接发 in_progress，仍应发一次 start。"""
+    from acp.schema import ToolCallProgress
+
+    from ethan.kernel.acp_client_kernel import AntigravityAcpKernel
+
+    k = AntigravityAcpKernel()
+    ev1 = k._map_update(
+        ToolCallProgress(
+            sessionUpdate="tool_call_update",
+            toolCallId="agy-1",
+            title="read_file: main.py",
+            status="in_progress",
+        ),
+        queue=None,
+    )
+    ev2 = k._map_update(
+        ToolCallProgress(
+            sessionUpdate="tool_call_update",
+            toolCallId="agy-1",
+            status="in_progress",
+        ),
+        queue=None,
+    )
+    ev3 = k._map_update(
+        ToolCallProgress(
+            sessionUpdate="tool_call_update",
+            toolCallId="agy-1",
+            status="completed",
+        ),
+        queue=None,
+    )
+
+    assert [e.state for e in (ev1 + ev2 + ev3)] == ["start", "done"]
+    assert ev1[0].tool_name == "read_file"
+    assert ev3[0].tool_name == "read_file"

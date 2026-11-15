@@ -9,7 +9,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 ## 特性
 
 **多内核**
-- 内核决定「由谁执行这一轮对话」：原生内核用 Ethan 的全部能力，外部内核（DSH / Claude Code / Codex / OpenCode / Pi）把执行权交给对应 CLI
+- 内核决定「由谁执行这一轮对话」：原生内核用 Ethan 的全部能力，外部内核（DSH / Claude Code / OpenCode / Antigravity / Codex / Pi）把执行权交给对应 CLI
 - **外部内核能用 Ethan 的工具**：经 `/kernel-tools` MCP 端点注入 58 个工具（搜索、知识库、文件、OCR、技能、记忆），`shell` 与改人格/配置的工具永不暴露
 - **简报表**：光挂工具不够——外部内核看不到 Ethan 的系统提示词，不知道「有哪些技能」「何时该召回记忆」。派发时前置技能索引 + 记忆召回/写入提示，人格与画像不注入（两份人格会打架）
 - 注入不污染用户环境：`mcp_servers` 是 ACP `new_session()` 的每次调用参数，不写入 `~/.dsh` / `~/.claude`
@@ -842,6 +842,7 @@ DevTools Network 里 GET /sessions/{session_id} 的响应体应是几百 KB 量�
 - [ ] **移动端适配**：底部 Tab 导航、触摸手势、键盘弹起适配
 
 **Coding Agent 集成**
+- [x] **多内核运行时（7 个内核）**：除原生 `ethan` 外，支持在设置页或 `defaults.kernel.default` 切换 `claude_code` / `dsh` / `opencode` / `antigravity` / `codex` / `pi`。其中 `dsh`、`opencode`（`opencode acp`）、`antigravity`（`agy acp --process-per-session`）和 `claude_code`（`--mcp-config`）支持按会话注入 `/kernel-tools` MCP 共享 Ethan 的工具与技能，不污染外部 CLI 全局配置
 - [x] **ACP 持续对话优化**：`delegate_coding` 按「Coding Agent × 工作目录」持久化 session_id。三套后端（Claude Code / OpenCode / Codex）现都走 JSON 事件流 + 会话续接，解析为 sub_steps，Web UI 时间轴折叠展示、最终结果高亮。Codex 复用 Ethan 的 cliproxy provider；超时优雅终止并清掉会话，避免续接到卡住的 thread
 - [x] **镜像会话**：每次 `delegate()` 落成一条真正的 Ethan 会话（`source` 用真实工具名 codex/claude/opencode），记录下发的 query + Coding Agent 回复 + 步骤，并注册为 RunManager run，委派过程可经 SSE 实时观看
 - [x] **沉浸式工具模式**：对话 mode 可切到 Codex / Claude Code / OpenCode；切入后整条会话每句话都直接续接该工具（同一工具 session、按会话隔离工作目录），既能临时 delegate，也能沉浸式持续对话。在镜像会话里直接发消息也会自动续接对应工具

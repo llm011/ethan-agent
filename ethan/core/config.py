@@ -158,7 +158,7 @@ class KernelSelectionConfig(BaseModel):
     task_rules 是「按任务类型选内核」的映射，key 为 task_kind
     （coding / chat / research ...），value 为内核名。未命中的走 default。
     """
-    default: str = ""  # "" = 原生 Ethan；可选 ethan | claude_code | codex | opencode
+    default: str = ""  # "" = 原生 Ethan；可选 ethan | claude_code | dsh | opencode | antigravity | codex | pi
     task_rules: dict[str, str] = Field(default_factory=dict)  # {"coding": "claude_code"}
     # 外部内核能用多少 Ethan 的工具（通过 /kernel-tools MCP 端点注入）。
     #   "all"      —— 除 shell 外的全部（默认）。用户要求「内核作为 Ethan 的心脏」，

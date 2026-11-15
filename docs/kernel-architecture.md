@@ -16,7 +16,7 @@ producers.py                     ← 上游只认 .stream_chat()
    └── KernelRunner              ← 鸭子类型兼容 Agent（.usage / .model / .session_id）
          └── KernelRuntime.run() ← 事件流契约（str / ThinkingEvent / ToolEvent / ...）
                ├── EthanKernel     原生，直接委托 Agent（零行为变化，默认兜底）
-               ├── AcpClientKernel DSH（ACP stdio + mcp_servers 注入工具）
+               ├── AcpClientKernel DSH / Antigravity（ACP stdio + mcp_servers 注入工具）
                ├── ACPKernelBase   Claude Code / Codex / OpenCode（经 ethan.acp.delegate）
                └── PiKernel        Pi（NDJSON，无 MCP）
 ```
@@ -42,9 +42,14 @@ Web / Desktop / Android 三端。
 | `ethan` | 原生 | ✅ | ✅ | — | — |
 | `dsh` | ✅ | ❌ | ✅ | ✅ | ACP `new_session(mcp_servers=...)` |
 | `claude_code` | ✅ | ❌ | ❌ | ✅ | `--mcp-config <临时文件>` |
+| `opencode` | ✅ | ❌ | ❌ | ✅ | ACP `mcp_servers`（#464 起） |
+| `antigravity` | ✅ | ❌ | ❌ | ✅ | ACP `mcp_servers`（`agy acp --process-per-session`） |
 | `codex` | ❌ | ❌ | ❌ | ✅ | 能接受配置但**不加载工具**（实测工具列表只有自带的 10 个） |
-| `opencode` | ❌ | ❌ | ❌ | ✅ | 只有 `mcp add`（写全局配置，会污染用户环境，不做） |
 | `pi` | ❌ | ❌ | ❌ | ✅ | 源码无 MCP 实现 |
+
+> 这张表会变（OpenCode 就是后补上 ACP 的）。以 `runtime.py` 里各 kernel 的
+> `capabilities` 为准；`tests/test_kernel_briefing.py` 里有一张逐内核的断言表，
+> 新增内核忘了声明会立刻失败。
 
 ### 两个字段别搞混
 

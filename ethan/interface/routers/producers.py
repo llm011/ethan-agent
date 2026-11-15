@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from ethan.memory.session import SessionStore, get_session_store, retry_on_db_locked
 from ethan.providers.base import Message
@@ -459,6 +460,10 @@ async def _run_generation(
                         "id": item.tool_call_id,
                         "duration_ms": step.get("duration_ms"),
                         "gen_ms": step.get("gen_ms"),
+                        # 完成时刻（epoch 秒）：前端在耗时后面显示「完成于 hh:mm」。
+                        # 老事件没带 ended_at，用「当前时间 - 耗时」兜底，保证实时流也能显示。
+                        "ended_at": step.get("ended_at")
+                        or (time.time() - (step.get("duration_ms") or 0) / 1000),
                         "result_preview": item.result_preview or "",
                         "result_detail": item.result_detail or "",
                         "sub_steps": item.sub_steps or [],
