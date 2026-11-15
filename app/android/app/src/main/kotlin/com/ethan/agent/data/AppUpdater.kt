@@ -327,12 +327,44 @@ class AppUpdater(
      */
     private fun compareVersions(v1: String, v2: String): Int {
         // 把 "1.2.3-rc1" 拆成 numeric=[1,2,3], pre="rc1"
+        //
+        // ⚠️ 还必须处理 **不带横杠** 的 PEP 440 写法：`1.0.0b10`、`1.0.0rc1`、`1.0.0a2`。
+        // 我们的 tag 就是 `v1.0.0b10`（去掉 v 后是 `1.0.0b10`），
+        //
+        // 旧实现只按 '-' 拆，于是 `1.0.0b10`.split('.') → ["1","0","0b10"]
+        // → "0b10".toIntOrNull() 返回 null → 兜底成 0
+        // → `1.0.0b7` 和 `1.0.0b10` 都变成 numeric=[1,0,0] + pre=""
+        // → 比较结果是 0 → **判定「已是最新」，永远收不到更新**。
+        //
+        // 实测就是这个 bug 让 Android 客户端停在 1.0.0b7、看不到 b8/b9/b10。
         fun parse(v: String): Pair<List<Int>, String> {
+            // 先按 '-' 拆（semver：1.0.0-beta.7）
             val dashIdx = v.indexOf('-')
-            val numeric = (if (dashIdx < 0) v else v.substring(0, dashIdx))
-                .split(".")
-                .map { it.toIntOrNull() ?: 0 }
-            val pre = if (dashIdx < 0) "" else v.substring(dashIdx + 1)
+            val head = if (dashIdx < 0) v else v.substring(0, dashIdx)
+            val preFromDash = if (dashIdx < 0) "" else v.substring(dashIdx + 1)
+
+            // 再把 head 的**最后一段**按「数字+字母前缀+数字」再拆
+            // （PEP 440：1.0.0b10 → head="1.0.0b10" 最后一段 "0b10" → core "0", pre "b10"）
+            val segs = head.split(".").toMutableList()
+            var preFromSeg = ""
+            if (segs.isNotEmpty()) {
+                // 匹配 数字 + 可选(字母前缀 + 可选数字)，例如 "0b10" / "0rc1" / "0"
+                val m = Regex("^(\\d+)([A-Za-z]+\\.?\\d*)?$").find(segs.last())
+                if (m != null) {
+                    val core = m.groupValues[1]
+                    val tail = m.groupValues[2]
+                    if (tail.isNotEmpty()) {
+                        segs[segs.size - 1] = core
+                        preFromSeg = tail.removePrefix(".")
+                    }
+                }
+            }
+            val numeric = segs.map { it.toIntOrNull() ?: 0 }
+            val pre = when {
+                preFromDash.isEmpty() -> preFromSeg
+                preFromSeg.isEmpty() -> preFromDash
+                else -> "$preFromSeg.$preFromDash"
+            }
             return numeric to pre
         }
 
