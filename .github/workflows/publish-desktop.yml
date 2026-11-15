@@ -76,7 +76,17 @@ jobs:
             args: '--target x86_64-apple-darwin'
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            args: ''
+            # 只打 NSIS（.exe），不打 MSI。
+            #
+            # 原因：Windows MSI 的版本号约束比 semver 更严——预发布标识必须纯数字
+            # （`1.0.0-beta.2` 里的 `beta` 直接报错 "optional pre-release identifier
+            # in app version must be numeric-only"）。而我们给 macOS 用的标准 semver
+            # 含文字后缀，两者无法共用同一个版本字符串。
+            #
+            # 既然 updater 本来就优先用 NSIS（见下面 updaterJsonPreferNsis），
+            # 直接不产 MSI 更简单：NSIS 对版本号格式没有这个限制。
+            # 用户拿到的 Windows 安装包一直是 .exe，去掉 MSI 不影响现有用户。
+            args: '--bundles nsis'
 
     runs-on: ${{ matrix.platform }}
     permissions:
@@ -126,12 +136,16 @@ jobs:
           #   1.0.0a2  → 1.0.0-alpha.2
           #   1.0.0rc1 → 1.0.0-rc.1
           # 无预发布后缀的正式版原样保留。
+          # PEP 440 → 标准 semver（Tauri 只认 semver，不认 `1.0.0b2`）
+          #   1.0.0b2  → 1.0.0-beta.2
+          #   1.0.0a1  → 1.0.0-alpha.1
+          #   1.0.0rc3 → 1.0.0-rc.3
+          #   1.0.0    → 1.0.0
           SEMVER=$(python3 -c "
           import re, sys
           v = '$VERSION'
           m = re.match(r'^(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+))?$', v)
           if not m:
-              # 已经是 semver 或无法识别 → 原样用
               print(v); sys.exit()
           base, tag, num = m.group(1), m.group(2), m.group(3)
           if not tag:
@@ -171,29 +185,6 @@ jobs:
           print('Verified:', [l for l in content.splitlines() if l.startswith('version')][:1])
           "
 
-      # Windows MSI 对版本号的限制比 semver 更严：预发布标识必须纯数字，
-      # 且 ≤65535。`1.0.0-beta.1` 里的 `beta` 不合法，只能用 `1.0.0.1` 这种 4 段式。
-      # macOS 保持标准 semver 不变，只在 Windows 上覆写。
-      - name: Override version for Windows MSI
-        if: matrix.platform == 'windows-latest'
-        shell: bash
-        run: |
-          python3 -c "
-          import json, re
-          ver = ''
-          for line in open('pyproject.toml', encoding='utf-8'):
-              if line.startswith('version = '):
-                  ver = line.split('\"')[1]; break
-          m = re.match(r'^(\d+\.\d+\.\d+)(?:(?:a|b|rc)(\d+))?$', ver)
-          winver = f'{m.group(1)}.{m.group(2) or 0}' if m else '0.0.0.0'
-          f = 'desktop/src-tauri/tauri.conf.json'
-          d = json.load(open(f, encoding='utf-8'))
-          d['version'] = winver
-          with open(f, 'w', encoding='utf-8') as fh:
-              json.dump(d, fh, indent=2, ensure_ascii=False); fh.write('\n')
-          print(f'Windows MSI version -> {winver}')
-          "
-
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v1
         env:
@@ -231,7 +222,6 @@ jobs:
         with:
           name: ethan-desktop-${{ matrix.target }}
           path: |
-            desktop/src-tauri/target/release/bundle/**/*.msi
             desktop/src-tauri/target/release/bundle/**/*.exe
 
   # 当 desktop 文件没有变动、build 被跳过时，把前一个 release 的 latest.json
