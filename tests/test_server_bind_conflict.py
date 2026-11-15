@@ -17,8 +17,20 @@ from __future__ import annotations
 
 import pytest
 
-from ethan.interface import api
+from ethan.interface import api, serve_lock
 from ethan.watchdog import DEFAULT_PORT, _check_server_health
+
+
+@pytest.fixture(autouse=True)
+def _release_serve_lock():
+    """``run_server`` 现在会先拿单实例锁（见 serve_lock.py），锁随进程生命周期持有。
+
+    同一个测试进程里多次调用 ``run_server``（每个用例都走一遍启动路径）时，前一个
+    用例拿到的锁还挂着，后一个用例就会被锁拦下、测不到它本来要测的闸门。这里每个
+    用例结束后统一放锁，让这些用例继续只验证端口 / DB 判据本身。
+    """
+    yield
+    serve_lock._reset_for_tests()
 
 
 class _FakeResp:

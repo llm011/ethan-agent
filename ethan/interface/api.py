@@ -422,6 +422,28 @@ def run_server(host: str | None = None, port: int | None = None, *, force: bool 
     host = host or "0.0.0.0"
     port = port or 8900
 
+    # 单实例锁必须先于下面所有「先查后做」的闸门：那两道闸门只回答「此刻有没有
+    # 人在」，两个进程同时启动会同时听到「没有」，然后一起跑完 lifespan 才在 bind
+    # 时撞 Errno 48。锁把「检查 + 启动」变成一个原子区间，第二个进程在检查之前
+    # 就直接退出。详见 ethan/interface/serve_lock.py。
+    #
+    # force=True（`ethan serve --force`）明确表示「我知道自己在干什么」，不加锁；
+    # ETHAN_NO_WATCHDOG=1 仍加锁，但按端口 + 数据目录分桶（多个 worktree 各自起
+    # 实例是合法的，同一端口同一数据目录重复起才拦）。
+    if not force:
+        from ethan.interface import serve_lock
+
+        got_lock, holder = serve_lock.acquire(port)
+        if not got_lock:
+            logging.getLogger(__name__).error(
+                "[Server] 另一个 ethan serve 正在启动或已监听 %s:%d%s，拒绝重复启动。"
+                "如需重启请先运行 `ethan serve stop`。",
+                host,
+                port,
+                f"（pid={holder}）" if holder else "",
+            )
+            raise SystemExit(1)
+
     # 端口上已有健康的 ethan：立刻退出，别启动。
     # 这一条是「服务反复失联」的根治点——被 launchd/watchdog/桌面端拉起的重复实例
     # 曾在这里一路跑完 lifespan（含 memory reindex，耗时数十秒），最后才在 uvicorn
