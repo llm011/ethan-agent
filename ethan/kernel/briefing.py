@@ -43,23 +43,28 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-# 简报表缓存：(cache_key) -> 文本。
+# 简报表缓存：(user_id, mode, 技能目录指纹, share_tools) -> 文本。
 #
 # 为什么缓存：技能索引要扫目录 + 读 stats，虽然 `SkillLoader` 自己有进程级缓存，
 # 但每条消息都重建一遍 `SkillRegistry` 仍然是白付的开销，而这块内容在
-# 「技能目录 + 模式」不变时逐字节稳定。
+# 「用户 + 技能目录 + 模式 + 共享档位」不变时逐字节稳定。
 #
-# 失效：按 `skills_dir` 的 mtime + 模式做 key。装/删技能会改目录 mtime。
+# **key 必须含 user_id**：技能目录是 per-profile 的（`user_skills_dir()`），
+# 不含用户会串号——两个 profile 的技能目录都不存在时指纹都是 "missing"，
+# 后一个用户会直接吃到前一个用户的技能简表。
 _CACHE: dict[tuple, str] = {}
 _LOCK = threading.Lock()
 
 
 def _skills_dir_signature() -> str:
-    """技能目录的指纹，用于判断索引缓存是否失效。
+    """当前用户技能目录的指纹，用于判断索引缓存是否失效。
 
     取目录 mtime 而非遍历全部文件：装/删技能必然改目录 mtime，改文件内容不改
     ——但改单个 SKILL.md 内容的场景极少，且代价只是缓存多存活一会儿（用户重启
     或装下一个技能就会刷新）。这里刻意选便宜的那个。
+
+    注意 mtime 精度只到秒，单靠它区分不了用户；调用方必须把 user_id 一起放进
+    cache key（见 `_CACHE` 的注释）。
     """
     try:
         from ethan.core.paths import user_skills_dir
@@ -68,6 +73,16 @@ def _skills_dir_signature() -> str:
         return str(int(d.stat().st_mtime)) if d.is_dir() else "missing"
     except Exception:
         return "unknown"
+
+
+def _current_user() -> str:
+    """当前 profile 的 user_id（default profile 为 ""）。"""
+    try:
+        from ethan.core.context import get_user_id
+
+        return get_user_id() or ""
+    except Exception:
+        return ""
 
 
 def _visible_skills(mode: str) -> list:
@@ -191,16 +206,27 @@ _WRITE_HINT = """<memory_write_hint>
 </memory_write_hint>"""
 
 
-def build_kernel_briefing(*, mode: str = "", shares_tools: bool = True) -> str:
+def build_kernel_briefing(
+    *, mode: str = "", shares_tools: bool = True, share: str = "all"
+) -> str:
     """构造注入给外部内核的简报表。
 
-    `shares_tools=False` 时返回空串——内核拿不到 Ethan 工具，教它调这些工具
-    只会让它失败一轮再绕路。
+    两个门控必须同时看，缺一个就会「教模型调它没有的工具」：
+
+    · `shares_tools` —— 这个内核能不能接 MCP。False（Codex / OpenCode / Pi）
+      直接返回空串。
+    · `share` —— 配置里 `kernel.share_tools` 给了多少工具：
+        - `"off"`      → `_build_mcp_servers()` 返回空列表，实际一个工具都没有，
+                         简报也必须为空（否则就是在教模型调不存在的工具）
+        - `"readonly"` → 只读白名单里**没有** `memory_write`，所以 write hint 不发；
+                         `recall_memory` / `skill_list` / `skill_read` 都在，照发
+        - `"all"`      → 全给，三段都发
     """
-    if not shares_tools:
+    share = (share or "all").strip().lower()
+    if not shares_tools or share == "off":
         return ""
 
-    key = (mode or "", _skills_dir_signature())
+    key = (_current_user(), mode or "", _skills_dir_signature(), share)
     with _LOCK:
         cached = _CACHE.get(key)
     if cached is not None:
@@ -223,7 +249,9 @@ def build_kernel_briefing(*, mode: str = "", shares_tools: bool = True) -> str:
         # 技能索引构建失败/空时不塞空块，但记忆提示照给——recall/write 与技能无关。
         logger.debug("内核简报：无技能索引，仅注入记忆提示")
     parts.append(_RECALL_HINT)
-    parts.append(_WRITE_HINT)
+    # write hint 只跟 all 走：readonly 白名单里没有 memory_write。
+    if share == "all":
+        parts.append(_WRITE_HINT)
     parts.append("</ethan_briefing>")
     text = "\n\n".join(parts)
 

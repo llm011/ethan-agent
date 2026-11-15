@@ -107,6 +107,93 @@ def test_briefing_empty_when_tools_not_shared(fake_skills):
     assert build_kernel_briefing(mode="", shares_tools=False) == ""
 
 
+def test_briefing_empty_when_share_tools_off(fake_skills):
+    """`share_tools=off` 时 `_build_mcp_servers()` 返回空列表，一个工具都没挂。
+
+    这时再发简报就是让模型去调不存在的东西 —— 与 shares_tools=False 同一条原则。
+    只有 shares_ethan_tools 一个门控会漏掉这种情况（review 时发现的）。
+    """
+    from ethan.core.config import get_config
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+
+    old = get_config().defaults.kernel.share_tools
+    get_config().defaults.kernel.share_tools = "off"
+    try:
+        clear_briefing_cache()
+        assert build_kernel_briefing(mode="", share="off") == ""
+        k = DshAcpKernel()
+        # 内核能力仍是「能共享」，但配置把它关了 → 简报必须跟着消失
+        assert k.capabilities.shares_ethan_tools is True
+        assert k._build_mcp_servers() == [], "前提：off 下确实没注入任何 MCP server"
+        prompt = k._compose_prompt(
+            KernelRequest(messages=[Message(role="user", content="hi")])
+        )
+        assert not prompt.startswith("<ethan_briefing>")
+    finally:
+        get_config().defaults.kernel.share_tools = old
+        clear_briefing_cache()
+
+
+def test_readonly_mode_skips_write_hint(fake_skills):
+    """readonly 白名单里没有 `memory_write`，所以不能发 write hint。
+
+    `recall_memory` / `skill_list` / `skill_read` 在 readonly 下都有，照发。
+    """
+    from ethan.kernel.tool_bridge import build_mcp_tools
+
+    readonly_tools = {t.name for t in build_mcp_tools(share="readonly")}
+    assert "memory_write" not in readonly_tools, "前提变了：readonly 现在含 memory_write"
+    assert "recall_memory" in readonly_tools
+
+    text = build_kernel_briefing(mode="", share="readonly")
+    assert "<memory_recall_hint>" in text
+    assert "<memory_write_hint>" not in text, "readonly 下教模型调 memory_write 会失败一轮"
+
+
+def test_all_mode_ships_write_hint(fake_skills):
+    text = build_kernel_briefing(mode="", share="all")
+    assert "<memory_write_hint>" in text
+
+
+def test_briefing_cache_does_not_leak_across_users(monkeypatch):
+    """缓存 key 必须含 user_id —— 技能目录是 per-profile 的。
+
+    review 时发现的原实现只有 (mode, mtime)：两个 profile 的技能目录都不存在时
+    指纹都是 "missing"，后一个用户会直接吃到前一个用户的技能简表。
+
+    **不要在两次渲染之间 clear_briefing_cache()** —— 那样永远命中不了缓存，
+    测的就变成「两次独立构造」，原 bug 照样绿。这里刻意留着缓存不丢。
+    """
+    import ethan.core.context as ctx
+    import ethan.kernel.briefing as mod
+
+    # 两个 profile 的指纹刻意相同（都不存在的目录就是这种情形）
+    monkeypatch.setattr(mod, "_skills_dir_signature", lambda: "missing")
+    monkeypatch.setattr(
+        mod,
+        "_build_skills_block",
+        lambda names: "<available_skills>\n- " + " | ".join(names) + "\n</available_skills>",
+    )
+
+    current: dict = {"skills": []}
+    monkeypatch.setattr(mod, "_visible_skills", lambda mode: list(current["skills"]))
+
+    clear_briefing_cache()
+
+    ctx.set_user_id("alice")
+    current["skills"] = ["alice-only-skill"]
+    alice = mod.build_kernel_briefing(mode="")
+
+    ctx.set_user_id("bob")  # 不清缓存，让 bob 去读 alice 写下的条目
+    current["skills"] = ["bob-only-skill"]
+    bob = mod.build_kernel_briefing(mode="")
+
+    ctx.set_user_id("")
+    assert "alice-only-skill" in alice
+    assert "bob-only-skill" in bob, "bob 读到了 alice 的缓存（串用户）"
+    assert "alice-only-skill" not in bob, "缓存串用户了：bob 拿到了 alice 的技能简表"
+
+
 def test_briefing_hides_mode_specific_skills(fake_skills):
     """模式专属技能（legal-assistant）不进普通模式的简报。
 

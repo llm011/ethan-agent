@@ -217,17 +217,32 @@ class KernelRuntime:
         `<memory_recall_hint>`——于是手上挂着 `recall_memory` 却不知道要调，
         表现为「换内核后记忆/技能就不生效了」。这里补的正是那两块。
 
-        只对**真的共享了 Ethan 工具**的内核生效（`shares_ethan_tools=False` 时
-        `build_kernel_briefing` 返回空串）：教模型调一个它没有的工具，只会让它
-        失败一轮再绕路。人格/画像（soul、identity、user_profile）仍然不注入，
-        `ethan_context` 的取舍不变。
+        门控有两层，缺一个就会「教模型调它没有的工具」：
+
+        · `capabilities.shares_ethan_tools` —— 这个内核能不能接 MCP
+          （Codex / OpenCode / Pi 是 False，直接不注入）
+        · 配置里的 `kernel.share_tools` —— 这次到底给了多少工具。设成 `off` 时
+          `_build_mcp_servers()` 返回空列表，一个工具都没挂；这时再发简报就是
+          让模型去调不存在的东西。`readonly` 下没有 `memory_write`，write hint
+          也随之不发（细节见 `build_kernel_briefing`）。
+
+        人格/画像（soul、identity、user_profile）仍然不注入，`ethan_context`
+        的取舍不变。
         """
         from ethan.kernel.briefing import build_kernel_briefing
+
+        try:
+            from ethan.core.config import get_config
+
+            share = getattr(get_config().defaults.kernel, "share_tools", "all") or "all"
+        except Exception:
+            share = "all"
 
         try:
             return build_kernel_briefing(
                 mode=getattr(request, "mode", "") or "",
                 shares_tools=bool(self.capabilities.shares_ethan_tools),
+                share=share,
             )
         except Exception:  # noqa: BLE001 - 简报构造失败不该让整轮对话失败
             logger.warning("%s 内核简报构造失败，本轮按原样派发", self.display_name, exc_info=True)
