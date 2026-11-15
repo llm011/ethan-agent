@@ -1,14 +1,12 @@
-"""Codex / OpenCode 内核 —— 复用 ACPKernelBase，只是换 CLI 和 prefer 参数。
+"""Codex 内核 —— 复用 ACPKernelBase。
 
-这两个 CLI 的 stream 事件形态与 Claude 略有差异（见 `ethan/acp/agent_codex.py`
-与 `agent_opencode.py`），但 ACP 层已经把差异吸收成了统一的
-`on_event("step"|"text", data)`，所以这里只需要声明路由信息。
-
-⚠️ 与 Claude Code 相同的取舍：不走 Ethan 工具/技能/记忆、不做中途授权。
-详见 `claude_kernel.py` 的模块 docstring。
+OpenCode 已迁往 `acp_client_kernel.OpenCodeAcpKernel`（走原生 `opencode acp`
+协议，支持按会话 HTTP MCP 注入 Ethan 工具）；此处保留 `OpenCodeKernel` 别名
+兼容既有直接导入路径。
 """
 from __future__ import annotations
 
+from ethan.kernel.acp_client_kernel import OpenCodeAcpKernel as OpenCodeKernel  # noqa: F401
 from ethan.kernel.claude_kernel import ACPKernelBase
 from ethan.kernel.runtime import KernelCapabilities, KernelKind
 
@@ -67,30 +65,3 @@ class CodexKernel(ACPKernelBase):
                 os.environ.pop("ETHAN_CODEX_NO_PROVIDER_OVERRIDE", None)
             else:
                 os.environ["ETHAN_CODEX_NO_PROVIDER_OVERRIDE"] = old
-
-
-class OpenCodeKernel(ACPKernelBase):
-    kind = KernelKind.OPENCODE
-    display_name = "OpenCode"
-    acp_agent = "opencode"
-    cli_binary = "opencode"
-
-    capabilities = KernelCapabilities(
-        streaming=True,
-        tools=True,
-        consent=False,
-        ethan_context=False,
-        resumable=True,
-        # OpenCode 只有 `opencode mcp add`（写全局配置文件），没有单次会话注入的
-        # 命令行参数。强行用它意味着要改用户的 ~/.config/opencode/config.json——
-        # 那会污染用户环境，且脱离 Ethan 后还留着我们塞的 server。
-        shares_ethan_tools=False,
-        shares_ethan_tools_reason=(
-            "OpenCode 没有单次会话注入 MCP 的方式，只能改全局配置文件。"
-            "为避免污染你的 ~/.config/opencode，暂不做共享"
-        ),
-    )
-
-    @property
-    def install_hint(self) -> str:
-        return "curl -fsSL https://opencode.ai/install | bash"

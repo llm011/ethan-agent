@@ -25,6 +25,7 @@
 | codex | `npm install -g @openai/codex` |
 | opencode | curl 脚本（官方安装方式） |
 | pi | `npm install -g @mariozechner/pi-coding-agent` |
+| antigravity | curl 脚本（官方安装方式，装到 `~/.local/bin/agy`） |
 
 npm 全局安装可能需要 sudo（取决于 node prefix）。我们不擅自提权——检测到
 权限错误时把确切命令给用户，由用户决定。
@@ -100,6 +101,17 @@ KERNEL_DEPS: dict[KernelKind, KernelDepsSpec] = {
         binary="pi",
         install_cmd=["npm", "install", "-g", "@mariozechner/pi-coding-agent"],
         hint="需要 Node.js 与 npm",
+    ),
+    KernelKind.ANTIGRAVITY: KernelDepsSpec(
+        kind=KernelKind.ANTIGRAVITY,
+        binary="agy",
+        install_cmd=[
+            "bash",
+            "-lc",
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        ],
+        hint="官方安装脚本会装到 ~/.local/bin；装好后需运行 agy 登录或设置 GEMINI_API_KEY",
+        extra_paths=("~/.local/bin", "~/bin"),
     ),
 }
 
