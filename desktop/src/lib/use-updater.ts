@@ -63,6 +63,10 @@ export interface UpdaterState {
   update: UpdateInfo | null;
   error: string | null;
   progress: number; // 0-100，downloading 期间实时更新
+  /** 最近一次检查的时间戳（ms）。用来给「已是最新」反馈做 30 秒自动隐藏。 */
+  checkedAt?: number;
+  /** 本次检查明确得出「没有更新」。之前这里是静默的，用户会以为按钮坏了。 */
+  upToDate?: boolean;
 }
 
 const INITIAL_STATE: UpdaterState = {
@@ -97,21 +101,45 @@ const CHECK_INTERVAL_MS = 60 * 60_000; // 1 小时
  * - 如果已有更新就绪或已安装待重启，跳过
  * - 如果当前正在 checking/downloading，跳过
  */
+/** 读取当前安装版本（Tauri 的 app.getVersion）。拿不到就返回 unknown。 */
+async function getCurrentVersion(): Promise<string> {
+  try {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    return await getVersion();
+  } catch {
+    return "unknown";
+  }
+}
+
 export async function checkForUpdate(): Promise<void> {
   if (currentState.state === "checking" || currentState.state === "downloading" || currentState.state === "installing") return;
   if (currentState.state === "ready" || currentState.state === "installed") return;
 
   const mod = await loadUpdater();
-  if (!mod) return;
+  if (!mod) {
+    // 非 Tauri 环境（web dev）或插件没装 —— 明确告诉用户为什么点不动
+    console.warn("[updater] 当前环境不支持自动更新（不在 Tauri 内或插件缺失）");
+    setState({ state: "error", error: "当前环境不支持自动更新" });
+    return;
+  }
 
   setState({ state: "checking", error: null, progress: 0 });
   try {
+    // 打印检查结果，方便用户/我们判断「为什么没检测到」：
+    //   · 返回 null        → 真的没有更新（或版本号相等/更旧）
+    //   · 抛异常           → 网络/签名/latest.json 解析问题，见 catch
+    const current = await getCurrentVersion();
+    console.log(`[updater] 检查更新，当前版本 ${current}`);
     const update = await mod.check();
     if (!update) {
+      console.log(`[updater] 没有可用更新（当前 ${current}）`);
       pendingDownload = null;
-      setState({ state: "idle", update: null });
+      // 之前这里静默回到 idle，用户完全不知道检查发生过。
+      // 现在带上「已是最新」的可见反馈，避免「点了没反应」的错觉。
+      setState({ state: "idle", update: null, checkedAt: Date.now(), upToDate: true });
       return;
     }
+    console.log(`[updater] 发现新版本 ${current} → ${update.version}`);
     const info: UpdateInfo = {
       version: update.version,
       notes: update.body ?? "",
