@@ -390,12 +390,61 @@ jobs:
           #   were found in the response "platforms" object
           # 用户看到的是"更新坏了"，而不是"构建失败"，排查成本很高。
           # 这里显式校验，缺平台就让 workflow 失败（红），不再静默发布残档。
+          # 3.6 先尝试**补全**缺失的平台。
+          #
+          # 根因：三个 build job（macOS arm64 / macOS x64 / Windows）并行跑，
+          # 每个都会各自生成一份 latest.json 并上传覆盖 —— 最后一个写完的赢。
+          # 于是 macOS 的 job 后完成时，Windows 的条目就丢了。
+          # 实测 v1.0.0b11：latest.json 只有 4 个 darwin-* 平台，windows-x86_64 消失，
+          # 而 release 里 .exe 和 .exe.sig 明明都在。
+          #
+          # 好在 tauri-action 把每个平台的产物（含 .sig）都上传了，
+          # 所以可以从 asset 列表**反推重建**缺失的平台条目，不必让用户等一次重跑。
+          def rebuild_platform(key: str):
+              """从 release assets 里重建某个平台条目。返回 dict 或 None。"""
+              # Windows NSIS：<name>_x64-setup.exe + .sig
+              if key in ("windows-x86_64", "windows-x86_64-nsis"):
+                  exe = next(
+                      (a for a in release["assets"]
+                       if a["name"].endswith("-setup.exe")), None
+                  )
+                  if not exe:
+                      return None
+                  sig_name = exe["name"] + ".sig"
+                  sig = subprocess.run(
+                      ["gh", "release", "download", tag, "--repo", repo,
+                       "--pattern", sig_name, "--dir", "/tmp/fixjson/sig", "--clobber"],
+                      capture_output=True, text=True,
+                  )
+                  sig_path = f"/tmp/fixjson/sig/{sig_name}"
+                  if sig.returncode != 0 or not os.path.exists(sig_path):
+                      return None
+                  with open(sig_path) as fh:
+                      signature = fh.read().strip()
+                  return {
+                      "signature": signature,
+                      "url": f"{base}/{exe['name']}",
+                  }
+              return None
+
+          platforms = data.setdefault("platforms", {})
+          built = []
+          for key in ("darwin-aarch64", "darwin-x86_64", "windows-x86_64"):
+              if key in platforms:
+                  continue
+              rebuilt = rebuild_platform(key)
+              if rebuilt:
+                  platforms[key] = rebuilt
+                  built.append(key)
+          if built:
+              print(f"重建了缺失的平台条目: {built}")
+              changed += len(built)
+
           REQUIRED = ["darwin-aarch64", "darwin-x86_64", "windows-x86_64"]
-          platforms = data.get("platforms", {})
-          missing = [p for p in REQUIRED if p not in platforms]
+          missing = [pname for pname in REQUIRED if pname not in platforms]
           if missing:
               print(f"::error::latest.json 缺少平台 {missing}；"
-                    f"实际只有 {sorted(platforms)}。"
+                    f"实际只有 {sorted(platforms)}，且无法从 release assets 重建。"
                     "很可能是对应 runner 的 build job 失败/被取消。"
                     "拒绝发布残缺的更新清单。")
               raise SystemExit(1)
@@ -462,6 +511,10 @@ jobs:
           for arch in ("aarch64", "x86_64"):
               if not any(f"darwin-{arch}" in k for k in platforms):
                   missing.append(f"darwin-{arch}")
+          # Windows 也要查 —— v1.0.0b11 就是 macOS 三个平台都在、唯独 windows 丢了，
+          # 而这里当时只校验 macOS，所以没拦住。
+          if not any(k.startswith("windows-") for k in platforms):
+              missing.append("windows-x86_64")
 
           if missing:
               print(f"::error::latest.json 缺少平台 {missing}——"
