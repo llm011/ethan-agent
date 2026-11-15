@@ -56,9 +56,10 @@ class KernelKind(str, Enum):
     ETHAN = "ethan"                # 原生 Ethan 运行时（默认，永远可用的兜底）
     CLAUDE_CODE = "claude_code"    # Claude Code CLI（经 ACP）
     CODEX = "codex"                # Codex CLI（经 ACP）
-    OPENCODE = "opencode"          # OpenCode CLI（经 ACP）
-    DSH = "dsh"                    # DeepSeek Harness headless
+    OPENCODE = "opencode"          # OpenCode CLI（经 `opencode acp`）
+    DSH = "dsh"                    # DeepSeek Harness（经 `dsh --profile acp`）
     PI = "pi"                      # Pi Coding Agent
+    ANTIGRAVITY = "antigravity"    # Google Antigravity CLI（经 `agy acp`）
 
     @classmethod
     def parse(cls, raw: str, default: "KernelKind" = None) -> "KernelKind":
@@ -94,12 +95,13 @@ class KernelCapabilities:
     # 能否共享 Ethan 的工具/技能（经 /kernel-tools MCP 端点注入）。
     #
     # 这是「内核作为 Ethan 的心脏」的核心指标：能共享 = 它用 Ethan 的手脚干活，
-    # 不能共享 = 只是个外接的三方 agent。实测情况：
+    # 不能共享 = 只是个外接的三方 agent。实测/协议情况：
     #   ethan       ✅ 本来就是
     #   dsh         ✅ ACP 的 mcp_servers 参数
     #   claude_code ✅ --mcp-config（需配合 --dangerously-skip-permissions）
+    #   opencode    ✅ `opencode acp` 声明 mcpCapabilities.http=true，按会话注入 mcp_servers
+    #   antigravity ✅ `agy acp --process-per-session` 支持按会话 HTTP MCP 注入
     #   codex       ❌ 写进配置了但工具列表里没有（加载条件未明）
-    #   opencode    ❌ 只能写全局配置，会污染用户环境，不做
     #   pi          ❌ 源码里没有 MCP 支持
     shares_ethan_tools: bool = False
     # 不能共享时给用户看的原因（可操作，不是「暂不支持」这种废话）
@@ -330,9 +332,10 @@ def get_kernel_registry() -> KernelRegistry:
     # 用户在设置页选中时会触发自动安装（见 ethan/kernel/deps.py）。
     for _kind, _module_path, _class_name in (
         (KernelKind.CODEX, "ethan.kernel.acp_kernel", "CodexKernel"),
-        (KernelKind.OPENCODE, "ethan.kernel.acp_kernel", "OpenCodeKernel"),
+        (KernelKind.OPENCODE, "ethan.kernel.acp_client_kernel", "OpenCodeAcpKernel"),
         (KernelKind.DSH, "ethan.kernel.acp_client_kernel", "DshAcpKernel"),
         (KernelKind.PI, "ethan.kernel.pi_kernel", "PiKernel"),
+        (KernelKind.ANTIGRAVITY, "ethan.kernel.acp_client_kernel", "AntigravityAcpKernel"),
     ):
         try:
             import importlib

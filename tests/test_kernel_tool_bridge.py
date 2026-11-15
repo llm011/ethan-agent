@@ -247,18 +247,19 @@ def test_claude_mcp_requires_skip_permissions():
 def test_shares_ethan_tools_declared_for_all_kernels():
     """每个内核都要明确声明能否共享，不能留默认值糊过去。
 
-    实测结论（2026-11-15）：
+    实测/协议结论：
       ethan       ✅ 本来就是
       dsh         ✅ ACP mcp_servers
       claude_code ✅ --mcp-config
+      opencode    ✅ `opencode acp` mcpCapabilities.http=true + mcp_servers
+      antigravity ✅ `agy acp --process-per-session` + mcp_servers
       codex       ❌ 接受配置但不加载工具
-      opencode    ❌ 只能写全局配置（会污染用户环境）
       pi          ❌ 源码里没有 MCP
     """
     from ethan.kernel.runtime import get_kernel_registry
 
-    expect_yes = {"ethan", "dsh", "claude_code"}
-    expect_no = {"codex", "opencode", "pi"}
+    expect_yes = {"ethan", "dsh", "claude_code", "opencode", "antigravity"}
+    expect_no = {"codex", "pi"}
 
     for item in get_kernel_registry().list_status():
         kind = item["kind"]

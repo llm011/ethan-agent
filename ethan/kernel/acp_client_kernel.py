@@ -129,6 +129,10 @@ class AcpClientKernel(KernelRuntime):
     def __init__(self) -> None:
         self.last_usage: dict[str, int] = {}
         self._last_plan: list = []
+        self._emitted: bool = False
+        self._tool_started: dict[str, float] = {}
+        self._tool_names: dict[str, str] = {}
+        self._tool_args: dict[str, str] = {}
 
     # 交给 KernelRuntime 的鸭子属性
     @property
@@ -162,6 +166,12 @@ class AcpClientKernel(KernelRuntime):
         if not prompt:
             yield "[空输入] 没有可执行的内容"
             return
+
+        # 单例跨轮复用：每轮开始重置本次流式跟踪状态
+        self._emitted = False
+        self._tool_started.clear()
+        self._tool_names.clear()
+        self._tool_args.clear()
 
         queue: asyncio.Queue = asyncio.Queue()
         driver = asyncio.create_task(self._drive(prompt, request, queue))
@@ -233,9 +243,18 @@ class AcpClientKernel(KernelRuntime):
 
             async def request_permission(self, session_id, tool_call, options, **kw):
                 # 内核模式下默认放行——外部 agent 自己的权限模型我们已经
-                # 通过启动参数（--approval-policy / --dangerously-skip-permissions）
                 # 交给它了，这里再拦一次只会让流程卡住。
-                opt_id = options[0].option_id if options else "allow"
+                # 优先选显式的 allow 选项，防止某些 agent 把 reject 排在第一位。
+                allow = next(
+                    (
+                        o
+                        for o in (options or [])
+                        if getattr(o, "kind", "") in ("allow_once", "allow_always")
+                    ),
+                    None,
+                )
+                chosen = allow or (options[0] if options else None)
+                opt_id = chosen.option_id if chosen is not None else "allow"
                 return RequestPermissionResponse(
                     outcome=AllowedOutcome(outcome="selected", option_id=opt_id)
                 )
@@ -321,50 +340,75 @@ class AcpClientKernel(KernelRuntime):
 
         elif t == "tool_call":
             call_id = getattr(update, "tool_call_id", "") or f"acp-{id(update)}"
-            # ACP 的 title 是「工具名: 参数摘要」的合并文本，前端要把两者分开显示，
-            # 所以按第一个冒号切；切不出来就整体当工具名。
-            title = getattr(update, "title", "") or "tool"
-            name, _, args = title.partition(": ")
-            # ACP 的 ToolCallStart 有 raw_input（结构化参数）。title 有时只有工具名，
-            # 参数全在 raw_input 里——那样前端就看不到「这个工具在干什么」。
-            if not args:
-                raw = getattr(update, "raw_input", None)
-                if isinstance(raw, dict) and raw:
-                    args = ", ".join(f"{k}={str(v)[:40]}" for k, v in list(raw.items())[:3])
-                elif raw:
-                    args = str(raw)[:100]
-            self._tool_started[call_id] = time.time()
-            self._tool_names[call_id] = name
-            out.append(
-                ToolEvent(
-                    tool_name=name,
-                    args_summary=args,
-                    state="start",
-                    tool_call_id=call_id,
-                    entity_type="acp",
-                )
+            name, args = self._parse_tool_title_and_args(
+                getattr(update, "title", "") or "tool",
+                getattr(update, "raw_input", None),
             )
+            if call_id not in self._tool_started:
+                self._tool_started[call_id] = time.time()
+                self._tool_names[call_id] = name
+                self._tool_args[call_id] = args
+                out.append(
+                    ToolEvent(
+                        tool_name=name,
+                        args_summary=args,
+                        state="start",
+                        tool_call_id=call_id,
+                        entity_type="acp",
+                    )
+                )
 
         elif t == "tool_call_update":
             call_id = getattr(update, "tool_call_id", "") or f"acp-{id(update)}"
             status = getattr(update, "status", "") or ""
-            state = "start" if status == "in_progress" else ("error" if status == "failed" else "done")
-            preview = self._extract_content_text(getattr(update, "content", None))
-            # ACP 不提供耗时，client 侧按 tool_call_id 自己算
-            name = self._tool_names.get(call_id) or getattr(update, "title", "") or "tool"
-            if state != "start":
-                self._tool_started.pop(call_id, None)
-            out.append(
-                ToolEvent(
-                    tool_name=name,
-                    args_summary="",
-                    state=state,
-                    result_preview=preview,
-                    result_detail=preview if len(preview) > 200 else "",
-                    tool_call_id=call_id,
-                    entity_type="acp",
+            # OpenCode 等 ACP 服务端会先发 tool_call(pending)，再发多次
+            # tool_call_update(in_progress)，且参数常在 in_progress 时才填进来。
+            # 若已发过 start，不能再重复 emit start——否则 StreamCollector 会追加
+            # 永远关不掉的幽灵 running 步骤。
+            if status in ("pending", "in_progress"):
+                raw = getattr(update, "raw_input", None)
+                if call_id in self._tool_started:
+                    if not self._tool_args.get(call_id) and raw:
+                        _, rich_args = self._parse_tool_title_and_args(
+                            self._tool_names.get(call_id, "tool"), raw
+                        )
+                        if rich_args:
+                            self._tool_args[call_id] = rich_args
+                    return out
+                name, args = self._parse_tool_title_and_args(
+                    self._tool_names.get(call_id) or getattr(update, "title", "") or "tool",
+                    raw,
                 )
-            )
+                self._tool_started[call_id] = time.time()
+                self._tool_names[call_id] = name
+                self._tool_args[call_id] = args
+                out.append(
+                    ToolEvent(
+                        tool_name=name,
+                        args_summary=args,
+                        state="start",
+                        tool_call_id=call_id,
+                        entity_type="acp",
+                    )
+                )
+            else:
+                state = "error" if status == "failed" else "done"
+                preview = self._extract_content_text(getattr(update, "content", None))
+                # ACP 不提供耗时，client 侧按 tool_call_id 自己算
+                name = self._tool_names.pop(call_id, "") or getattr(update, "title", "") or "tool"
+                saved_args = self._tool_args.pop(call_id, "")
+                self._tool_started.pop(call_id, None)
+                out.append(
+                    ToolEvent(
+                        tool_name=name,
+                        args_summary=saved_args,
+                        state=state,
+                        result_preview=preview,
+                        result_detail=preview if len(preview) > 200 else "",
+                        tool_call_id=call_id,
+                        entity_type="acp",
+                    )
+                )
 
         elif "plan" in (t or ""):
             # 计划更新：先存下来，未来接 UI（ACP 这里比 Ethan 原生多一个能力）
@@ -378,6 +422,19 @@ class AcpClientKernel(KernelRuntime):
             self.last_usage = {"input": used, "output": 0}
 
         return out
+
+    @staticmethod
+    def _parse_tool_title_and_args(title: str, raw_input: Any) -> tuple[str, str]:
+        """从 ACP 的 title / raw_input 拆出 (tool_name, args_summary)。"""
+        name, _, args = (title or "tool").partition(": ")
+        if not args and raw_input:
+            if isinstance(raw_input, dict):
+                args = ", ".join(
+                    f"{k}={str(v)[:40]}" for k, v in list(raw_input.items())[:3]
+                )
+            else:
+                args = str(raw_input)[:100]
+        return name, args
 
     @staticmethod
     def _extract_content_text(content: Any) -> str:
@@ -498,12 +555,6 @@ class AcpClientKernel(KernelRuntime):
 
     # ── 杂项 ─────────────────────────────────────────────────
 
-    _emitted: bool = False
-    _tool_started: dict[str, float] = {}
-    # tool_call_id → (工具名, 起始时间)。ToolCallProgress 不带 title，
-    # 必须在 start 时记下来，否则 done 事件只能报 "tool"，前端时间线就没名字了。
-    _tool_names: dict[str, str] = {}
-
     def _idle_timeout(self, request: KernelRequest) -> int:
         """多久没事件算卡死（秒）。
 
@@ -546,4 +597,37 @@ class DshAcpKernel(AcpClientKernel):
         cmd=["dsh", "--profile", "acp"],
         binary="dsh",
         inject_provider=True,
+    )
+
+
+class OpenCodeAcpKernel(AcpClientKernel):
+    """OpenCode CLI 经 ACP 协议接入（`opencode acp`）。
+
+    相比旧的 `opencode run --format json`，ACP 模式原生声明了
+    `mcpCapabilities: {http: true}`，通过 `new_session(mcp_servers=...)`
+    按会话注入 Ethan 的 `/kernel-tools` MCP 服务，无需修改 `~/.config/opencode`。
+    """
+
+    spec = AcpAgentSpec(
+        kind=KernelKind.OPENCODE,
+        display_name="OpenCode",
+        cmd=["opencode", "acp"],
+        binary="opencode",
+        inject_provider=False,
+    )
+
+
+class AntigravityAcpKernel(AcpClientKernel):
+    """Google Antigravity CLI 经 ACP 协议接入（`agy acp`）。
+
+    官方文档说明连接客户端传入的 HTTP MCP server 时必须加
+    `--process-per-session`（以隔离工作进程按会话提供服务）。
+    """
+
+    spec = AcpAgentSpec(
+        kind=KernelKind.ANTIGRAVITY,
+        display_name="Antigravity",
+        cmd=["agy", "acp", "--process-per-session"],
+        binary="agy",
+        inject_provider=False,
     )
