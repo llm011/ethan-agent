@@ -105,6 +105,7 @@ class ToolEvent:
     cards: Optional[list] = None  # 结构化卡片数据（web_search/image_search 产出），透传给前端渲染横向滚动卡片
     cards_meta: Optional[dict] = None  # 卡片元数据，如 {"total_results": 12300, "showing": 7}
     gen_ms: Optional[int] = None  # 本轮模型生成这批 tool_calls 的流式耗时（毫秒），start 事件携带
+    ended_at: Optional[float] = None  # 工具执行完成时刻（epoch 秒，done/error 事件携带），前端显示「完成于 hh:mm」
 
 
 @dataclass

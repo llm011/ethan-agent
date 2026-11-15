@@ -128,3 +128,42 @@ def test_step_dict_persistence_fields(clock):
     clock.advance(0.25)
     c.feed(_done("browser_click", call_id="c9"))
     assert c.tool_steps[0]["duration_ms"] == 250
+
+
+def test_ended_at_records_completion_time(clock):
+    """done/error 时记录完成时刻（epoch 秒），start 态不带该字段。
+
+    这个时刻随 tool_steps 一起落库，重开会话后前端仍能显示「完成于 hh:mm」；
+    它同时是 duration_ms 计算所用的同一个时间点，两者不会漂移。
+    """
+    c = StreamCollector()
+    c.feed(_start("web_search", call_id="c1"))
+    assert "ended_at" not in c.tool_steps[0]       # running 态没有完成时刻
+
+    clock.advance(1.5)
+    c.feed(_done("web_search", call_id="c1"))
+    step = c.tool_steps[0]
+    assert step["ended_at"] == clock.now           # 1001.5，与 duration 的终点一致
+    assert step["duration_ms"] == 1500
+
+
+def test_ended_at_prefers_event_value(clock):
+    """事件自带 ended_at（如外部内核回传）时优先用它，不用本地时钟覆盖。"""
+    c = StreamCollector()
+    c.feed(_start("shell", call_id="c2"))
+    clock.advance(0.5)
+    c.feed(_done("shell", call_id="c2", ended_at=2000.0))
+    assert c.tool_steps[0]["ended_at"] == 2000.0
+
+
+def test_ended_at_on_error(clock):
+    """error 与 done 一样记录完成时刻。"""
+    c = StreamCollector()
+    c.feed(_start("shell", call_id="c3"))
+    clock.advance(0.75)
+    c.feed(ToolEvent(tool_name="shell", args_summary="", state="error",
+                     tool_call_id="c3", result_preview="boom"))
+    step = c.tool_steps[0]
+    assert step["state"] == "error"
+    assert step["ended_at"] == clock.now
+    assert step["duration_ms"] == 750

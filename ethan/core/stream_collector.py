@@ -134,8 +134,9 @@ class StreamCollector:
             })
             self._pending_injected.clear()
         else:  # done / error
+            _ended_ts = time.time()
             duration_ms = int(
-                (time.time() - self._times.pop(key, time.time())) * 1000
+                (_ended_ts - self._times.pop(key, _ended_ts)) * 1000
             )
             if getattr(item, "ui", None):
                 self.a2ui.extend(item.ui)
@@ -160,6 +161,9 @@ class StreamCollector:
                 step = matched
                 step["state"] = item.state
                 step["duration_ms"] = duration_ms
+                # 完成时刻（epoch 秒）。落库后重开会话仍能显示「完成于 hh:mm」；
+                # 老消息没有这个字段，前端按 duration_ms 兜底（仅显示耗时）。
+                step["ended_at"] = getattr(item, "ended_at", None) or _ended_ts
                 step["result_preview"] = item.result_preview or ""
                 step["result_detail"] = item.result_detail or ""
                 step["sub_steps"] = item.sub_steps or []

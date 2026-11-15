@@ -116,6 +116,7 @@ export function mapDetailMessages(detail: { messages: any[] }): Message[] {
           state: s.state as "running" | "done" | "error",
           duration_ms: s.duration_ms,
           gen_ms: s.gen_ms ?? undefined,
+          ended_at: s.ended_at ?? undefined,
           result_preview: s.result_preview,
           result_detail: s.result_detail,
           thought: s.thought,

@@ -34,6 +34,8 @@ export interface ToolStep {
   duration_ms?: number;
   /** 模型生成这批 tool_calls 的流式耗时（ms）。start 事件即携带，running 态也可显示。 */
   gen_ms?: number;
+  /** 工具执行完成时刻（epoch 秒）。done/error 后才有，前端显示「完成于 hh:mm」。 */
+  ended_at?: number;
   result_preview?: string;
   result_detail?: string;
   thought?: string;
@@ -103,6 +105,23 @@ function CancelButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
 function formatDuration(ms?: number) {
   if (ms === undefined) return "";
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** 工具完成时刻：当天只显示 hh:mm，跨天带月日，省地方又不会误导。
+ *  ended_at 是 epoch 秒（后端下发）。历史消息没有该字段时返回 null，前端就不显示。 */
+function formatEndedAt(epochSec?: number): { label: string; full: string } | null {
+  if (epochSec == null || !Number.isFinite(epochSec) || epochSec <= 0) return null;
+  const d = new Date(epochSec * 1000);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const sameDay = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
+  const label = sameDay ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
+  const full = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}:${pad(d.getSeconds())}`;
+  return { label, full };
 }
 
 function tryFormatJson(text: string): { formatted: string; language: string } {
@@ -432,6 +451,7 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool, session
   }, [fetchToolRaw, sessionId, numericMessageId, stepIndex, step.id]);
 
   const hasDetail = (step.thought || step.result_detail) && step.state !== "running";
+  const endedAt = formatEndedAt(step.ended_at);
   const [detailOpen, setDetailOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   // web_search 详情优先用 step 自带的结构化卡片；老会话仅在 fallbackCards 门控放行时回退到消息级 cards；再兼容旧文本格式解析（不丢数据）
@@ -524,7 +544,7 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool, session
               详情
             </button>
           )}
-          {(step.gen_ms != null || (step.duration_ms != null && step.state !== "running")) && (
+          {(step.gen_ms != null || (step.duration_ms != null && step.state !== "running") || (endedAt && step.state !== "running")) && (
             <span className="ml-auto text-xs text-muted-foreground/60 flex items-center gap-2 shrink-0">
               {/* ✨ 模型生成耗时：start 事件即下发，running 态也显示 */}
               {step.gen_ms != null && (
@@ -548,6 +568,18 @@ function StepRow({ step, isLast, highlight, fallbackCards, onCancelTool, session
                     </span>}
                   />
                   <TooltipContent side="top">工具执行耗时</TooltipContent>
+                </Tooltip>
+              )}
+              {/* ✅ 完成时刻：跟在耗时后，同字号同色系不抢视线；当天只到分钟，跨天带日期 */}
+              {endedAt && step.state !== "running" && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className="flex items-center gap-0.5 tabular-nums">
+                      <Check className="h-2.5 w-2.5" />
+                      {endedAt.label}
+                    </span>}
+                  />
+                  <TooltipContent side="top">执行完成于 {endedAt.full}</TooltipContent>
                 </Tooltip>
               )}
             </span>
