@@ -11,7 +11,7 @@ import { startAutoUpdate, useUpdater } from "@/lib/use-updater";
 const AUTO_UPDATE_KEY = "ethan_auto_update_disabled";
 
 export function AboutTab() {
-  const { state, update, progress, error, checkNow, installNow } = useUpdater();
+  const { state, update, progress, error, checkedAt, upToDate, checkNow, installNow } = useUpdater();
   const [appVersion, setAppVersion] = useState<string>("");
   const [autoUpdateDisabled, setAutoUpdateDisabled] = useState(false);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
@@ -120,6 +120,15 @@ export function AboutTab() {
         </div>
         {error && (
           <div className="px-4 py-2 text-xs text-red-500 break-all">{error}</div>
+        )}
+        {/* 「已是最新」的显式反馈。
+            之前检查完没更新时完全静默，用户点了「手动检查更新」看不到任何变化，
+            很容易误判成「功能坏了 / 检测不到更新」。 */}
+        {upToDate && state === "idle" && (
+          <div className="px-4 py-2 text-xs text-emerald-600 dark:text-emerald-400">
+            已是最新版本
+            {checkedAt ? `（${new Date(checkedAt).toLocaleTimeString()} 检查）` : ""}
+          </div>
         )}
       </div>
 
