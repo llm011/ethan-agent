@@ -2,9 +2,7 @@ package com.ethan.agent.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -36,10 +34,15 @@ fun VoiceSettings(
     val currentTts = data?.current?.tts ?: "edge-tts"
     val currentAsr = data?.current?.asr ?: "off"
 
+    // 注意：**不要**在这里加 fillMaxSize / verticalScroll。
+    // 外层 SettingsScreen 的 HorizontalPager 每页已经是
+    //   Column(fillMaxSize + verticalScroll + padding)
+    // 内层再套一层 verticalScroll 会形成嵌套滚动，内层拿到无界高度约束，
+    // Compose 测量期直接抛异常 → 切到这个 Tab 就闪退。实测踩到。
+    // 本组件只负责内容，滚动交给外层。
     Column(
         modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .fillMaxWidth()
             .padding(16.dp),
     ) {
         Text("语音", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
