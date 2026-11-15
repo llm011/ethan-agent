@@ -82,6 +82,10 @@ docker compose up -d
 `ethan_context=False` 的取舍。没共享工具的内核（Codex / Pi）不带简报，
 免得教它们调不存在的工具。
 
+**附图**：外部内核的 ACP 传输层基本都声明 `promptCapabilities.image=false`（dsh
+实测直接拒收 inline 图片），所以图片不走 base64，而是**存盘后附本地绝对路径**。
+只给位置，不指定用什么工具读——拒收的是传输格式，不是模型不能识图。
+
 注入不污染用户环境：`mcp_servers` 是 ACP `new_session()` 的每次调用参数，
 不写入 `~/.dsh` / `~/.claude`。DSH 自带的工具全部保留，只多出 `mcp__ethan__*` 前缀的那批。
 

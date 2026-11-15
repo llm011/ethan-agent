@@ -293,3 +293,86 @@ def test_empty_request_yields_empty_prompt():
 
     k = DshAcpKernel()
     assert k._compose_prompt(KernelRequest(messages=[])) == ""
+
+
+# ── 附图：落盘 + 路径（不走 inline） ─────────────────────────
+
+
+def test_image_only_message_is_not_dropped():
+    """只发一张图、不打字的消息必须保留。
+
+    原实现是 `if not text: continue`，把「只发图」整条丢掉——内核连图存在都
+    不知道。用户报的「给 ethan 发图片，dsh 不知道图片存在」正是这个 + inline
+    被拒两条一起造成的。
+    """
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+
+    k = DshAcpKernel()
+    req = KernelRequest(
+        messages=[
+            Message(
+                role="user",
+                content="",
+                images=[{"path": "s1/img_0.png", "media_type": "image/png"}],
+            )
+        ],
+        session_id="s1",
+    )
+    prompt = k._build_prompt(req)
+    assert prompt, "纯图片消息被整条丢掉了"
+    assert "img_0.png" in prompt
+
+
+def test_image_paths_are_absolute_and_readable():
+    """给的是可直接读取的绝对路径，不是相对引用。
+
+    外部 CLI 的 cwd 是 workspace，不是 ~/.ethan/assets；给相对路径它读不到。
+    """
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+
+    k = DshAcpKernel()
+    req = KernelRequest(
+        messages=[Message(role="user", content="看图", images=[{"path": "s2/a.png"}])],
+        session_id="s2",
+    )
+    prompt = k._build_prompt(req)
+    assert "a.png" in prompt
+    # 抽出一行路径验证是绝对路径
+    line = next(ln for ln in prompt.splitlines() if "a.png" in ln)
+    path_str = line.lstrip("- ").strip()
+    import os
+
+    assert os.path.isabs(path_str), f"应该是绝对路径，实际 {path_str!r}"
+
+
+def test_image_prompt_does_not_dictate_a_tool():
+    """不要在提示里替内核指定用哪个工具读图。
+
+    模型本身大多有识图能力；写「用 ocr_extract_text 读」既越权又可能在
+    该内核没挂 OCR 工具时把它带偏。只给位置，怎么用交给它判断。
+    """
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+
+    k = DshAcpKernel()
+    req = KernelRequest(
+        messages=[Message(role="user", content="", images=[{"path": "s3/b.png"}])],
+        session_id="s3",
+    )
+    prompt = k._build_prompt(req)
+    for tool_name in ("ocr_extract_text", "file_read", "shell"):
+        assert tool_name not in prompt, f"提示里不该指定工具 {tool_name}"
+
+
+def test_text_and_image_both_preserved():
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+
+    k = DshAcpKernel()
+    req = KernelRequest(
+        messages=[
+            Message(role="user", content="这个报错怎么修", images=[{"path": "s4/e.png"}])
+        ],
+        session_id="s4",
+    )
+    prompt = k._build_prompt(req)
+    assert "这个报错怎么修" in prompt
+    assert "e.png" in prompt

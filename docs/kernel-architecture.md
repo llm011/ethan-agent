@@ -136,6 +136,12 @@ UI 曾经把 `ethan_context=False` 翻译成「不共享 Ethan 技能/记忆」�
   兜底是 `_idle_timeout()`：120s（coding 300s）无任何事件即中止。
 - **`skill_category` / `sub_steps` 打不平**：ACP 没有对应字段，留空，不谎报。
 - **token 统计拿不到**：外部内核保持 0，不瞎估（估出来的数会污染内核对比）。
+- **图片不走 inline，改给本地路径**。外部内核的 ACP 传输层普遍声明
+  `promptCapabilities.image=false`，实测 dsh 直接拒收整条 prompt：
+  `Invalid params: inline image prompts were not advertised by this connection`。
+  所以 `_build_prompt()` 把图片存盘后只附**绝对路径**（`[附图，本地文件]`），
+  不塞 base64、也不在提示里指定用哪个工具读——拒收的是传输格式，不是模型不能
+  识图，怎么读交给内核自己判断。
 
 ---
 
