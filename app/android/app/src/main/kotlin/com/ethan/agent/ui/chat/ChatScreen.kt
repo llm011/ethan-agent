@@ -1749,16 +1749,27 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                             }
                         }
                     }
-                    if (message.isStreaming && message.content.isEmpty() && message.toolSteps.isEmpty()) {
-                        // 首字之前的等待：动画 + 文案。只有静态「思考中…」时用户分不清
-                        // 「在跑」和「卡住了」，这也正是问题里说的「看不出它在处理中」。
+                    // 流式过程中的「还在跑」提示。
+                    //
+                    // 之前条件是 `content.isEmpty() && toolSteps.isEmpty()` —— 两个都必须为空。
+                    // 问题：外部内核（DSH/Claude）是「调工具 → 想 → 再调」的循环，
+                    // 一旦有过工具调用，`toolSteps` 就永久非空，这个提示**再也不会出现**；
+                    // 而 ToolTimeline 里的 spinner 只在有 step 处于 running 时显示。
+                    // 于是在「工具都跑完了、模型正在想下一句」这段最常见的等待期，
+                    // 屏幕上**没有任何进行中动画**，看起来像卡死了。
+                    //
+                    // 新条件：只要在流式且当前没有正文（正在等下一步），就给提示。
+                    // 是否已有工具步骤只影响文案措辞，不再决定要不要显示。
+                    if (message.isStreaming && message.content.isEmpty()) {
+                        val hasTools = message.toolSteps.isNotEmpty()
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             TypingDots(color = textColor.copy(alpha = 0.7f))
                             Text(
-                                "思考中…",
+                                // 有工具步骤时说明它在「基于结果继续想」，措辞更贴切
+                                if (hasTools) "继续处理中…" else "思考中…",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = textColor.copy(alpha = 0.7f),
                             )
