@@ -41,7 +41,17 @@ class AppUpdater(
 
         /** 上次下载对应的版本号；变了就把 `.part` 清掉（远端包换了，续不了）。 */
         private const val KEY_PART_TAG = "part_tag"
-        private const val CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000L // 4 小时
+        /**
+         * 两次自动检查之间的最小间隔。
+         *
+         * 原本是 4 小时，问题是：**发版往往比这个间隔还密**。
+         * 实测 v1.0.0b13 比 b12 只晚 1.5 小时发布 —— 用户装完 b12 启动过一次
+         * （记下检查时间），之后的 4 小时里再启动都不会检查，b13 根本收不到。
+         *
+         * 30 分钟足够省电/省流量（一次请求几 KB），又能让新版本在半小时内被发现。
+         * 手动检查不受此限制。
+         */
+        private const val CHECK_INTERVAL_MS = 30 * 60 * 1000L // 30 分钟
 
         /** 常见 prerelease 前缀 → 优先级（越大越接近正式版）。 */
         private val PRERELEASE_PRIORITY = mapOf(
@@ -96,10 +106,20 @@ class AppUpdater(
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
     }
 
-    /** 当前是否应该检查更新（距上次检查超过 4 小时）。 */
+    /** 当前是否应该检查更新（距上次**成功的**检查超过节流间隔）。 */
     fun shouldCheck(): Boolean {
         val last = prefs.getLong(KEY_LAST_CHECK, 0)
         return System.currentTimeMillis() - last > CHECK_INTERVAL_MS
+    }
+
+    /**
+     * 记录「刚成功检查过一次」。
+     *
+     * 只在实际拿到确定结论（有更新 / 已是最新）时调用。
+     * 失败路径不记录，避免「一次网络抖动把用户锁在 30 分钟静默期里」。
+     */
+    private fun markChecked() {
+        prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
     }
 
     /**
@@ -108,8 +128,6 @@ class AppUpdater(
      */
     suspend fun checkForUpdate(): CheckResult = withContext(Dispatchers.IO) {
         try {
-            prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
-
             val currentVersion = getCurrentVersion()
                 ?: return@withContext CheckResult.Error("无法获取当前版本号")
 
@@ -135,6 +153,13 @@ class AppUpdater(
 
             // 版本号没变或更低，不提示
             if (compareVersions(tagName, currentVersion) <= 0) {
+                // 只在**成功走完检查**时才记时间戳。
+                //
+                // 之前这行在函数最开头，意味着：不管检查有没有成功（网络失败、
+                // JSON 解析失败、release 里没 APK……）都算「查过了」，接下来
+                // 的节流期内不会再查。
+                // 现在只在拿到确定结论时记录 —— 失败会立刻允许下次重试。
+                markChecked()
                 return@withContext CheckResult.UpToDate
             }
 
@@ -184,6 +209,7 @@ class AppUpdater(
                     serverUrl = serverUrl,
                 )
 
+            markChecked()
             CheckResult.UpdateAvailable(UpdateInfo(
                 version = tagName,
                 downloadUrl = apkUrl,
