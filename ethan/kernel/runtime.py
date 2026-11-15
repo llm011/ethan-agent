@@ -274,6 +274,12 @@ class KernelRuntime:
 
         只取 user/assistant 文本：tool 消息是 Ethan 侧的中间产物，喂给外部 CLI
         会干扰它对「谁说了什么」的判断。单轮直接用原文，不加历史前缀。
+
+        图片走**落盘 + 路径**（见 `_image_paths`），不塞 inline。原因是外部内核
+        的 ACP 传输层普遍声明 `promptCapabilities.image=false`——实测 dsh 会直接
+        拒收：`Invalid params: inline image prompts were not advertised by this
+        connection`。但拒收的是**传输格式**，不是模型不能识图，所以这里只把图片
+        的位置如实告诉它，用不用、怎么用交给内核自己判断（不要在提示里指定工具）。
         """
         msgs = request.messages or []
         turns: list[str] = []
@@ -283,14 +289,60 @@ class KernelRuntime:
             if role not in ("user", "assistant"):
                 continue
             text = content.strip()
-            if not text:
+            # 只有图片、没有文字的消息同样要进来——早期实现 `if not text: continue`
+            # 会把「只发一张图」整条丢掉，内核连图存在都不知道。
+            images = self._image_paths(m, request)
+            if not text and not images:
                 continue
+            if images:
+                listing = "\n".join(f"- {p}" for p in images)
+                text = (text + "\n\n" if text else "") + f"[附图，本地文件]\n{listing}"
             turns.append(text if role == "user" else f"[你之前的回复]\n{text}")
         if not turns:
             return ""
         if len(turns) == 1:
             return turns[0]
         return "以下是对话历史，请接着回答最后一条用户消息：\n\n" + "\n\n".join(turns)
+
+    def _image_paths(self, msg: Any, request: KernelRequest) -> list[str]:
+        """把一条消息里的图片变成可直接读取的本地绝对路径。
+
+        DB 里的历史图片已经是 `{path: 相对路径}`（落盘后的引用），当前消息可能是
+        `{data: base64}`（刚上传还没落盘）。两种都要能处理——只认一种就会出现
+        「历史图能看、新发的图看不到」这类割裂。
+
+        `{data: ...}` 那条走 `save_image()`：它顺带做了长图切分与超限缩放，
+        和 Ethan 原生链路是同一份落盘逻辑，不另起一套。
+
+        **只返回磁盘上真实存在的文件**。历史消息的 `path` 可能指向已被清理的
+        会话资产（会话删除/归档后图片目录会没），把死路径交给内核等于让它去读
+        一个不存在的文件——比不告诉它更糟，它会把失败当工具有问题反复重试。
+        """
+        images = getattr(msg, "images", None) or []
+        if not images:
+            return []
+
+        try:
+            from ethan.core.assets import image_file_path, save_image
+
+            out: list[str] = []
+            for idx, img in enumerate(images):
+                data = (img or {}).get("data", "")
+                if data:
+                    media_type = img.get("media_type", "image/png")
+                    sid = request.session_id or "kernel"
+                    for rel_path, _ in save_image(sid, idx, data, media_type):
+                        out.append(str(image_file_path(rel_path)))
+                elif img.get("path"):
+                    abs_path = image_file_path(img["path"])
+                    if abs_path.exists():
+                        out.append(str(abs_path))
+                    else:
+                        logger.debug("内核 prompt 跳过已失效的附图引用：%s", abs_path)
+            return out
+        except Exception:  # noqa: BLE001 - 图片处理失败不该让整轮对话失败
+            logger.warning("内核 prompt 解析附图失败，本轮按无图处理", exc_info=True)
+            return []
 
 
 class KernelRegistry:

@@ -12,6 +12,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 - 内核决定「由谁执行这一轮对话」：原生内核用 Ethan 的全部能力，外部内核（DSH / Claude Code / OpenCode / Antigravity / Codex / Pi）把执行权交给对应 CLI
 - **外部内核能用 Ethan 的工具**：经 `/kernel-tools` MCP 端点注入 58 个工具（搜索、知识库、文件、OCR、技能、记忆），`shell` 与改人格/配置的工具永不暴露
 - **简报表**：光挂工具不够——外部内核看不到 Ethan 的系统提示词，不知道「有哪些技能」「何时该召回记忆」。派发时前置技能索引 + 记忆召回/写入提示，人格与画像不注入（两份人格会打架）
+- **附图**：外部内核的 ACP 传输层基本都声明 `promptCapabilities.image=false`（dsh 实测直接拒收 inline 图片），所以图片存盘后只附本地绝对路径，不指定读取工具——拒收的是传输格式，不是模型不能识图
 - 注入不污染用户环境：`mcp_servers` 是 ACP `new_session()` 的每次调用参数，不写入 `~/.dsh` / `~/.claude`
 - 详见 [内核架构](docs/kernel-architecture.md)
 
