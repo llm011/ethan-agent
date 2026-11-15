@@ -90,7 +90,7 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 **会话打开速度**
 - Agent 读到的图片落盘到 `~/.ethan/assets/images/<session_id>/`，卡片只存相对路径，不再内联 base64——这正是以前点开会话要等好几秒的原因
-- 消息**按页加载**：首屏只取最近 30 条，向上滚动时再加载更早的页（`GET /sessions/{id}` 的 `limit` / `before`，配 `has_more` / `oldest_id` 当游标）。实测最大的真实会话，打开从 1602ms / 9.06MB 降到 10ms / 304KB
+- 消息**按页加载**：首屏只取最近 30 条，向上滚动时再加载更早的页（`GET /sessions/{session_id}` 的 `limit` / `before`，配 `has_more` / `oldest_id` 当游标）。实测最大的真实会话，打开从 1602ms / 9.06MB 降到 10ms / 304KB
 - 流式与分页安全共存：一轮生成结束后把新的末尾并入已加载的历史，而不是整表替换——用户上滚翻出来的更早几页不会凭空消失
 - 打开会话先渲染本地缓存（Web 走 IndexedDB、桌面端走 localStorage），网络结果后台覆盖；历史遗留的内联 base64 卡片在启动时一次性转成资产路径
 - 分页结果**只合并进已有缓存、绝不覆盖**——缓存是整个会话的语义，写入最近 30 条会把离线可读的历史降级成残页（更早历史永久不可达）
@@ -553,7 +553,12 @@ ethan -m MODEL                     指定模型
 ethan -r last                      恢复上次会话
 ethan serve                        启动 HTTP API 服务（前台运行）
 ethan serve stop                   停止后台运行的 serve 进程
-ethan serve restart                重启后台 serve 进程
+
+# 重启 / 开机自启属于 `ethan server`（launchd 托管），不是 `ethan serve`
+ethan server status                查看服务运行状态
+ethan server restart               重启后台服务
+ethan server install|uninstall     安装 / 卸载开机自启
+
 ethan acp                          ACP stdio 服务（JSON-RPC；供 Multica 等拉起）
 
 ethan model list|add|remove|default
@@ -577,10 +582,10 @@ GET  /health                    # 健康检查
 GET  /models                    # 可用模型列表
 POST /chat                      # 对话（stream: true 开启 SSE 流式）
 GET  /sessions                  # 会话列表
-GET  /sessions/{id}             # 会话详情（含消息历史）
+GET  /sessions/{session_id}             # 会话详情（含消息历史）
 GET  /memory/facts              # 记忆列表，分页（limit/offset/total）
 GET  /memory/records            # 结构化记忆，分页（可按 type/domain/status 过滤）
-GET  /memory/records/{id}       # 记忆详情 + 证据链
+GET  /memory/records/search     # 结构化记忆检索（无 id 直查，走 search/summaries）
 GET  /skills                    # Skill 列表
 POST /skills                    # 创建 Skill
 POST /skills/evolve             # 手动触发 Skill 自动更新
@@ -753,11 +758,11 @@ EOF
 
 # 3. 会话打开速度验证
 让 Agent 读一张本地图片，再点回该会话
-DevTools Network 里 GET /sessions/{id} 的响应体应是几百 KB 量级（不是 MB）
+DevTools Network 里 GET /sessions/{session_id} 的响应体应是几百 KB 量级（不是 MB）
 卡片图片走 assets/images/ 路径，而不是 data:image/png;base64 开头
 
 # 4. 长会话分页验证
-点开一个几百条以上的会话，看 GET /sessions/{id}?limit=30 的首屏请求——
+点开一个几百条以上的会话，看 GET /sessions/{session_id}?limit=30 的首屏请求——
 响应体应只有最近 30 条，约几百 KB；向上滚动时再发带 before=<oldest_id> 的请求
 翻到头（回到第一条 user 消息）后不再发请求（响应里 has_more=false）
 ```
