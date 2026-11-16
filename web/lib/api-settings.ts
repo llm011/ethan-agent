@@ -424,7 +424,17 @@ export interface KernelsResponse {
 
 export async function fetchKernels(): Promise<KernelsResponse> {
   const res = await fetchWithTimeout(`${API_URL}/kernels`, { headers: headers() });
-  if (!res.ok) throw new Error("Failed to fetch kernels");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const detail = typeof body?.detail === "string" ? body.detail : body?.detail?.message || "";
+    if (res.status === 404) {
+      throw new Error("后端未提供 /api/kernels 接口（HTTP 404），请将后端 ethan-agent 升级并重启到最新版");
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`认证失败（HTTP ${res.status}），请重新登录`);
+    }
+    throw new Error(detail || `获取内核列表失败（HTTP ${res.status}）`);
+  }
   return res.json();
 }
 
@@ -446,6 +456,7 @@ export async function installKernel(kind: string): Promise<KernelInstallResult> 
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ kind, auto_install: true }),
+    timeoutMs: 300_000,
   });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
@@ -460,6 +471,7 @@ export async function selectKernel(kind: string): Promise<{ ok: boolean; default
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ kind, auto_install: true }),
+    timeoutMs: 300_000,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
