@@ -267,6 +267,9 @@ async def update_system_settings(req: SystemSettingsPatch):
     if req.naming is not None:
         from ethan.memory.session import reload_naming_rules
         reload_naming_rules()
+    if req.soul is not None or req.identity is not None:
+        from ethan.kernel.briefing import clear_briefing_cache
+        clear_briefing_cache()
     return {"ok": True}
 
 
@@ -296,9 +299,12 @@ async def get_user_profile(user_id: str = Depends(verify_token)):
 async def update_user_profile(req: UserProfilePatch, user_id: str = Depends(verify_token)):
     """整篇覆盖写回当前用户的 user_profile.md。"""
     from ethan.core.paths import user_profile_path
+    from ethan.kernel.briefing import clear_briefing_cache
+
     p = user_profile_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(req.content, encoding="utf-8")
+    clear_briefing_cache()
     return {"ok": True}
 
 
@@ -356,6 +362,9 @@ async def patch_user_name(req: UserNamePatch, user_id: str = Depends(verify_toke
     p = user_profile_path()
     content = ensure_profile(p)
     p.write_text(set_display_name(content, name), encoding="utf-8")
+    from ethan.kernel.briefing import clear_briefing_cache
+
+    clear_briefing_cache()
     return {"ok": True, "display_name": name}
 
 
@@ -809,12 +818,15 @@ async def list_kernels():
         items.append(item)
 
     import ethan.core.config as _cfg
+    from ethan.kernel.briefing import normalize_inject_context
+
     current = _cfg.get_config().defaults.kernel
     latest = latest_status()
     return {
         "kernels": items,
         "default": current.default or "ethan",
         "task_rules": current.task_rules,
+        "inject_context": normalize_inject_context(getattr(current, "inject_context", None)),
         "last_install": latest.to_dict() if latest else None,
     }
 
@@ -924,3 +936,27 @@ async def set_kernel_task_rules(req: KernelTaskRulesRequest):
     save_config(cfg)
     reload_config()
     return {"ok": True, "task_rules": cleaned}
+
+
+class KernelContextModeRequest(BaseModel):
+    inject_context: str
+
+
+@router.post("/kernels/context-mode", dependencies=[Depends(verify_token)])
+async def set_kernel_context_mode(req: KernelContextModeRequest):
+    """设置外部内核注入 Ethan 上下文的粒度（off / rules_profile / full）。"""
+    from ethan.kernel.briefing import VALID_INJECT_CONTEXTS, clear_briefing_cache
+
+    val = (req.inject_context or "").strip().lower()
+    if val not in VALID_INJECT_CONTEXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无效的 inject_context: {req.inject_context!r}（合法值：{', '.join(VALID_INJECT_CONTEXTS)}）",
+        )
+
+    def _apply(c):
+        c.defaults.kernel.inject_context = val
+
+    update_config(_apply)
+    clear_briefing_cache()
+    return {"ok": True, "inject_context": val}

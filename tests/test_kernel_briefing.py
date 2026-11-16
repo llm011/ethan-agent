@@ -26,8 +26,17 @@ from ethan.providers.base import Message
 
 
 @pytest.fixture(autouse=True)
+def _isolate_paths_dir(tmp_path, monkeypatch):
+    """隔离 paths.CONFIG_DIR，避免测试读到开发者本机的 ~/.ethan/system/*.md 或画像。"""
+    import ethan.core.paths as paths_mod
+
+    monkeypatch.setattr(paths_mod, "CONFIG_DIR", tmp_path)
+    return tmp_path
+
+
+@pytest.fixture(autouse=True)
 def _fresh_cache():
-    """简报按 (mode, 技能目录 mtime) 缓存，用例之间必须隔离。"""
+    """简报按 (mode, 技能目录 mtime, 上下文文件指纹) 缓存，用例之间必须隔离。"""
     clear_briefing_cache()
     yield
     clear_briefing_cache()
@@ -91,15 +100,61 @@ def test_briefing_carries_skills_and_memory_hints(fake_skills):
     assert "ethan_memory_write" in text
 
 
-def test_briefing_does_not_inject_persona(fake_skills):
-    """人格/画像仍然不注入 —— `ethan_context=False` 的取舍不变。
+def test_briefing_inject_context_off_omits_persona_and_rules(fake_skills, tmp_path):
+    """`inject_context="off"` 时不注入任何准则、画像与人格。"""
+    (tmp_path / "system").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "system" / "soul.md").write_text("SOUL_RULE", encoding="utf-8")
+    (tmp_path / "system" / "identity.md").write_text("ID_PERSONA", encoding="utf-8")
+    (tmp_path / "memory").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "memory" / "user_profile.md").write_text("# 画像\n- 喜欢简洁", encoding="utf-8")
 
-    塞进去会和外部 agent 自己的系统提示词打架（两份人格谁优先），
-    这是本模块刻意不碰的部分。
-    """
-    text = build_kernel_briefing(mode="")
-    for forbidden in ("<soul>", "<identity>", "<user_profile>", "<behavioral_guidelines>"):
+    text = build_kernel_briefing(mode="", inject_context="off")
+    for forbidden in ("<ethan_context>", "<soul>", "<identity>", "<user_profile>", "<behavioral_guidelines>"):
         assert forbidden not in text
+    assert "<ethan_briefing>" in text
+
+
+def test_briefing_rules_profile_injects_soul_profile_and_guidelines(fake_skills, tmp_path):
+    """默认 `rules_profile` 注入 soul.md + 非空画像 + 纠错准则，但不注入 identity 人设。"""
+    from ethan.memory.procedures import ProcedureStore
+
+    (tmp_path / "system").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "system" / "soul.md").write_text("绝不泄露 .secrets/", encoding="utf-8")
+    (tmp_path / "system" / "identity.md").write_text("我是小艺", encoding="utf-8")
+    (tmp_path / "memory").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "memory" / "user_profile.md").write_text("# 用户画像\n\n## 基础特征\n- 叫我阿凌", encoding="utf-8")
+    ProcedureStore(path=tmp_path / "memory" / "playbook.json").add("回答尽量给出具体路径")
+
+    text = build_kernel_briefing(mode="", inject_context="rules_profile")
+    assert "<ethan_context>" in text
+    assert "<soul>" in text and "绝不泄露 .secrets/" in text
+    assert "<user_profile>" in text and "叫我阿凌" in text
+    assert "<behavioral_guidelines>" in text and "回答尽量给出具体路径" in text
+    assert "<identity>" not in text
+    assert "我是小艺" not in text
+
+
+def test_briefing_full_context_injects_identity_and_mode_identity(fake_skills, tmp_path):
+    """`inject_context="full"` 在 rules_profile 基础上追加 identity.md 与模式身份。"""
+    (tmp_path / "system").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "system" / "soul.md").write_text("SOUL_CONTENT", encoding="utf-8")
+    (tmp_path / "system" / "identity.md").write_text("我是小艺", encoding="utf-8")
+
+    text = build_kernel_briefing(mode="法律", inject_context="full")
+    assert "<soul>" in text
+    assert "<identity>" in text and "我是小艺" in text
+    assert "<mode_identity>" in text and "法律专家" in text
+
+
+def test_briefing_skips_heading_only_user_profile(fake_skills, tmp_path):
+    """仅有标题骨架、没有实际内容的 user_profile.md 不应占用 prompt。"""
+    (tmp_path / "memory").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "memory" / "user_profile.md").write_text(
+        "# 用户画像\n\n## 基础特征\n\n## 心理与情绪\n",
+        encoding="utf-8",
+    )
+    text = build_kernel_briefing(mode="", inject_context="rules_profile")
+    assert "<user_profile>" not in text
 
 
 def test_briefing_empty_when_tools_not_shared(fake_skills):
@@ -129,6 +184,8 @@ def test_briefing_empty_when_share_tools_off(fake_skills):
             KernelRequest(messages=[Message(role="user", content="hi")])
         )
         assert not prompt.startswith("<ethan_briefing>")
+        assert "<available_skills>" not in prompt
+        assert "<memory_recall_hint>" not in prompt
     finally:
         get_config().defaults.kernel.share_tools = old
         clear_briefing_cache()
@@ -256,6 +313,23 @@ def test_pi_prompt_has_no_briefing():
     k = PiKernel()
     req = KernelRequest(messages=[Message(role="user", content="hi")])
     assert k._compose_prompt(req) == "hi"
+
+
+def test_pi_and_codex_still_receive_soul_and_profile_when_configured(tmp_path):
+    """即便不支持 MCP 工具共享（Codex / Pi），soul.md 与画像依然可以注入。"""
+    from ethan.kernel.acp_kernel import CodexKernel
+    from ethan.kernel.pi_kernel import PiKernel
+
+    (tmp_path / "system").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "system" / "soul.md").write_text("安全红线：禁止 rm -rf ~", encoding="utf-8")
+
+    req = KernelRequest(messages=[Message(role="user", content="hi")])
+    for cls in (CodexKernel, PiKernel):
+        prompt = cls()._compose_prompt(req)
+        assert "<ethan_context>" in prompt
+        assert "禁止 rm -rf ~" in prompt
+        assert "<ethan_briefing>" not in prompt
+        assert "<memory_recall_hint>" not in prompt
 
 
 def test_briefing_gate_follows_shares_ethan_tools(fake_skills):
@@ -418,3 +492,249 @@ def test_text_and_image_both_preserved(real_images):
     prompt = k._build_prompt(req)
     assert "这个报错怎么修" in prompt
     assert "e.png" in prompt
+
+
+# ── Skill frontmatter 每轮匹配与事件发射 ──────────────────────
+
+
+def _make_skill_dir(tmp_path, name: str, frontmatter: str, body: str, refs: dict[str, str] | None = None):
+    d = tmp_path / "skills" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(f"---\n{frontmatter.strip()}\n---\n\n{body}\n", encoding="utf-8")
+    if refs:
+        ref_dir = d / "references"
+        ref_dir.mkdir(exist_ok=True)
+        for fname, content in refs.items():
+            (ref_dir / fname).write_text(content, encoding="utf-8")
+
+
+def test_per_turn_skill_frontmatter_matching_injects_default_and_discoverable(tmp_path):
+    """外部内核每轮按 Skill frontmatter 匹配：default 注入全文，discoverable 提示 skill_read。"""
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+    from ethan.kernel.runtime import KernelContext
+    from ethan.skills.registry import SkillRegistry
+
+    _make_skill_dir(
+        tmp_path,
+        "qcc",
+        'name: qcc\ntrigger: "企查查|工商信息"\ndescription: "企业工商查询"',
+        "步骤：先查缓存，再调 qcc MCP。",
+        refs={"api.md": "QCC API 参考说明"},
+    )
+    _make_skill_dir(
+        tmp_path,
+        "code-review",
+        'name: code-review\ncategory: discoverable\ntrigger: "review代码|代码审查"\ndescription: "代码审查规范"',
+        "完整审查流程正文...",
+    )
+
+    reg = SkillRegistry()
+    reg.load()
+    ctx = KernelContext(skill_registry=reg)
+
+    k = DshAcpKernel()
+    req = KernelRequest(
+        messages=[Message(role="user", content="帮我用企查查并做一下review代码")],
+    )
+    prompt, matched = k._prepare_prompt(req, ctx)
+    names = [s.name for s in matched]
+
+    assert "qcc" in names
+    assert "code-review" in names
+    assert "<relevant_skills>" in prompt
+    assert "步骤：先查缓存，再调 qcc MCP。" in prompt
+    assert "api.md" in prompt
+    assert "<matched_skills_brief>" in prompt
+    assert "code-review" in prompt
+    assert "ethan_skill_read" in prompt
+
+
+def test_per_turn_skill_matching_respects_mode_and_channel_frontmatter(tmp_path):
+    """frontmatter 的 modes / channels 隔离在外部内核同样生效。"""
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+    from ethan.kernel.runtime import KernelContext
+    from ethan.skills.registry import SkillRegistry
+
+    _make_skill_dir(
+        tmp_path,
+        "legal-assistant",
+        'name: legal-assistant\nmodes: [legal]\ndescription: "法律专家技能"',
+        "法律研判方法论。",
+    )
+    _make_skill_dir(
+        tmp_path,
+        "lark-only",
+        'name: lark-only\nchannels: [lark]\ntrigger: "飞书卡片"\ndescription: "飞书专用"',
+        "飞书专用内容。",
+    )
+
+    reg = SkillRegistry()
+    reg.load()
+    ctx = KernelContext(skill_registry=reg)
+    k = DshAcpKernel()
+
+    # 普通模式 web 渠道：两个都不该出现
+    prompt_web, matched_web = k._prepare_prompt(
+        KernelRequest(messages=[Message(role="user", content="帮我发飞书卡片")], channel="web", mode=""),
+        ctx,
+    )
+    assert matched_web == []
+    assert "法律研判方法论" not in prompt_web
+    assert "飞书专用内容" not in prompt_web
+
+    # 法律模式：mode 专属技能无条件命中；lark 渠道：channel 技能命中
+    prompt_legal, matched_legal = k._prepare_prompt(
+        KernelRequest(messages=[Message(role="user", content="帮我发飞书卡片")], channel="lark", mode="法律"),
+        ctx,
+    )
+    assert {s.name for s in matched_legal} == {"legal-assistant", "lark-only"}
+    assert "法律研判方法论" in prompt_legal
+    assert "飞书专用内容" in prompt_legal
+
+
+def test_per_turn_skill_matching_skipped_without_tools_or_in_minimal_mode(tmp_path):
+    """Codex / Pi 无 MCP 工具，或 minimal 精简模式下不注入技能正文与提示。"""
+    from ethan.kernel.acp_client_kernel import DshAcpKernel
+    from ethan.kernel.pi_kernel import PiKernel
+    from ethan.kernel.runtime import KernelContext
+    from ethan.skills.registry import SkillRegistry
+
+    _make_skill_dir(
+        tmp_path,
+        "qcc",
+        'name: qcc\ntrigger: "企查查"\ndescription: "企业查询"',
+        "QCC_SECRET_BODY",
+    )
+    reg = SkillRegistry()
+    reg.load()
+    ctx = KernelContext(skill_registry=reg)
+
+    req = KernelRequest(messages=[Message(role="user", content="查下企查查")])
+    pi_prompt, pi_matched = PiKernel()._prepare_prompt(req, ctx)
+    assert pi_matched == []
+    assert "QCC_SECRET_BODY" not in pi_prompt
+
+    min_req = KernelRequest(messages=[Message(role="user", content="查下企查查")], mode="minimal")
+    min_prompt, min_matched = DshAcpKernel()._prepare_prompt(min_req, ctx)
+    assert min_matched == []
+    assert "QCC_SECRET_BODY" not in min_prompt
+    assert "<mode_note>" in min_prompt
+    assert "<memory_recall_hint>" not in min_prompt
+
+
+def test_external_kernel_emits_skills_matched_event_and_syncs_agent(monkeypatch, tmp_path):
+    """外部内核运行前命中技能时应 emit SkillsMatchedEvent 并写入 agent.last_matched_skills。"""
+    import asyncio
+    import ethan.acp as acp_mod
+    from ethan.acp.models import ACPResult
+    from ethan.kernel.claude_kernel import ClaudeCodeKernel
+    from ethan.kernel.runtime import KernelContext
+    from ethan.providers.base import SkillsMatchedEvent
+    from ethan.skills.registry import SkillRegistry
+
+    _make_skill_dir(
+        tmp_path,
+        "qcc",
+        'name: qcc\ntrigger: "企查查"\ndescription: "企业查询"',
+        "QCC_BODY",
+    )
+    reg = SkillRegistry()
+    reg.load()
+
+    class _AgentStub:
+        last_matched_skills: list[str] = []
+        _skills = reg
+        is_owner = True
+        _system_files: dict[str, str] = {}
+
+    agent = _AgentStub()
+    ctx = KernelContext(agent=agent, skill_registry=reg)
+
+    captured_prompt = {}
+
+    async def fake_delegate(prompt, **kwargs):
+        captured_prompt["text"] = prompt
+        return ACPResult(success=True, output="完成", agent="claude")
+
+    monkeypatch.setattr(acp_mod, "delegate", fake_delegate)
+
+    async def collect():
+        return [
+            e
+            async for e in ClaudeCodeKernel().run(
+                KernelRequest(messages=[Message(role="user", content="用企查查查腾讯")]),
+                ctx,
+            )
+        ]
+
+    events = asyncio.run(collect())
+    skill_events = [e for e in events if isinstance(e, SkillsMatchedEvent)]
+    assert len(skill_events) == 1
+    assert skill_events[0].skills[0]["name"] == "qcc"
+    assert agent.last_matched_skills == ["qcc"]
+    assert "QCC_BODY" in captured_prompt["text"]
+
+
+def test_non_owner_skips_profile_and_memory_hints(fake_skills, tmp_path):
+    """非主人请求（如飞书群外人）不得把主人画像和记忆召回提示注入外部内核。"""
+    (tmp_path / "system").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "system" / "soul.md").write_text("SOUL_SAFE", encoding="utf-8")
+    (tmp_path / "memory").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "memory" / "user_profile.md").write_text("# 画像\n- 主人秘密偏好", encoding="utf-8")
+
+    text = build_kernel_briefing(
+        mode="",
+        inject_context="rules_profile",
+        is_owner=False,
+        runtime_context="当前发消息的人【不是主人】",
+    )
+    assert "<soul>" in text and "SOUL_SAFE" in text
+    assert "<runtime_context>" in text and "不是主人" in text
+    assert "<user_profile>" not in text
+    assert "主人秘密偏好" not in text
+    assert "<memory_recall_hint>" not in text
+    assert "<memory_write_hint>" not in text
+
+
+def test_cache_invalidates_when_soul_or_profile_changes(fake_skills, tmp_path):
+    """修改 soul.md / user_profile.md 后无需手动清缓存即可在下轮生效。"""
+    (tmp_path / "system").mkdir(parents=True, exist_ok=True)
+    soul = tmp_path / "system" / "soul.md"
+    soul.write_text("第一版准则", encoding="utf-8")
+
+    first = build_kernel_briefing(mode="", inject_context="rules_profile")
+    assert "第一版准则" in first
+
+    soul.write_text("第二版安全准则（已更新）", encoding="utf-8")
+    second = build_kernel_briefing(mode="", inject_context="rules_profile")
+    assert "第二版安全准则（已更新）" in second
+    assert "第一版准则" not in second
+
+
+def test_kernels_context_mode_api_roundtrip(tmp_path, monkeypatch):
+    """GET /api/kernels 返回 inject_context，POST /api/kernels/context-mode 持久化并校验。"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from ethan.interface.routers import settings as settings_router
+
+    app = FastAPI()
+    app.include_router(settings_router.router, prefix="/api")
+    app.dependency_overrides[settings_router.verify_token] = lambda: ""
+
+    client = TestClient(app)
+
+    r1 = client.get("/api/kernels")
+    assert r1.status_code == 200
+    assert r1.json()["inject_context"] == "rules_profile"
+
+    r_bad = client.post("/api/kernels/context-mode", json={"inject_context": "invalid"})
+    assert r_bad.status_code == 400
+
+    for mode in ("full", "off", "rules_profile"):
+        r_set = client.post("/api/kernels/context-mode", json={"inject_context": mode})
+        assert r_set.status_code == 200
+        assert r_set.json() == {"ok": True, "inject_context": mode}
+        r_get = client.get("/api/kernels")
+        assert r_get.status_code == 200
+        assert r_get.json()["inject_context"] == mode

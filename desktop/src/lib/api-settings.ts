@@ -414,10 +414,13 @@ export interface KernelInfo {
   install_hint: string;
 }
 
+export type KernelInjectContextMode = "off" | "rules_profile" | "full";
+
 export interface KernelsResponse {
   kernels: KernelInfo[];
   default: string;
   task_rules: Record<string, string>;
+  inject_context?: KernelInjectContextMode;
   last_install: {
     kind: string;
     installed: boolean;
@@ -542,6 +545,24 @@ export async function setKernelTaskRules(
   });
   if (!res.ok) throw new Error("设置失败");
   const out = await parseKernelJson<{ ok: boolean; task_rules: Record<string, string> }>(res, url);
+  bustCache("kernels");
+  return out;
+}
+
+export async function setKernelInjectContext(
+  injectContext: KernelInjectContextMode,
+): Promise<{ ok: boolean; inject_context: KernelInjectContextMode }> {
+  const url = kernelEndpoint("/kernels/context-mode");
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ inject_context: injectContext }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(typeof body?.detail === "string" ? body.detail : "设置失败");
+  }
+  const out = await parseKernelJson<{ ok: boolean; inject_context: KernelInjectContextMode }>(res, url);
   bustCache("kernels");
   return out;
 }
