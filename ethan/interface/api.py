@@ -316,6 +316,15 @@ except Exception:
     )
 
 if _WEB_DIST.exists():
+    # 产物陈旧自检：web_dist 不在 git 里，代码更新后忘记重建会让新前端路由
+    # 静默失效（历史故障：会话详情页全白屏，后端数据完好）。只警告不阻塞。
+    try:
+        from ethan.interface.web_dist_check import warn_if_stale as _warn_if_stale
+
+        _warn_if_stale(_WEB_DIST)
+    except Exception:  # noqa: BLE001 - 自检失败绝不影响启动
+        logging.getLogger(__name__).debug("web_dist 陈旧自检未执行", exc_info=True)
+
     app.mount("/_next", StaticFiles(directory=str(_WEB_DIST / "_next")), name="next-static")
 
     @app.get("/{path:path}")

@@ -351,6 +351,15 @@ npm install
 npm run dev   # http://localhost:3000 (开发模式，API 仍在 8900 端口)
 ```
 
+> ⚠️ 改了 `web/` 之后**必须重新 build 并替换 `ethan/web_dist`**，否则新前端路由不会生效——
+> 这个目录在 `.gitignore` 里、不随代码走。典型症状：代码已合并新路由，但点进会话详情页一片空白
+> （后端数据完好、前端也不报错）。服务启动时会自检产物是否落后于 `web/` 源码并打 WARNING。
+>
+> ```bash
+> pnpm build:web && rm -rf ethan/web_dist && cp -r web/out ethan/web_dist
+> # 静态目录在启动时 mount，改完要重启服务
+> ```
+
 ### Android App
 
 原生移动端客户端，位于 `app/android/`。需要 Android SDK 35 和 JDK 17+。
