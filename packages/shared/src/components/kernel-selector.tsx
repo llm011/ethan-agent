@@ -19,11 +19,12 @@
  *    高级功能，默认收起，避免主界面变成一个配置面板。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { AlertCircle, Check, Download, Loader2, RefreshCw, Wrench, Zap } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
 /** 与后端 `KernelInfo` 对应（见 ethan/interface/routers/settings.py）。 */
 export interface KernelCapabilities {
@@ -53,6 +54,8 @@ export interface KernelSelectorProps {
   current: string;
   taskRules: Record<string, string>;
   loading?: boolean;
+  /** 拉取内核列表失败时的错误信息，避免列表为空时无声失败 */
+  loadError?: string;
   /** 切换默认内核（内部会确保依赖就绪）。抛错表示切换失败。 */
   onSelect: (kind: string) => Promise<void>;
   /** 只安装依赖，不切换。 */
@@ -68,11 +71,14 @@ const TASK_LABELS: Record<string, string> = {
   chat: "日常对话",
 };
 
+const FOLLOW_DEFAULT_VALUE = "__default__";
+
 export function KernelSelector({
   kernels,
   current,
   taskRules,
   loading = false,
+  loadError = "",
   onSelect,
   onInstall,
   onSetTaskRules,
@@ -132,6 +138,41 @@ export function KernelSelector({
       </CardHeader>
 
       <CardContent className="space-y-3">
+        {loading && kernels.length === 0 && (
+          <div className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-6 text-xs text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>正在加载内核列表…</span>
+          </div>
+        )}
+
+        {!loading && loadError && kernels.length === 0 && (
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
+            <div className="flex gap-2">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-medium">无法加载内核列表</p>
+                <p className="whitespace-pre-wrap text-destructive/90">{loadError}</p>
+              </div>
+            </div>
+            {onRefresh && (
+              <Button size="sm" variant="outline" onClick={onRefresh}>
+                重试
+              </Button>
+            )}
+          </div>
+        )}
+
+        {!loading && !loadError && kernels.length === 0 && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
+            <span>未获取到可用内核配置，请检查后端服务状态。</span>
+            {onRefresh && (
+              <Button size="sm" variant="outline" onClick={onRefresh}>
+                刷新
+              </Button>
+            )}
+          </div>
+        )}
+
         {kernels.map((k) => {
           const isCurrent = k.kind === current;
           const isBusy = busy === k.kind;
@@ -268,8 +309,8 @@ export function KernelSelector({
           </div>
         )}
 
-        {/* 按任务自动选：高级功能，默认收起 */}
-        {onSetTaskRules && (
+        {/* 按任务自动选：高级功能，默认收起；内核列表未加载时不展示空下拉 */}
+        {onSetTaskRules && kernels.length > 0 && (
           <div className="pt-2">
             <button
               type="button"
@@ -282,34 +323,48 @@ export function KernelSelector({
             </button>
 
             {showRules && (
-              <div className="mt-2 space-y-2 rounded-md border p-2">
-                {Object.keys(TASK_LABELS).map((task) => (
-                  <div key={task} className="flex items-center justify-between gap-2">
-                    <span className="text-xs">{TASK_LABELS[task]}</span>
-                    <select
-                      className="rounded border bg-background px-1.5 py-1 text-xs"
-                      value={taskRules[task] || ""}
-                      onChange={(e) => {
-                        const next = { ...taskRules };
-                        if (e.target.value) next[task] = e.target.value;
-                        else delete next[task];
-                        onSetTaskRules(next).catch((err) =>
-                          setError(err instanceof Error ? err.message : String(err)),
-                        );
-                      }}
-                    >
-                      <option value="">跟随默认</option>
-                      {kernels
-                        .filter((k) => k.available)
-                        .map((k) => (
-                          <option key={k.kind} value={k.kind}>
-                            {k.name}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                ))}
-                <p className="text-[10px] text-muted-foreground">
+              <div className="mt-2 space-y-2.5 rounded-lg border border-border/70 bg-muted/20 p-3">
+                {Object.keys(TASK_LABELS).map((task) => {
+                  const selectedKind = taskRules[task] || FOLLOW_DEFAULT_VALUE;
+                  const availableKernels = kernels.filter((k) => k.available);
+                  const labelMap: Record<string, string> = {
+                    [FOLLOW_DEFAULT_VALUE]: "跟随默认",
+                    ...Object.fromEntries(kernels.map((k) => [k.kind, k.name])),
+                  };
+                  return (
+                    <div key={task} className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-medium">{TASK_LABELS[task]}</span>
+                      <Select
+                        value={selectedKind}
+                        onValueChange={(val) => {
+                          const next = { ...taskRules };
+                          if (val && val !== FOLLOW_DEFAULT_VALUE) next[task] = val;
+                          else delete next[task];
+                          onSetTaskRules(next).catch((err) =>
+                            setError(err instanceof Error ? err.message : String(err)),
+                          );
+                        }}
+                      >
+                        <SelectTrigger size="sm" className="min-w-[140px] bg-background text-xs">
+                          <SelectValue placeholder="跟随默认">
+                            {(v: string) => labelMap[v] ?? v ?? "跟随默认"}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FOLLOW_DEFAULT_VALUE} className="text-xs">
+                            跟随默认
+                          </SelectItem>
+                          {availableKernels.map((k) => (
+                            <SelectItem key={k.kind} value={k.kind} className="text-xs">
+                              {k.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  );
+                })}
+                <p className="text-[11px] text-muted-foreground">
                   任务类型由关键词粗判（编码/调研/对话）。判断不准时会回退到默认内核，不会出错。
                 </p>
               </div>

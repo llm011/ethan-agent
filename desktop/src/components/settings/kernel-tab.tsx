@@ -22,9 +22,11 @@ export function KernelTab() {
   const [current, setCurrent] = useState("ethan");
   const [taskRules, setTaskRules] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const data = await fetchKernels();
       setKernels(data.kernels);
@@ -32,6 +34,7 @@ export function KernelTab() {
       setTaskRules(data.task_rules || {});
     } catch (e) {
       console.error(e);
+      setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -71,6 +74,7 @@ export function KernelTab() {
         current={current}
         taskRules={taskRules}
         loading={loading}
+        loadError={loadError}
         onSelect={handleSelect}
         onInstall={handleInstall}
         onSetTaskRules={handleTaskRules}
