@@ -283,7 +283,7 @@ CLI 内部维护 `WorkingMemory` 实例：
 | 路径 | 功能 |
 |------|------|
 | `/chat` | 新建对话（默认落地页） |
-| `/chat/[id]` | 指定会话的对话界面，支持流式输出和工具调用可视化；消息气泡显示 TTFT 耗时 |
+| `/chat/[[...id]]` | 可选 catch-all：`/chat`、`/chat/new`、`/chat/<id>` 命中**同一个组件实例**，指定会话时加载其消息、支持流式输出和工具调用可视化，消息气泡显示 TTFT 耗时。不用 `[id]` 独立路由是因为两者属不同路由段，新建会话后 `replace` 会卸载重建整棵树（白屏闪一下），且静态导出下 `/chat/<真实id>` 没有预生成产物 |
 | `/memory` | 结构化记忆，七个 Tab：个人信息 / 偏好 / 方法论 / 正在做的事 / 决定与约定 / 苏念记忆 / 每日摘要。每条记忆可编辑/遗忘，展示来源、状态、scope、更新时间；苏念记忆仅在显式选择该 Tab 时加载（独立 domain） |
 | `/knowledge` | 知识库管理（查询、上传、删除文档） |
 | `/documents` | 文档库：Agent 产出的文档（md/txt/html/csv 等）按主题目录成树展示，可搜索、收藏、删除；点击复用侧栏预览，可放大到整宽阅读；带来源对话的文档可一键跳回产生它的那条消息 |
@@ -379,6 +379,34 @@ CLI 内部维护 `WorkingMemory` 实例：
 
 另：侧边栏的取数 effect 以「所在区块」而不是完整 `pathname` 作依赖，避免 `/chat/[id]`
 之间切换时把会话列表/定时任务重新拉一遍。
+
+### 静态产物必须跟代码一起更新（踩过）
+
+`ethan serve` 挂的是 `ethan/web_dist/` 这棵前端产物，而它在 `.gitignore` 里、**不随代码走**。
+所以「代码已合并新前端，产物还是几周前的」是常态，而后果往往不是样式旧了，是功能性故障：
+
+> 2026-11-16 真实故障：#448 把 `/chat/[id]` 与 `/chat` 合并成 `[[...id]]`，正是因为静态导出下
+> `/chat/<真实id>` 没有预生成产物。服务挂的仍是合并前产物（只有 `chat/index.html`、
+> `chat/new/index.html`、`chat/__placeholder__/index.html`），访问 `/chat/s_2026xxx`
+> 落不到任何产物 → ChatView 拿不到 id → 消息区永远 "Start a conversation"。
+> 所有会话都白屏，但后端 API 200、返回完整消息、前端不报任何异常。
+
+**排查这类问题先看产物时间戳**：`stat -f "%Sm" ethan/web_dist/index.html` 对比
+`git log -1 -- web/`。若产物更旧，先重建再谈其它。
+
+重建与部署（`dev.sh` 里也是这三步）：
+
+```bash
+pnpm build:web
+rm -rf ethan/web_dist && cp -r web/out ethan/web_dist
+# 重启服务（静态目录在启动时 mount，热替换不会生效）
+```
+
+自 2026-11-16 起 `ethan/interface/api.py` 启动时会跑一次
+`web_dist_check.warn_if_stale()`：产物比 `web/` 源码旧就打 WARNING 并给出修复命令
+（只警告、不阻塞启动；`ETHAN_SKIP_WEB_DIST_CHECK=1` 可关）。注意它按 **mtime** 判断，
+所以 `git pull` 后即使没改前端也会提示——那正是需要的语义（pull 后本来就该重建）。
+
 
 ### 聊天附件的存储与访问契约
 

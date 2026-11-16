@@ -272,6 +272,10 @@ pnpm --dir desktop build  # Desktop 前端
 pnpm --dir desktop tauri build   # 打桌面安装包
 ```
 
+⚠️ 改了 `web/` 之后**必须重新 build 并替换 `ethan/web_dist`**，否则新前端路由不会生效——
+这个目录在 `.gitignore` 里、不随代码走。典型症状：代码已合并新路由，但点进会话详情页一片空白
+（后端数据完好、前端也不报错）。服务启动时会自检产物是否落后于 `web/` 源码并打 WARNING。
+
 Android：
 
 ```bash
