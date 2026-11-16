@@ -84,15 +84,35 @@ def test_chat_session_path_does_not_fall_to_root(tmp_path):
     assert "CHAT" in hit.read_text(), "回落到站点根了"
 
 
-def test_serve_spa_does_not_swallow_api_routes():
+def test_serve_spa_does_not_swallow_api_routes(tmp_path):
     """未知 /api/* 路由绝不能由 serve_spa 回落成 200 index.html。
 
     否则旧版后端缺少新接口（如 /api/kernels）时返回 200 HTML，
     WKWebView 的 res.json() 直接报 'The string did not match the expected pattern.'。
     """
-    api_src = (Path(__file__).resolve().parent.parent / "ethan/interface/api.py").read_text(encoding="utf-8")
-    idx = api_src.find("async def serve_spa(")
-    assert idx >= 0
-    block = api_src[idx : idx + 800]
-    assert '"api"' in block and "status_code=404" in block
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from ethan.interface.api import _serve_spa_response
+
+    dist = _make_dist(tmp_path)
+    test_app = FastAPI()
+
+    @test_app.get("/{path:path}")
+    async def _spa(path: str):
+        return _serve_spa_response(dist, path)
+
+    client = TestClient(test_app)
+    assert client.get("/api/kernels").status_code == 404
+    assert client.get("/ws/unknown").status_code == 404
+    assert client.get("/mcp/unknown").status_code == 404
+    assert client.get("/kernel-tools/unknown").status_code == 404
+
+    chat_resp = client.get("/chat/s_abc123")
+    assert chat_resp.status_code == 200
+    assert "CHAT" in chat_resp.text
+
+    root_resp = client.get("/unknown-page")
+    assert root_resp.status_code == 200
+    assert "ROOT" in root_resp.text
 

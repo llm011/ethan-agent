@@ -315,6 +315,51 @@ except Exception:
         "/kernel-tools 端点未挂载（配置读取或初始化失败）", exc_info=True
     )
 
+def _serve_spa_response(web_dist: Path, path: str) -> Response:
+    # API / WebSocket / MCP 路径绝不能回落到 index.html：
+    # 否则未命中路由（例如旧版后端缺少新接口）会返回 200 text/html，
+    # 前端 res.json() 在 Safari/WKWebView 中直接抛
+    # "SyntaxError: The string did not match the expected pattern."，
+    # 404 友好提示永远触发不到。
+    first_seg = path.lstrip("/").split("/", 1)[0]
+    if first_seg in {"api", "ws", "mcp", "kernel-tools", "v1"}:
+        return Response(status_code=404)
+    file_path = web_dist / path
+    # Exact static file (favicon, images, etc.)
+    if file_path.is_file():
+        return FileResponse(file_path)
+    # Directory index (trailingSlash: true generates /chat/index.html)
+    if (file_path / "index.html").is_file():
+        return FileResponse(file_path / "index.html")
+    # Flat .html (e.g. web_dist/skills.html)
+    if (web_dist / f"{path}.html").is_file():
+        return FileResponse(web_dist / f"{path}.html")
+    # 动态路由回落，两种形态都要支持：
+    #
+    # 1) 可选 catch-all `[[...id]]`（当前 chat 用的）：产物只有 `chat/index.html`
+    #    一条，任意 `/chat/<任意id>` 都由它接管。所以先逐层往上找最近的
+    #    `index.html`——/chat/a/b 找不到就用 chat/a/index.html，再找不到用
+    #    chat/index.html。
+    #
+    # 2) 必选动态段 `[id]`（旧写法）：静态导出只预生成 `__placeholder__`，
+    #    产物是 `xxx/__placeholder__/index.html`。保留这段兼容，
+    #    避免其它动态路由（如 /settings/[tab]）受影响。
+    parts = path.strip("/").split("/")
+    for cut in range(len(parts), 0, -1):
+        prefix_dir = web_dist.joinpath(*parts[:cut])
+        index = prefix_dir / "index.html"
+        if index.is_file():
+            return FileResponse(index)
+        placeholder = prefix_dir / "__placeholder__" / "index.html"
+        if placeholder.is_file():
+            return FileResponse(placeholder)
+    # 真的什么都匹配不上才回落到站点根（首页），而不是把 /chat/xxx 也送回去
+    root_index = web_dist / "index.html"
+    if root_index.is_file():
+        return FileResponse(root_index)
+    return Response(status_code=404)
+
+
 if _WEB_DIST.exists():
     # 产物陈旧自检：web_dist 不在 git 里，代码更新后忘记重建会让新前端路由
     # 静默失效（历史故障：会话详情页全白屏，后端数据完好）。只警告不阻塞。
@@ -329,48 +374,7 @@ if _WEB_DIST.exists():
 
     @app.get("/{path:path}")
     async def serve_spa(request: Request, path: str):
-        # API / WebSocket / MCP 路径绝不能回落到 index.html：
-        # 否则未命中路由（例如旧版后端缺少新接口）会返回 200 text/html，
-        # 前端 res.json() 在 Safari/WKWebView 中直接抛
-        # "SyntaxError: The string did not match the expected pattern."，
-        # 404 友好提示永远触发不到。
-        first_seg = path.lstrip("/").split("/", 1)[0]
-        if first_seg in {"api", "ws", "mcp", "kernel-tools", "v1"}:
-            return Response(status_code=404)
-        file_path = _WEB_DIST / path
-        # Exact static file (favicon, images, etc.)
-        if file_path.is_file():
-            return FileResponse(file_path)
-        # Directory index (trailingSlash: true generates /chat/index.html)
-        if (file_path / "index.html").is_file():
-            return FileResponse(file_path / "index.html")
-        # Flat .html (e.g. web_dist/skills.html)
-        if (_WEB_DIST / f"{path}.html").is_file():
-            return FileResponse(_WEB_DIST / f"{path}.html")
-        # 动态路由回落，两种形态都要支持：
-        #
-        # 1) 可选 catch-all `[[...id]]`（当前 chat 用的）：产物只有 `chat/index.html`
-        #    一条，任意 `/chat/<任意id>` 都由它接管。所以先逐层往上找最近的
-        #    `index.html`——/chat/a/b 找不到就用 chat/a/index.html，再找不到用
-        #    chat/index.html。
-        #
-        # 2) 必选动态段 `[id]`（旧写法）：静态导出只预生成 `__placeholder__`，
-        #    产物是 `xxx/__placeholder__/index.html`。保留这段兼容，
-        #    避免其它动态路由（如 /settings/[tab]）受影响。
-        parts = path.strip("/").split("/")
-        for cut in range(len(parts), 0, -1):
-            prefix_dir = _WEB_DIST.joinpath(*parts[:cut])
-            index = prefix_dir / "index.html"
-            if index.is_file():
-                return FileResponse(index)
-            placeholder = prefix_dir / "__placeholder__" / "index.html"
-            if placeholder.is_file():
-                return FileResponse(placeholder)
-        # 真的什么都匹配不上才回落到站点根（首页），而不是把 /chat/xxx 也送回去
-        root_index = _WEB_DIST / "index.html"
-        if root_index.is_file():
-            return FileResponse(root_index)
-        return Response(status_code=404)
+        return _serve_spa_response(_WEB_DIST, path)
 
 
 def _port_is_served(host: str, port: int) -> bool:

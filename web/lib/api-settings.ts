@@ -423,8 +423,11 @@ export interface KernelsResponse {
 }
 
 async function parseKernelJson<T>(res: Response, endpoint: string): Promise<T> {
-  const contentType = res.headers.get("content-type") || "";
+  const contentType = (res.headers.get("content-type") || "").toLowerCase();
   const rawText = await res.text();
+  if (!rawText.trim()) {
+    throw new Error(`接口返回了空响应（HTTP ${res.status}）`);
+  }
   try {
     return JSON.parse(rawText) as T;
   } catch {

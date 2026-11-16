@@ -27,10 +27,18 @@ describe("fetchKernels", () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response("<!doctype html><html><body>SPA</body></html>", {
         status: 200,
-        headers: { "Content-Type": "text/html" },
+        headers: { "Content-Type": "Text/HTML; charset=utf-8" },
       }),
     );
     await expect(fetchKernels()).rejects.toThrow("接口返回了网页而非 JSON");
+  });
+
+  it("throws clear message when server returns empty body", async () => {
+    localStorage.setItem("ethan_api_url", "http://127.0.0.1:8900");
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response("", { status: 200 }),
+    );
+    await expect(fetchKernels()).rejects.toThrow("接口返回了空响应");
   });
 
   it("returns parsed kernels on valid JSON", async () => {
