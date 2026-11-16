@@ -76,11 +76,15 @@ docker compose up -d
 于是它既能用自己擅长的能力，又能用 Ethan 的手脚干活。
 
 光把工具挂上去还不够：外部内核看不到 Ethan 的系统提示词，不知道「有这些技能」
-「该在什么时候召回记忆」。所以派发时还会前置一张**简报表**——技能索引 +
-「涉及个人上下文先调 `ethan_recall_memory`」+「值得长期记住的事调
-`ethan_memory_write`」。人格与用户画像**不注入**（两份人格会打架），这是
-`ethan_context=False` 的取舍。没共享工具的内核（Codex / Pi）不带简报，
-免得教它们调不存在的工具。
+「该在什么时候召回记忆」。所以派发时还会前置：
+1. **简报表与每轮技能匹配**：技能索引 + 按 Skill frontmatter（`trigger` / `modes` /
+   `channels` / `category`）每轮自动匹配并注入 `<relevant_skills>` 或
+   `<matched_skills_brief>` + 「涉及个人上下文先调 `ethan_recall_memory`」+「值得长期记住的事调
+   `ethan_memory_write`」。没共享工具的内核（Codex / Pi）不带这部分，免得教它们调不存在的工具。
+2. **分层上下文注入（`defaults.kernel.inject_context`）**：默认 `rules_profile`
+   注入 `soul.md`（主人权限/安全红线/密钥铁律）、`user_profile.md`（我的画像）与
+   `<behavioral_guidelines>`（纠错准则），保留外部内核原生语气；也可在设置页切为
+   `full`（连同 `identity.md` 与模式人设一起注入）或 `off`（关闭）。
 
 **附图**：外部内核的 ACP 传输层基本都声明 `promptCapabilities.image=false`（dsh
 实测直接拒收 inline 图片），所以图片不走 base64，而是**存盘后附本地绝对路径**。
@@ -209,6 +213,7 @@ GET  /ui-resources                # MCP Apps UI 资源：列出
 GET  /ui-resources/read?uri=      # MCP Apps UI 资源：读取 HTML + _meta
 GET  /kernels                     # 内核列表与可用性
 POST /kernels/select              # 切换内核
+POST /kernels/context-mode        # 设置外部内核上下文注入档位（off/rules_profile/full）
 GET  /tts/backends                # 语音后端可用性
 POST /tts/select                  # 切换语音后端
 ```
@@ -225,9 +230,10 @@ POST /tts/select                  # 切换语音后端
 defaults:
   model: provider/model-id
   kernel:
-    default: ""            # "" = 原生 Ethan；可选 dsh / claude_code / opencode / antigravity / codex / pi
-    task_rules: {}         # {"coding": "claude_code"} 按任务类型选内核
-    share_tools: all       # all | readonly | off —— 外部内核能用多少 Ethan 的工具
+    default: ""                    # "" = 原生 Ethan；可选 dsh / claude_code / opencode / antigravity / codex / pi
+    task_rules: {}                 # {"coding": "claude_code"} 按任务类型选内核
+    share_tools: all               # all | readonly | off —— 外部内核能用多少 Ethan 的工具
+    inject_context: rules_profile  # off | rules_profile | full —— 外部内核上下文注入粒度
 
 network:
   auth_token: "..."        # Web/API 认证

@@ -166,6 +166,12 @@ class KernelRunner:
         """按选中的内核产出事件流，并顺手统计可观测数据。"""
         started = time.time()
         tool_calls = 0
+        runtime_ctx = (
+            getattr(self._agent, "runtime_context", "") if self._agent is not None else ""
+        ) or self.runtime_context
+        is_owner = (
+            bool(getattr(self._agent, "is_owner", True)) if self._agent is not None else True
+        )
         request = KernelRequest(
             messages=messages,
             user_id=self._user_id,
@@ -174,6 +180,8 @@ class KernelRunner:
             session_id=self.session_id,
             working_dir=self._working_dir,
             task_kind=self._task_kind,
+            runtime_context=runtime_ctx,
+            is_owner=is_owner,
         )
         context = KernelContext(
             # 关键：把原 agent 实例传进去。EthanKernel 直接用它，不新建——
@@ -182,6 +190,7 @@ class KernelRunner:
             # 这两个是给「没有 agent 但给了 registry」的兜底路径用的
             tool_registry=getattr(self._agent, "_registry", None),
             skill_registry=getattr(self._agent, "_skills", None),
+            runtime_context=runtime_ctx,
         )
 
         error = ""

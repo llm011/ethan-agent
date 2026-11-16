@@ -52,6 +52,8 @@ data class KernelsResponse(
     val default: String = "ethan",
     /** 按任务类型选内核的映射，如 {"coding": "claude_code"} */
     @SerialName("task_rules") val taskRules: Map<String, String> = emptyMap(),
+    /** 外部内核注入 Ethan 上下文的粒度：off | rules_profile | full */
+    @SerialName("inject_context") val injectContext: String = "rules_profile",
 )
 
 @Serializable

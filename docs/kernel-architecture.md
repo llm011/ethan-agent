@@ -54,11 +54,15 @@ Web / Desktop / Android 三端。
 ### 两个字段别搞混
 
 - **`shares_ethan_tools`** —— 能不能**用** Ethan 的工具/技能/记忆（经 MCP 注入）。
-- **`ethan_context`** —— 要不要**注入** Ethan 的系统提示词、人格、用户画像。
+- **`ethan_context`** —— 是否原生运行 Ethan 自身的完整系统提示词与 agent 循环（外部内核有自己的系统提示词，固定为 `False`）。
 
-UI 曾经把 `ethan_context=False` 翻译成「不共享 Ethan 技能/记忆」，和旁边的绿色
-「可用 Ethan 的工具」徽章自相矛盾，被当成 bug 报过。现在的文案是
-「不注入 Ethan 人格/画像」。
+至于外部内核要不要接收 `soul.md` / `user_profile.md` / `identity.md` 等上下文，由配置项 **`defaults.kernel.inject_context`** 单独控制（设置页「AI 内核 → 外部内核上下文注入」可切换）：
+
+| 档位 | 注入内容 | 适用场景 |
+|---|---|---|
+| `rules_profile`（默认） | `soul.md`（主人授权/安全红线/密钥铁律）、`user_profile.md`、`<behavioral_guidelines>`、`<runtime_context>` 与显式切换的模式角色 | 既保留外部内核原生工作流与语气，又让安全红线、个人画像与会话模式生效 |
+| `full` | 在 `rules_profile` 基础上额外注入 `identity.md`（默认身份与说话风格） | 希望外部内核也完全沿用 Ethan 的人设与说话语气 |
+| `off` | 不注入上述任何规则/画像/人设 | 仅把外部内核当作纯三方执行器（有工具共享时仍给技能与记忆简报） |
 
 ---
 
@@ -107,18 +111,16 @@ UI 曾经把 `ethan_context=False` 翻译成「不共享 Ethan 技能/记忆」�
 **替代自动注入的正是那个 hint**。外部内核走自己的系统提示词，一个字都收不到 →
 等价于自动注入被撤掉、又没给替代品，记忆彻底失效。
 
-`build_kernel_briefing()` 补的就是这两块，外加 `<memory_write_hint>`。规则：
+`build_kernel_briefing()` + `match_kernel_skills()` 补的正是这两块，外加 `<memory_write_hint>` 与分层上下文。规则：
 
-- **只注入索引与提示，不注入人格**（soul / identity / user_profile /
-  behavioral_guidelines 仍然不给）—— 两份人格打架比没有更糟
-- **只在 `shares_ethan_tools=True` 时注入** —— 教 Codex/Pi 调它们没有的工具，
-  只会让它失败一轮再绕路
-- **模式专属技能不泄漏** —— `legal-assistant` 只在法律模式的简报里出现，
-  「零污染」的硬保证对外部内核同样成立
-- 按 `(mode, 技能目录 mtime)` 缓存；构建失败退化成只给记忆提示，不让整轮失败
+- **上下文分层注入（`inject_context`）**：默认 `rules_profile` 注入 `soul.md`、`user_profile.md`、`<behavioral_guidelines>` 与 `<runtime_context>`（不依赖 MCP 工具，Codex / Pi 同样可用）；`full` 再追加 `identity.md` 与模式人设；`off` 关闭；`minimal` 精简模式下不注入画像、记忆提示与技能匹配
+- **工具简报只在 `shares_ethan_tools=True` 且 `share_tools != "off"` 时注入** —— 教 Codex/Pi 调它们没有的工具，只会让它失败一轮再绕路
+- **每轮按 Skill frontmatter 自动匹配**（`match_kernel_skills()`）：复用 `SkillRegistry.match()` 按 `trigger` / `modes` / `channels` / 语义路由匹配，命中 `default` 技能直接注入 `<relevant_skills>`（正文 + references），命中 `discoverable` 技能注入 `<matched_skills_brief>` 引导调用 `ethan_skill_read`，并发送 `SkillsMatchedEvent` 与记录命中统计
+- **模式专属技能不泄漏** —— `legal-assistant` 只在法律模式的简报里出现，「零污染」的硬保证对外部内核同样成立
+- 按 `(mode, 技能目录 mtime, soul/identity/profile/playbook 指纹)` 缓存；构建失败退化成只给记忆提示，不让整轮失败
 
-接线在 `KernelRuntime._compose_prompt()`：`_build_prompt()` 保持「只压对话历史」
-的纯粹语义，简报在 `_compose_prompt` 里前置拼上去。
+接线在 `KernelRuntime._prepare_prompt()` / `_compose_prompt()`：`_build_prompt()` 保持「只压对话历史」
+的纯粹语义，上下文、简报与命中技能在 `_prepare_prompt` 里前置拼上去。
 
 ---
 
@@ -162,9 +164,10 @@ UI 曾经把 `ethan_context=False` 翻译成「不共享 Ethan 技能/记忆」�
 ```yaml
 defaults:
   kernel:
-    default: ""        # "" = 原生 Ethan；可填 ethan / dsh / claude_code / ...
-    task_rules: {}     # {"coding": "claude_code"} 按任务类型选内核
-    share_tools: all   # all | readonly | off —— 外部内核能用多少 Ethan 的工具
+    default: ""                    # "" = 原生 Ethan；可填 ethan / dsh / claude_code / ...
+    task_rules: {}                 # {"coding": "claude_code"} 按任务类型选内核
+    share_tools: all               # all | readonly | off —— 外部内核能用多少 Ethan 的工具
+    inject_context: rules_profile  # off | rules_profile | full —— 注入准则/画像/人格粒度
 ```
 
 `resolve()` 的选择顺序：请求级显式指定 → `task_rules` → `default` → 兜底原生。

@@ -162,10 +162,14 @@ class AcpClientKernel(KernelRuntime):
             yield f"[内核不可用] {reason}"
             return
 
-        prompt = self._compose_prompt(request)
+        prompt, matched_skills = self._prepare_prompt(request, context)
         if not prompt:
             yield "[空输入] 没有可执行的内容"
             return
+
+        skills_evt = self._record_matched_skills(matched_skills, context)
+        if skills_evt is not None:
+            yield skills_evt
 
         # 单例跨轮复用：每轮开始重置本次流式跟踪状态
         self._emitted = False

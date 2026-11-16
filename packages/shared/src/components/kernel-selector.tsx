@@ -49,10 +49,13 @@ export interface KernelInfo {
   install_hint: string;
 }
 
+export type KernelInjectContextMode = "off" | "rules_profile" | "full";
+
 export interface KernelSelectorProps {
   kernels: KernelInfo[];
   current: string;
   taskRules: Record<string, string>;
+  injectContext?: KernelInjectContextMode;
   loading?: boolean;
   /** 拉取内核列表失败时的错误信息，避免列表为空时无声失败 */
   loadError?: string;
@@ -61,8 +64,36 @@ export interface KernelSelectorProps {
   /** 只安装依赖，不切换。 */
   onInstall?: (kind: string) => Promise<void>;
   onSetTaskRules?: (rules: Record<string, string>) => Promise<void>;
+  onSetInjectContext?: (mode: KernelInjectContextMode) => Promise<void>;
   onRefresh?: () => void;
 }
+
+/** 外部内核上下文注入档位的中文标签与说明。 */
+const INJECT_CONTEXT_OPTIONS: Array<{
+  value: KernelInjectContextMode;
+  label: string;
+  desc: string;
+  badge: string;
+}> = [
+  {
+    value: "rules_profile",
+    label: "准则与画像（推荐）",
+    desc: "注入 soul.md（主人权限与安全红线）、我的画像、纠错准则与会话模式角色，保留外部内核原生语气。",
+    badge: "注入准则与画像",
+  },
+  {
+    value: "full",
+    label: "完整人格与画像",
+    desc: "在准则与画像基础上，额外注入 identity.md（默认身份与说话风格，可能与外部内核风格重叠）。",
+    badge: "注入完整人格/画像",
+  },
+  {
+    value: "off",
+    label: "仅工具简报（关闭上下文）",
+    desc: "不注入 soul.md、画像或人设，仅在共享 Ethan 工具时提供技能与记忆提示。",
+    badge: "不注入 Ethan 人格/画像",
+  },
+];
 
 /** 任务类型的中文标签。与后端 `_infer_task_kind` 的取值对应。 */
 const TASK_LABELS: Record<string, string> = {
@@ -77,11 +108,13 @@ export function KernelSelector({
   kernels,
   current,
   taskRules,
+  injectContext = "rules_profile",
   loading = false,
   loadError = "",
   onSelect,
   onInstall,
   onSetTaskRules,
+  onSetInjectContext,
   onRefresh,
 }: KernelSelectorProps) {
   const [busy, setBusy] = useState<string>("");
@@ -228,14 +261,12 @@ export function KernelSelector({
                             仅自带工具
                           </Badge>
                         )}
-                        {/* ethan_context 只表示「不注入 Ethan 的人格/画像/系统提示词」，
-                            与「能不能用 Ethan 的技能/记忆」是两件事——后者由
-                            shares_ethan_tools 决定（经 MCP 注入，还会附带技能索引与
-                            记忆召回提示）。以前这里写成「不共享 Ethan 技能/记忆」，
-                            和上面那条绿色徽章自相矛盾，被当成 bug 报过。 */}
+                        {/* ethan_context=False 表示使用外部内核自身系统提示词；
+                            具体是否注入 soul/画像/人设由 injectContext 配置决定。 */}
                         {!k.capabilities.ethan_context && (
                           <Badge variant="outline" className="text-[10px]">
-                            不注入 Ethan 人格/画像
+                            {INJECT_CONTEXT_OPTIONS.find((o) => o.value === injectContext)?.badge ??
+                              "注入准则与画像"}
                           </Badge>
                         )}
                         {!k.capabilities.consent && (
@@ -306,6 +337,45 @@ export function KernelSelector({
           <div className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span className="whitespace-pre-wrap">{error}</span>
+          </div>
+        )}
+
+        {/* 外部内核上下文注入粒度：控制 soul.md / user_profile.md / identity.md 是否注入 */}
+        {onSetInjectContext && kernels.length > 0 && (
+          <div className="rounded-lg border border-border/70 bg-muted/20 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium">外部内核上下文注入</span>
+              <Select
+                value={injectContext}
+                onValueChange={(val) => {
+                  const next = (val || "rules_profile") as KernelInjectContextMode;
+                  setError("");
+                  onSetInjectContext(next).catch((err) =>
+                    setError(err instanceof Error ? err.message : String(err)),
+                  );
+                }}
+              >
+                <SelectTrigger size="sm" className="min-w-[170px] bg-background text-xs">
+                  <SelectValue>
+                    {(v: string) =>
+                      INJECT_CONTEXT_OPTIONS.find((o) => o.value === v)?.label ??
+                      "准则与画像（推荐）"
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {INJECT_CONTEXT_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {INJECT_CONTEXT_OPTIONS.find((o) => o.value === injectContext)?.desc ??
+                INJECT_CONTEXT_OPTIONS[0].desc}
+            </p>
           </div>
         )}
 

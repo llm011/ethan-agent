@@ -86,6 +86,7 @@ fun KernelSettings(
                 kernel = kernel,
                 isCurrent = kernel.kind == current,
                 isBusy = busyKind == kernel.kind,
+                injectContext = data.injectContext,
                 onSelect = { onSelect(kernel.kind) },
             )
             Spacer(Modifier.height(8.dp))
@@ -106,6 +107,7 @@ private fun KernelCard(
     kernel: KernelInfoDto,
     isCurrent: Boolean,
     isBusy: Boolean,
+    injectContext: String,
     onSelect: () -> Unit,
 ) {
     val caps = kernel.capabilities
@@ -187,6 +189,7 @@ private fun KernelCard(
                 FlowRowLikeBadges(
                     sharesTools = caps.sharesEthanTools,
                     ethanContext = caps.ethanContext,
+                    injectContext = injectContext,
                     consent = caps.consent,
                     resumable = caps.resumable,
                 )
@@ -215,6 +218,7 @@ private fun KernelCard(
 private fun FlowRowLikeBadges(
     sharesTools: Boolean,
     ethanContext: Boolean,
+    injectContext: String,
     consent: Boolean,
     resumable: Boolean,
 ) {
@@ -236,8 +240,13 @@ private fun FlowRowLikeBadges(
         // 由上面的 sharesTools 决定（经 MCP 注入，附带技能索引与记忆召回提示）。
         // 这里以前写「不共享技能/记忆」，和绿色徽章自相矛盾。
         if (!ethanContext) {
+            val contextLabel = when (injectContext) {
+                "off" -> "不注入人格/画像"
+                "full" -> "注入完整人格/画像"
+                else -> "注入准则与画像"
+            }
             SmallChip(
-                text = "不注入人格/画像",
+                text = contextLabel,
                 bg = MaterialTheme.colorScheme.surfaceVariant,
                 fg = MaterialTheme.colorScheme.onSurfaceVariant,
             )

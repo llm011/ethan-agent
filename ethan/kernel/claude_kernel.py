@@ -110,10 +110,14 @@ class ACPKernelBase(KernelRuntime):
             yield f"[内核不可用] {reason}"
             return
 
-        prompt = self._compose_prompt(request)
+        prompt, matched_skills = self._prepare_prompt(request, context)
         if not prompt:
             yield "[空输入] 没有可执行的内容"
             return
+
+        skills_evt = self._record_matched_skills(matched_skills, context)
+        if skills_evt is not None:
+            yield skills_evt
 
         # 生成 MCP 配置（把 Ethan 的工具挂给 Claude Code）。
         # 拿不到就不注入，行为退回"只用它自带工具"。

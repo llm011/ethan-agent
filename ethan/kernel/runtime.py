@@ -133,6 +133,10 @@ class KernelRequest:
     working_dir: str = ""
     # 任务类型提示，供「按任务选内核」的路由用（如 "coding" / "chat" / "research"）
     task_kind: str = ""
+    # 请求级运行时上下文（如飞书主人/非主人权限说明、定时任务环境说明）
+    runtime_context: str = ""
+    # 请求发起者是否为主人（非主人时外部内核跳过记忆召回与用户画像）
+    is_owner: bool = True
 
 
 @dataclass
@@ -212,57 +216,148 @@ class KernelRuntime:
         """释放资源。默认无事可做。"""
         return None
 
-    def _briefing_prefix(self, request: KernelRequest) -> str:
-        """Ethan 侧索引与提示（技能简表 + 记忆召回/写入约定）。
-
-        外部内核用自己的系统提示词，收不到 Ethan 的 `<available_skills>` 与
-        `<memory_recall_hint>`——于是手上挂着 `recall_memory` 却不知道要调，
-        表现为「换内核后记忆/技能就不生效了」。这里补的正是那两块。
-
-        门控有两层，缺一个就会「教模型调它没有的工具」：
-
-        · `capabilities.shares_ethan_tools` —— 这个内核能不能接 MCP
-          （Codex / Pi 是 False，直接不注入）
-        · 配置里的 `kernel.share_tools` —— 这次到底给了多少工具。设成 `off` 时
-          `_build_mcp_servers()` 返回空列表，一个工具都没挂；这时再发简报就是
-          让模型去调不存在的东西。`readonly` 下没有 `memory_write`，write hint
-          也随之不发（细节见 `build_kernel_briefing`）。
-
-        人格/画像（soul、identity、user_profile）仍然不注入，`ethan_context`
-        的取舍不变。
-        """
-        from ethan.kernel.briefing import build_kernel_briefing
+    def _kernel_share_and_context(self) -> tuple[str, str]:
+        """读取 kernel.share_tools 与 kernel.inject_context 配置。"""
+        from ethan.kernel.briefing import DEFAULT_INJECT_CONTEXT, normalize_inject_context
 
         try:
             from ethan.core.config import get_config
 
-            share = getattr(get_config().defaults.kernel, "share_tools", "all") or "all"
+            kcfg = get_config().defaults.kernel
+            share = getattr(kcfg, "share_tools", "all") or "all"
+            inject_context = normalize_inject_context(
+                getattr(kcfg, "inject_context", DEFAULT_INJECT_CONTEXT)
+            )
         except Exception:
             share = "all"
+            inject_context = DEFAULT_INJECT_CONTEXT
+        return share, inject_context
+
+    def _briefing_prefix(
+        self,
+        request: KernelRequest,
+        context: KernelContext | None = None,
+    ) -> str:
+        """Ethan 侧上下文与简报表（准则/画像 + 技能简表 + 记忆召回/写入约定）。
+
+        1. `<ethan_context>` 受 `kernel.inject_context`（off / rules_profile / full）控制，
+           不依赖 MCP 工具共享（Codex / Pi 同样可用）。
+        2. `<ethan_briefing>` 只在 `shares_ethan_tools=True` 且 `share_tools != "off"` 时
+           注入，防止教模型去调不存在的 MCP 工具。
+        """
+        from ethan.kernel.briefing import build_kernel_briefing
+
+        share, inject_context = self._kernel_share_and_context()
+        runtime_ctx = (
+            getattr(request, "runtime_context", "")
+            or (getattr(context, "runtime_context", "") if context else "")
+            or ""
+        )
+        is_owner = bool(getattr(request, "is_owner", True))
+        if context and context.agent is not None and hasattr(context.agent, "is_owner"):
+            is_owner = bool(context.agent.is_owner)
+
+        system_files = None
+        if context and context.agent is not None:
+            sf = getattr(context.agent, "_system_files", None)
+            if isinstance(sf, dict) and sf:
+                system_files = sf
 
         try:
             return build_kernel_briefing(
                 mode=getattr(request, "mode", "") or "",
                 shares_tools=bool(self.capabilities.shares_ethan_tools),
                 share=share,
+                inject_context=inject_context,
+                is_owner=is_owner,
+                runtime_context=runtime_ctx,
+                system_files=system_files,
             )
         except Exception:  # noqa: BLE001 - 简报构造失败不该让整轮对话失败
             logger.warning("%s 内核简报构造失败，本轮按原样派发", self.display_name, exc_info=True)
             return ""
 
-    def _compose_prompt(self, request: KernelRequest) -> str:
-        """最终派发给外部 CLI 的 prompt = 简报表 + 对话历史。
+    def _prepare_prompt(
+        self,
+        request: KernelRequest,
+        context: KernelContext | None = None,
+    ) -> tuple[str, list[Any]]:
+        """构造最终派发给外部 CLI 的 `(prompt, matched_skills)`。
 
-        `_build_prompt` 保持「只压消息历史」的纯粹语义（测试直接断言它的输出），
-        简报在这里拼——这样「历史怎么展开」和「额外注入什么」两件事不纠缠。
+        组成顺序：`<ethan_context>` + `<ethan_briefing>` + 每轮 frontmatter 命中的
+        `<relevant_skills>`/`<matched_skills_brief>` + 对话历史。
         """
         text = self._build_prompt(request)
         if not text:
-            return ""
-        briefing = self._briefing_prefix(request)
-        if not briefing:
-            return text
-        return briefing + "\n\n" + text
+            return "", []
+
+        parts: list[str] = []
+        briefing = self._briefing_prefix(request, context=context)
+        if briefing:
+            parts.append(briefing)
+
+        matched_skills: list[Any] = []
+        share, _ = self._kernel_share_and_context()
+        if self.capabilities.shares_ethan_tools and (share or "all").strip().lower() != "off":
+            try:
+                from ethan.kernel.briefing import match_kernel_skills
+
+                skill_reg = context.skill_registry if context else None
+                if skill_reg is None and context and context.agent is not None:
+                    skill_reg = getattr(context.agent, "_skills", None)
+                skills_block, matched_skills = match_kernel_skills(
+                    request.messages,
+                    channel=getattr(request, "channel", "") or "",
+                    mode=getattr(request, "mode", "") or "",
+                    user_id=getattr(request, "user_id", "") or "",
+                    skill_registry=skill_reg,
+                )
+                if skills_block:
+                    parts.append(skills_block)
+            except Exception:  # noqa: BLE001 - 技能匹配失败不阻断对话
+                logger.warning("%s 内核按需匹配技能失败", self.display_name, exc_info=True)
+
+        parts.append(text)
+        return "\n\n".join(parts), matched_skills
+
+    def _record_matched_skills(
+        self,
+        matched_skills: list[Any],
+        context: KernelContext | None = None,
+    ) -> Any:
+        """同步 agent.last_matched_skills（供 record_hit 统计）并构造 SkillsMatchedEvent。"""
+        if context and context.agent is not None and hasattr(context.agent, "last_matched_skills"):
+            try:
+                context.agent.last_matched_skills[:] = [s.name for s in matched_skills]
+            except Exception:
+                pass
+        if not matched_skills:
+            return None
+        from ethan.providers.base import SkillsMatchedEvent
+
+        return SkillsMatchedEvent(
+            skills=[
+                {
+                    "name": s.name,
+                    "is_default": getattr(s, "is_default", False),
+                    "category": getattr(s, "category", "default"),
+                }
+                for s in matched_skills
+            ]
+        )
+
+    def _compose_prompt(
+        self,
+        request: KernelRequest,
+        context: KernelContext | None = None,
+    ) -> str:
+        """最终派发给外部 CLI 的 prompt = 上下文与简报表 + 命中技能 + 对话历史。
+
+        `_build_prompt` 保持「只压消息历史」的纯粹语义（测试直接断言它的输出），
+        简报与技能匹配在这里拼——这样「历史怎么展开」和「额外注入什么」两件事不纠缠。
+        """
+        prompt, _ = self._prepare_prompt(request, context=context)
+        return prompt
 
     def _build_prompt(self, request: KernelRequest) -> str:
         """把消息历史压成单条 prompt。子类一般不用覆写。

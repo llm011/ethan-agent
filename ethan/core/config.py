@@ -167,6 +167,13 @@ class KernelSelectionConfig(BaseModel):
     #   "off"      —— 完全注入，外部内核只用它自己的工具
     # 无论哪种，shell 与 delegate_coding 永不暴露（见 kernel/tool_bridge.py）。
     share_tools: str = "all"
+    # 注入给外部内核的 Ethan 上下文粒度：
+    #   "off"           —— 不注入人格/准则/画像（仅保留工具共享时的技能索引与记忆提示）
+    #   "rules_profile" —— 默认。注入核心执行准则（soul.md）、用户画像（user_profile.md）、
+    #                      行为准则（behavioral_guidelines）与运行时上下文（runtime_context），
+    #                      保留外部内核原本的说话风格
+    #   "full"          —— 全部注入，再追加身份人设（identity.md）与模式人格（mode_identity/persona）
+    inject_context: str = "rules_profile"
 
 
 class RoutingConfig(BaseModel):

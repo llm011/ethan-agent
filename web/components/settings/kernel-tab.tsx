@@ -12,8 +12,10 @@ import {
   fetchKernels,
   installKernel,
   selectKernel,
+  setKernelInjectContext,
   setKernelTaskRules,
   type KernelInfo,
+  type KernelInjectContextMode,
 } from "@/lib/api-settings";
 import { KernelSelector } from "@ethan/shared/components/kernel-selector";
 
@@ -21,6 +23,7 @@ export function KernelTab() {
   const [kernels, setKernels] = useState<KernelInfo[]>([]);
   const [current, setCurrent] = useState("ethan");
   const [taskRules, setTaskRules] = useState<Record<string, string>>({});
+  const [injectContext, setInjectContext] = useState<KernelInjectContextMode>("rules_profile");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -32,6 +35,7 @@ export function KernelTab() {
       setKernels(data.kernels);
       setCurrent(data.default);
       setTaskRules(data.task_rules || {});
+      setInjectContext(data.inject_context || "rules_profile");
     } catch (e) {
       console.error(e);
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -67,17 +71,24 @@ export function KernelTab() {
     setTaskRules(out.task_rules || {});
   }, []);
 
+  const handleInjectContext = useCallback(async (mode: KernelInjectContextMode) => {
+    const out = await setKernelInjectContext(mode);
+    setInjectContext(out.inject_context);
+  }, []);
+
   return (
     <div className="space-y-6">
       <KernelSelector
         kernels={kernels}
         current={current}
         taskRules={taskRules}
+        injectContext={injectContext}
         loading={loading}
         loadError={loadError}
         onSelect={handleSelect}
         onInstall={handleInstall}
         onSetTaskRules={handleTaskRules}
+        onSetInjectContext={handleInjectContext}
         onRefresh={load}
       />
     </div>

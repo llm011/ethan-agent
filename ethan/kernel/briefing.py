@@ -1,76 +1,104 @@
-"""给外部内核的「简报表」——技能索引 + 记忆召回/写入提示。
+"""给外部内核的「简报与上下文」注入器——技能索引/每轮匹配 + 记忆提示 + 准则/画像。
 
 ## 为什么需要这个
 
-`/kernel-tools` 已经把 Ethan 的 58 个工具挂给了外部内核（DSH / Claude Code），
-`skill_list` / `skill_read` / `recall_memory` 都在里面。但**挂着不等于会用**：
+1. **工具挂载 ≠ 会用技能/记忆**
+   `/kernel-tools` 把 Ethan 的工具挂给了外部内核（DSH / Claude Code / OpenCode /
+   Antigravity），但外部内核走的是自己的系统提示词，收不到 Ethan 原生的
+   `<available_skills>`、`<relevant_skills>` 和 `<memory_recall_hint>`。
+   于是出现两个常见问题：
+   · 技能里的 `trigger` / `modes` / `channels` / `category` 等 frontmatter 无法被
+     外部内核感知，很多技能根本不会被触发；
+   · 模型不知道自己可以通过 `ethan_recall_memory` 召回记忆。
 
-这些工具在 Ethan 原生内核里是被系统提示词教着用的——`<available_skills>` 告诉模型
-「有这么些技能，命中触发词就去 skill_read」，`<memory_recall_hint>` 告诉模型
-「涉及个人上下文时先调 recall_memory」。外部内核走的是自己的系统提示词，这两块
-一个字都收不到，于是：
+2. **切内核后 `soul.md` / `user_profile.md` / 纠错准则原本完全不生效**
+   早期 `ethan_context=False` 直接跳过全部 Ethan 系统上下文。实际上安全边界
+   （`soul.md` 的主人授权/红线/密钥铁律）、`user_profile.md` 和过往纠错形成的
+   `<behavioral_guidelines>` 并不会和外部内核的规划能力冲突，反而极其重要；
+   而 `identity.md` 说话腔调与模式人格可能影响原生工程师风格，适合按档位可选。
 
-  · 技能：手上有 skill_list，但不知道有什么、也不知道该用
-  · 记忆：`a8923c15` 把记忆召回从「每次调用前无条件注入」改成「模型按需调
-    recall_memory」，替代自动注入的正是那个 hint。外部内核没 hint
-    → 等价于自动注入被撤了，记忆彻底失效
+## 注入分层（`defaults.kernel.inject_context`）
 
-现象就是用户报的那句：「让之前的 ethan 记住过的东西，dsh 内核并不会主动去使用。」
+- `"off"`           —— 不注入人格/准则/画像（仅在共享工具时给技能索引与记忆提示）
+- `"rules_profile"` —— 默认。注入 `<soul>`、`<user_profile>`、`<behavioral_guidelines>`、
+                       `<runtime_context>` 以及用户显式切换的对话模式角色，保留外部内核在默认模式下的原生说话风格
+- `"full"`          —— 在 `rules_profile` 基础上再注入默认人设 `identity.md`（`<identity>`）
 
-## 注入什么、不注入什么
+## 门控边界
 
-只注入**索引与提示**，不注入人格：
-
-  · `<available_skills>`  —— 技能简表（热技能带描述，冷技能只列名字，discoverable 带触发词）
-  · `<memory_recall_hint>` —— 什么时候该调 recall_memory
-  · `<memory_write_hint>`  —— 什么时候该调 memory_write
-
-**不注入** soul / identity / user_profile / behavioral_guidelines。那些是 Ethan 的
-人格与画像，塞进外部 agent 会和它自己的系统提示词打架（两份人格谁优先？），
-这是 `ethan_context=False` 原本要守住的东西——本模块不改变那个取舍。
-
-## 只有真的共享了工具才注入
-
-Codex / Pi 拿不到 Ethan 的工具（各自有硬阻碍，见 `runtime.py` 的
-`shares_ethan_tools`）。对它们注入「你有 recall_memory 可以调」等于教模型调一个
-不存在的工具——和 `_ocr_available()` 那个坑同源。所以调用方必须传 `shares_tools`，
-为 False 时本模块直接返回空串。
+- **工具相关提示**（`<ethan_briefing>` 及每轮匹配的 `<relevant_skills>` /
+  `<matched_skills_brief>`）只在 `shares_tools=True` 且 `share_tools != "off"` 时注入，
+  绝不教 Codex / Pi 去调它们没有的 MCP 工具。
+- **上下文规则/画像**（`<ethan_context>`）不依赖 MCP 工具，Codex / Pi 同样可用；
+  但进入 `minimal`（精简模式）时，仍遵守精简模式约定，只保留 `<soul>`（和 `full` 下的
+  `<identity>`）及 `<mode_note>`，不注入画像、记忆提示与技能匹配。
 """
 from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# 简报表缓存：(user_id, mode, 技能目录指纹, share_tools) -> 文本。
+VALID_INJECT_CONTEXTS = ("off", "rules_profile", "full")
+DEFAULT_INJECT_CONTEXT = "rules_profile"
+_MAX_CACHE_ENTRIES = 64
+
+# 静态简报缓存：(user_id, mode, 技能目录指纹, share_tools, inject_context, is_owner,
+#                soul_sig, identity_sig, profile_sig, procedures_sig, workspace) -> 文本。
 #
-# 为什么缓存：技能索引要扫目录 + 读 stats，虽然 `SkillLoader` 自己有进程级缓存，
-# 但每条消息都重建一遍 `SkillRegistry` 仍然是白付的开销，而这块内容在
-# 「用户 + 技能目录 + 模式 + 共享档位」不变时逐字节稳定。
-#
-# **key 必须含 user_id**：技能目录是 per-profile 的（`user_skills_dir()`），
-# 不含用户会串号——两个 profile 的技能目录都不存在时指纹都是 "missing"，
-# 后一个用户会直接吃到前一个用户的技能简表。
+# **key 必须含 user_id**：技能目录、user_profile.md、playbook.json 都是 per-profile 的，
+# 不含用户会串号；同时含各文件的 mtime_ns:size 指纹，修改后立即可见。
 _CACHE: dict[tuple, str] = {}
 _LOCK = threading.Lock()
 
 
+def normalize_inject_context(raw: str | None) -> str:
+    """规范化外部内核上下文注入档位，非法/空值回退到默认值。"""
+    val = (raw or "").strip().lower()
+    if val in VALID_INJECT_CONTEXTS:
+        return val
+    return DEFAULT_INJECT_CONTEXT
+
+
 def _skills_dir_signature() -> str:
-    """当前用户技能目录的指纹，用于判断索引缓存是否失效。
-
-    取目录 mtime 而非遍历全部文件：装/删技能必然改目录 mtime，改文件内容不改
-    ——但改单个 SKILL.md 内容的场景极少，且代价只是缓存多存活一会儿（用户重启
-    或装下一个技能就会刷新）。这里刻意选便宜的那个。
-
-    注意 mtime 精度只到秒，单靠它区分不了用户；调用方必须把 user_id 一起放进
-    cache key（见 `_CACHE` 的注释）。
-    """
+    """当前用户技能目录的指纹，用于判断索引缓存是否失效。"""
     try:
         from ethan.core.paths import user_skills_dir
 
         d = user_skills_dir()
         return str(int(d.stat().st_mtime)) if d.is_dir() else "missing"
+    except Exception:
+        return "unknown"
+
+
+def _file_signature(path: Path | None) -> str:
+    """单文件指纹（mtime_ns + size），避免同一秒内改写命中旧缓存。"""
+    if path is None:
+        return "missing"
+    try:
+        if not path.is_file():
+            return "missing"
+        st = path.stat()
+        return f"{st.st_mtime_ns}:{st.st_size}"
+    except Exception:
+        return "unknown"
+
+
+def _procedures_signature() -> str:
+    """行为准则文件指纹（兼容 playbook.json 与旧版 procedures.json）。"""
+    try:
+        from ethan.core.paths import user_procedures_path
+
+        p = user_procedures_path()
+        if p.is_file():
+            return _file_signature(p)
+        legacy = p.parent / "procedures.json"
+        if legacy.is_file():
+            return _file_signature(legacy)
+        return "missing"
     except Exception:
         return "unknown"
 
@@ -81,6 +109,70 @@ def _current_user() -> str:
         from ethan.core.context import get_user_id
 
         return get_user_id() or ""
+    except Exception:
+        return ""
+
+
+def _current_workspace() -> str:
+    try:
+        from ethan.core.config import get_config
+
+        return (get_config().defaults.workspace or "").strip()
+    except Exception:
+        return ""
+
+
+def _read_system_file(name: str, workspace: str) -> str:
+    """读取全局 system/<name>.md，替换 {workspace} 并应用体积护栏。"""
+    try:
+        from ethan.core.paths import system_dir
+        from ethan.core.system_file_guard import guard_system_file_content
+
+        p = system_dir() / f"{name}.md"
+        if not p.is_file():
+            return ""
+        content = p.read_text(encoding="utf-8").strip()
+        if not content:
+            return ""
+        if workspace:
+            content = content.replace("{workspace}", workspace)
+        return guard_system_file_content(content, name)
+    except Exception:
+        return ""
+
+
+def _has_non_heading_text(content: str) -> bool:
+    """判断 markdown 是否存在除标题行外的有效正文（空模板不注入）。"""
+    return any(
+        line.strip() and not line.strip().startswith("#")
+        for line in content.splitlines()
+    )
+
+
+def _read_user_profile() -> str:
+    """读取当前 profile 的 user_profile.md（空模板返回空串）。"""
+    try:
+        from ethan.core.paths import user_profile_path
+        from ethan.core.system_file_guard import guard_system_file_content
+
+        p = user_profile_path()
+        if not p.is_file():
+            return ""
+        content = p.read_text(encoding="utf-8").strip()
+        if not content or not _has_non_heading_text(content):
+            return ""
+        return guard_system_file_content(content, "user_profile")
+    except Exception:
+        return ""
+
+
+def _read_procedures_context() -> str:
+    """读取用户纠错沉淀的行为准则（<behavioral_guidelines> 正文）。"""
+    try:
+        from ethan.core.paths import user_procedures_path
+        from ethan.memory.procedures import ProcedureStore
+
+        return ProcedureStore(path=user_procedures_path()).build_context() or ""
     except Exception:
         return ""
 
@@ -111,12 +203,7 @@ def _visible_skills(mode: str) -> list:
 
 
 def _build_skills_block(skills: list) -> str:
-    """技能简表。格式与 `system_prompt.py` 的 `<available_skills>` 保持一致。
-
-    刻意复用同一套分级口径（热技能给描述、冷技能只列名字），这样用户在两端
-    看到的是同一个技能世界观；不一致会让「为什么 DSH 只认得这几个技能」变成
-    新的困惑源。
-    """
+    """技能简表。格式与 `system_prompt.py` 的 `<available_skills>` 保持一致。"""
     stats = _load_hit_stats()
     hot: list[str] = []
     cold: list[str] = []
@@ -141,6 +228,7 @@ def _build_skills_block(skills: list) -> str:
         "[技能简表 — 完整清单用 `skill_list` 查，读某个技能全文用 `skill_read(name=...)`。"
         "这些工具来自 Ethan 的 MCP，实际名字可能带前缀（`ethan_skill_list` / "
         "`mcp__ethan__ethan_skill_list`），认后半个名字即可。"
+        "当用户请求涉及以下领域且本轮未自动注入全文时，先调 `skill_read` 读指令再执行。"
         "不要用 file_read 逐个翻技能目录]"
     ]
     lines.extend(hot)
@@ -153,16 +241,15 @@ def _build_skills_block(skills: list) -> str:
         no_trig = [s for s in discoverable if not s.trigger]
         lines.extend(f"- {s.name}: {' | '.join(s.trigger[:5])}" for s in with_trig)
         if no_trig:
-            lines.append(f"- （另有 {len(no_trig)} 个工具型技能无触发词，调 skill_list 查看完整清单）")
+            if len(no_trig) <= 10:
+                lines.append("- 工具型按需技能（调 skill_read 查详情）：" + " | ".join(s.name for s in no_trig))
+            else:
+                lines.append(f"- （另有 {len(no_trig)} 个工具型技能无触发词，调 skill_list 查看完整清单）")
     return "<available_skills>\n" + "\n".join(lines) + "\n</available_skills>"
 
 
 def _load_hit_stats() -> dict[str, int]:
-    """技能名 → 历史命中次数。读不到就返回空 dict（退化为「只按 fast_path 判热」）。
-
-    一次读全量而不是逐个查：`SkillStats.all()` 本来就读同一个 json，
-    循环里重复构造/解析纯属浪费。
-    """
+    """技能名 → 历史命中次数。读不到就返回空 dict（退化为「只按 fast_path 判热」）。"""
     try:
         from ethan.core.paths import user_skill_stats_path
         from ethan.skills.stats import SkillStats
@@ -206,61 +293,341 @@ _WRITE_HINT = """<memory_write_hint>
 </memory_write_hint>"""
 
 
-def build_kernel_briefing(
-    *, mode: str = "", shares_tools: bool = True, share: str = "all"
+def _build_context_block(
+    *,
+    inject_context: str,
+    mode: str,
+    is_owner: bool,
+    workspace: str,
+    system_files: dict[str, str] | None,
 ) -> str:
-    """构造注入给外部内核的简报表。
-
-    两个门控必须同时看，缺一个就会「教模型调它没有的工具」：
-
-    · `shares_tools` —— 这个内核能不能接 MCP。False（Codex / Pi）
-      直接返回空串。
-    · `share` —— 配置里 `kernel.share_tools` 给了多少工具：
-        - `"off"`      → `_build_mcp_servers()` 返回空列表，实际一个工具都没有，
-                         简报也必须为空（否则就是在教模型调不存在的工具）
-        - `"readonly"` → 只读白名单里**没有** `memory_write`，所以 write hint 不发；
-                         `recall_memory` / `skill_list` / `skill_read` 都在，照发
-        - `"all"`      → 全给，三段都发
-    """
-    share = (share or "all").strip().lower()
-    if not shares_tools or share == "off":
+    """构造来自 Ethan 的准则 / 画像 / 人格上下文块（`<ethan_context>`）。"""
+    if inject_context == "off":
         return ""
 
-    key = (_current_user(), mode or "", _skills_dir_signature(), share)
-    with _LOCK:
-        cached = _CACHE.get(key)
-    if cached is not None:
-        return cached
+    from ethan.core.modes import resolve_mode
+
+    resolved_mode = resolve_mode(mode)
+    soul = (
+        system_files.get("soul", "")
+        if system_files is not None
+        else _read_system_file("soul", workspace)
+    )
+    identity = (
+        system_files.get("identity", "")
+        if system_files is not None
+        else _read_system_file("identity", workspace)
+    )
+
+    sections: list[str] = []
+    if resolved_mode.minimal:
+        if soul:
+            sections.append(
+                f"<soul>\n[CRITICAL — 以下基础原则必须严格遵守]\n\n{soul}\n</soul>"
+            )
+        if inject_context == "full" and identity:
+            sections.append(f"<identity>\n{identity}\n</identity>")
+        sections.append(
+            "<mode_note>\n"
+            "当前处于「精简模式」：不注入长期记忆与用户画像，请基于当前这条消息独立作答。"
+            "</mode_note>"
+        )
+        return (
+            "<ethan_context>\n"
+            "[来自 Ethan 的安全准则与模式约束，请优先遵守]\n\n"
+            + "\n\n".join(sections)
+            + "\n</ethan_context>"
+        )
+
+    if soul:
+        sections.append(
+            "<soul>\n"
+            "[CRITICAL — 以下是 Ethan 核心执行准则（主人/授权、危险操作红线、密钥铁律、工作区边界），"
+            "即使由外部内核执行也必须严格遵守]\n\n"
+            f"{soul}\n"
+            "</soul>"
+        )
+
+    if inject_context == "full" and identity:
+        sections.append(f"<identity>\n{identity}\n</identity>")
+
+    # 对话模式（如法律专家 / 苏念陪伴）是用户在会话中显式切换的角色覆盖，
+    # 不属于默认 identity.md，因此 rules_profile 与 full 均应尊重。
+    if resolved_mode.key:
+        try:
+            from ethan.core.system_prompt import build_mode_identity_block, build_persona_block
+            from ethan.skills.registry import SkillRegistry
+
+            if resolved_mode.persona_skills:
+                reg = SkillRegistry()
+                persona_block = build_persona_block(mode, reg)
+                if persona_block:
+                    sections.append(persona_block)
+            mode_identity = build_mode_identity_block(mode)
+            if mode_identity:
+                sections.append(mode_identity)
+        except Exception:
+            logger.debug("构造外部内核模式人格块失败", exc_info=True)
+
+    if is_owner:
+        if system_files is not None:
+            raw_profile = system_files.get("user_profile", "")
+            profile = raw_profile if _has_non_heading_text(raw_profile) else ""
+        else:
+            profile = _read_user_profile()
+        if profile:
+            sections.append(
+                f"<user_profile>\n[User profile — 用户长期画像，用于个性化理解与回应]\n\n{profile}\n</user_profile>"
+            )
+
+    proc_ctx = _read_procedures_context()
+    if proc_ctx:
+        sections.append(
+            "<behavioral_guidelines>\n"
+            "[System note: Rules learned from past corrections. Apply consistently.]\n\n"
+            f"{proc_ctx}\n"
+            "</behavioral_guidelines>"
+        )
+
+    if not sections:
+        return ""
+
+    return (
+        "<ethan_context>\n"
+        "[来自 Ethan 的用户准则与上下文约定 — 其中的安全红线与用户约定优先于默认习惯]\n\n"
+        + "\n\n".join(sections)
+        + "\n</ethan_context>"
+    )
+
+
+def _format_runtime_context(runtime_context: str) -> str:
+    text = (runtime_context or "").strip()
+    if not text:
+        return ""
+    return (
+        "<runtime_context>\n"
+        "[CRITICAL — 当前会话上下文，结合 soul 的主人/授权准则判断]\n\n"
+        f"{text}\n"
+        "</runtime_context>"
+    )
+
+
+def build_kernel_briefing(
+    *,
+    mode: str = "",
+    shares_tools: bool = True,
+    share: str = "all",
+    inject_context: str = DEFAULT_INJECT_CONTEXT,
+    is_owner: bool = True,
+    runtime_context: str = "",
+    system_files: dict[str, str] | None = None,
+) -> str:
+    """构造注入给外部内核的上下文与简报表。
+
+    包含两块相互独立、各自门控的内容：
+    1. `<ethan_context>` —— 受 `inject_context`（off / rules_profile / full）控制，
+       包含 `soul.md`、`user_profile.md`、`<behavioral_guidelines>`（以及 `full` 下的
+       `identity.md` 与模式人设）；不依赖是否共享 MCP 工具。
+    2. `<ethan_briefing>` —— 仅在 `shares_tools=True` 且 `share != "off"` 且非精简模式
+       时注入，包含 `<available_skills>`、`<memory_recall_hint>`（owner）、
+       `<memory_write_hint>`（owner + share="all"）。
+    """
+    share = (share or "all").strip().lower()
+    inject_mode = normalize_inject_context(inject_context)
+    from ethan.core.modes import resolve_mode
+
+    is_minimal = resolve_mode(mode).minimal
+    want_briefing = bool(shares_tools and share != "off" and not is_minimal)
+    want_context = inject_mode != "off"
+
+    if not want_briefing and not want_context:
+        return ""
+
+    workspace = _current_workspace()
+    static_text: str | None = None
+
+    # 显式传入 system_files 覆写时不读写/污染全局缓存
+    if system_files is None:
+        from ethan.core.paths import system_dir, user_profile_path
+
+        sys_dir = system_dir()
+        key = (
+            _current_user(),
+            mode or "",
+            _skills_dir_signature() if want_briefing else "skip-skills",
+            share if want_briefing else "no-tools",
+            inject_mode,
+            is_owner,
+            _file_signature(sys_dir / "soul.md") if want_context else "skip",
+            _file_signature(sys_dir / "identity.md") if inject_mode == "full" else "skip",
+            _file_signature(user_profile_path()) if (want_context and is_owner and not is_minimal) else "skip",
+            _procedures_signature() if (want_context and not is_minimal) else "skip",
+            workspace if want_context else "",
+        )
+        with _LOCK:
+            static_text = _CACHE.get(key)
+    else:
+        key = ()
+
+    if static_text is None:
+        blocks: list[str] = []
+
+        if want_context:
+            ctx_block = _build_context_block(
+                inject_context=inject_mode,
+                mode=mode,
+                is_owner=is_owner,
+                workspace=workspace,
+                system_files=system_files,
+            )
+            if ctx_block:
+                blocks.append(ctx_block)
+
+        if want_briefing:
+            try:
+                skills_block = _build_skills_block(_visible_skills(mode))
+            except Exception:
+                # 技能索引构建失败不该让整轮对话失败——退化成只给记忆提示
+                logger.warning("构造内核技能索引失败，本次只注入记忆提示", exc_info=True)
+                skills_block = ""
+
+            briefing_parts = [
+                "<ethan_briefing>\n"
+                "[来自 Ethan：你通过 MCP 挂着它的工具。以下是它那边你不知道的索引与用法约定]"
+            ]
+            if skills_block:
+                briefing_parts.append(skills_block)
+            else:
+                logger.debug("内核简报：无技能索引，仅注入记忆提示")
+            if is_owner:
+                briefing_parts.append(_RECALL_HINT)
+                # write hint 只跟 all 走：readonly 白名单里没有 memory_write。
+                if share == "all":
+                    briefing_parts.append(_WRITE_HINT)
+            briefing_parts.append("</ethan_briefing>")
+            # 若非主人且无技能索引，不发空壳 briefing
+            if skills_block or is_owner:
+                blocks.append("\n\n".join(briefing_parts))
+
+        static_text = "\n\n".join(blocks)
+        if system_files is None:
+            with _LOCK:
+                if len(_CACHE) >= _MAX_CACHE_ENTRIES:
+                    _CACHE.pop(next(iter(_CACHE)))
+                _CACHE[key] = static_text
+
+    rt_block = _format_runtime_context(runtime_context) if (want_context and not is_minimal) else ""
+    if not rt_block:
+        return static_text
+    if not static_text:
+        return rt_block
+    return static_text + "\n\n" + rt_block
+
+
+def match_kernel_skills(
+    messages: list[Any],
+    *,
+    channel: str = "",
+    mode: str = "",
+    user_id: str = "",
+    skill_registry: Any = None,
+    max_skills: int = 3,
+) -> tuple[str, list[Any]]:
+    """按 Skill frontmatter（trigger / modes / channels / category + 语义路由）为本轮匹配技能。
+
+    返回 `(prompt_block, matched_skills)`:
+      - `default` / `plugin` 技能（最多 `max_skills` 个）：直接注入 `<relevant_skills>`
+        （含正文与 references 清单），外部内核无需先猜 `skill_list` 就能立刻按规范执行。
+      - `discoverable` 技能：注入 `<matched_skills_brief>`（含 name / trigger / description），
+        提示外部内核先调 `ethan_skill_read(name=...)` 读取完整指令后再执行。
+    """
+    from ethan.core.modes import resolve_mode
+    from ethan.core.system_prompt import get_last_user_text
+    from ethan.skills.registry import _MAX_SKILL_CONTENT, _build_references_block
+
+    resolved = resolve_mode(mode)
+    if resolved.minimal:
+        return "", []
+
+    last_user = get_last_user_text(messages or [])
+    if not last_user:
+        return "", []
+
+    reg = skill_registry
+    if reg is None:
+        try:
+            from ethan.core.agent_factory import _get_cached_skill_registry
+
+            reg = _get_cached_skill_registry(user_id or "")
+        except Exception:
+            logger.debug("内核按需加载 SkillRegistry 失败", exc_info=True)
+            return "", []
 
     try:
-        skills_block = _build_skills_block(_visible_skills(mode))
+        matched = reg.match(last_user, channel=channel or "", mode=resolved.key)
     except Exception:
-        # 技能索引构建失败不该让整轮对话失败——退化成只给记忆提示
-        logger.warning("构造内核技能索引失败，本次只注入记忆提示", exc_info=True)
-        skills_block = ""
+        logger.debug("内核匹配技能失败", exc_info=True)
+        return "", []
 
-    parts = [
-        "<ethan_briefing>\n"
-        "[来自 Ethan：你通过 MCP 挂着它的工具。以下是它那边你不知道的索引与用法约定]"
-    ]
-    if skills_block:
-        parts.append(skills_block)
-    else:
-        # 技能索引构建失败/空时不塞空块，但记忆提示照给——recall/write 与技能无关。
-        logger.debug("内核简报：无技能索引，仅注入记忆提示")
-    parts.append(_RECALL_HINT)
-    # write hint 只跟 all 走：readonly 白名单里没有 memory_write。
-    if share == "all":
-        parts.append(_WRITE_HINT)
-    parts.append("</ethan_briefing>")
-    text = "\n\n".join(parts)
+    if not matched:
+        return "", []
 
-    with _LOCK:
-        _CACHE[key] = text
-    return text
+    full_parts: list[str] = []
+    brief_parts: list[str] = []
+    used_skills: list[Any] = []
+    full_count = 0
+
+    for s in matched:
+        category = getattr(s, "category", "default")
+        if category == "discoverable":
+            trig = " | ".join((s.trigger or [])[:5])
+            desc = (s.description or "").strip()[:80]
+            line = f"- {s.name}"
+            if trig:
+                line += f": {trig}"
+            if desc:
+                line += f" — {desc}"
+            brief_parts.append(line)
+            used_skills.append(s)
+            continue
+
+        if full_count >= max_skills:
+            continue
+        full_count += 1
+        used_skills.append(s)
+        content = (s.content or "").strip()
+        if len(content) > _MAX_SKILL_CONTENT:
+            content = content[:_MAX_SKILL_CONTENT] + "\n…(truncated)"
+        refs_block = _build_references_block(s)
+        if refs_block:
+            full_parts.append(f"[Skill: {s.name}]\n{content}\n\n{refs_block}")
+        elif content:
+            full_parts.append(f"[Skill: {s.name}]\n{content}")
+        else:
+            desc = (s.description or "").strip()
+            full_parts.append(f"[Skill: {s.name}]" + (f"\n{desc}" if desc else ""))
+
+    blocks: list[str] = []
+    if full_parts:
+        blocks.append(
+            "<relevant_skills>\n"
+            "[以下 Ethan 技能根据本轮输入或当前模式自动命中；若需查阅 references/ 或完整文档，"
+            "请调用 Ethan MCP 的 `skill_read`（`ethan_skill_read`）]\n\n"
+            + "\n\n".join(full_parts)
+            + "\n</relevant_skills>"
+        )
+    if brief_parts:
+        blocks.append(
+            "<matched_skills_brief>\n"
+            "[以下按需技能命中本轮触发词，但未注入完整正文。"
+            "执行前请先调用 Ethan MCP 的 `skill_read(name=...)`（`ethan_skill_read`）读取完整规范：]\n"
+            + "\n".join(brief_parts)
+            + "\n</matched_skills_brief>"
+        )
+    return "\n\n".join(blocks), used_skills
 
 
 def clear_briefing_cache() -> None:
-    """清空缓存（测试用；也供「重装技能后立即生效」的场景调用）。"""
+    """清空缓存（测试用；也供修改系统提示词/画像/重装技能后立即生效）。"""
     with _LOCK:
         _CACHE.clear()
