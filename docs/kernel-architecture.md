@@ -60,8 +60,8 @@ Web / Desktop / Android 三端。
 
 | 档位 | 注入内容 | 适用场景 |
 |---|---|---|
-| `rules_profile`（默认） | `soul.md`（主人授权/安全红线/密钥铁律）、`user_profile.md`、`<behavioral_guidelines>`、`<runtime_context>` | 既保留外部内核原生工作流与语气，又让安全红线和个人画像生效 |
-| `full` | 在 `rules_profile` 基础上额外注入 `identity.md` 与当前模式人设（`<persona_override>` / `<mode_identity>`） | 希望外部内核也沿用 Ethan 的人设与对话模式语气 |
+| `rules_profile`（默认） | `soul.md`（主人授权/安全红线/密钥铁律）、`user_profile.md`、`<behavioral_guidelines>`、`<runtime_context>` 与显式切换的模式角色 | 既保留外部内核原生工作流与语气，又让安全红线、个人画像与会话模式生效 |
+| `full` | 在 `rules_profile` 基础上额外注入 `identity.md`（默认身份与说话风格） | 希望外部内核也完全沿用 Ethan 的人设与说话语气 |
 | `off` | 不注入上述任何规则/画像/人设 | 仅把外部内核当作纯三方执行器（有工具共享时仍给技能与记忆简报） |
 
 ---

@@ -140,6 +140,10 @@ def test_briefing_full_context_injects_identity_and_mode_identity(fake_skills, t
     (tmp_path / "system" / "soul.md").write_text("SOUL_CONTENT", encoding="utf-8")
     (tmp_path / "system" / "identity.md").write_text("我是小艺", encoding="utf-8")
 
+    text_legal = build_kernel_briefing(mode="法律", inject_context="rules_profile")
+    assert "<mode_identity>" in text_legal and "法律专家" in text_legal
+    assert "<identity>" not in text_legal
+
     text = build_kernel_briefing(mode="法律", inject_context="full")
     assert "<soul>" in text
     assert "<identity>" in text and "我是小艺" in text
@@ -738,3 +742,38 @@ def test_kernels_context_mode_api_roundtrip(tmp_path, monkeypatch):
         r_get = client.get("/api/kernels")
         assert r_get.status_code == 200
         assert r_get.json()["inject_context"] == mode
+
+
+def test_match_kernel_skills_returns_only_injected_skills_when_capped(tmp_path):
+    """超过 max_skills 被截断的技能不应混入返回的 matched 列表（避免误发事件/记命中）。"""
+    from ethan.kernel.briefing import match_kernel_skills
+    from ethan.skills.registry import SkillRegistry
+
+    for i in range(4):
+        _make_skill_dir(
+            tmp_path,
+            f"sk-{i}",
+            f'name: sk-{i}\ntrigger: "测试词"\ndescription: "技能{i}"',
+            f"正文 {i}",
+        )
+    _make_skill_dir(
+        tmp_path,
+        "disc-extra",
+        'name: disc-extra\ncategory: discoverable\ntrigger: "测试词"\ndescription: "按需技能"',
+        "按需正文",
+    )
+
+    reg = SkillRegistry()
+    reg.load()
+    block, used = match_kernel_skills(
+        [Message(role="user", content="触发测试词")],
+        skill_registry=reg,
+        max_skills=2,
+    )
+    used_default = [s for s in used if s.category != "discoverable"]
+    used_disc = [s for s in used if s.category == "discoverable"]
+    assert len(used_default) == 2
+    assert len(used_disc) == 1
+    assert used_disc[0].name == "disc-extra"
+    assert "<relevant_skills>" in block
+    assert "<matched_skills_brief>" in block

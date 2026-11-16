@@ -78,13 +78,13 @@ const INJECT_CONTEXT_OPTIONS: Array<{
   {
     value: "rules_profile",
     label: "准则与画像（推荐）",
-    desc: "注入 soul.md（主人权限与安全红线）、我的画像、纠错准则，保留外部内核原生语气。",
+    desc: "注入 soul.md（主人权限与安全红线）、我的画像、纠错准则与会话模式角色，保留外部内核原生语气。",
     badge: "注入准则与画像",
   },
   {
     value: "full",
     label: "完整人格与画像",
-    desc: "在准则与画像基础上，额外注入 identity.md 与当前模式人设（可能与外部内核风格重叠）。",
+    desc: "在准则与画像基础上，额外注入 identity.md（默认身份与说话风格，可能与外部内核风格重叠）。",
     badge: "注入完整人格/画像",
   },
   {

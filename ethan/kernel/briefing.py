@@ -20,10 +20,9 @@
 ## 注入分层（`defaults.kernel.inject_context`）
 
 - `"off"`           —— 不注入人格/准则/画像（仅在共享工具时给技能索引与记忆提示）
-- `"rules_profile"` —— 默认。注入 `<soul>`、`<user_profile>`、`<behavioral_guidelines>`
-                       和 `<runtime_context>`，保留外部内核原本的说话风格
-- `"full"`          —— 在 `rules_profile` 基础上再注入 `<identity>` 与模式人设
-                       （`<persona_override>` / `<mode_identity>`）
+- `"rules_profile"` —— 默认。注入 `<soul>`、`<user_profile>`、`<behavioral_guidelines>`、
+                       `<runtime_context>` 以及用户显式切换的对话模式角色，保留外部内核在默认模式下的原生说话风格
+- `"full"`          —— 在 `rules_profile` 基础上再注入默认人设 `identity.md`（`<identity>`）
 
 ## 门控边界
 
@@ -45,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 VALID_INJECT_CONTEXTS = ("off", "rules_profile", "full")
 DEFAULT_INJECT_CONTEXT = "rules_profile"
+_MAX_CACHE_ENTRIES = 64
 
 # 静态简报缓存：(user_id, mode, 技能目录指纹, share_tools, inject_context, is_owner,
 #                soul_sig, identity_sig, profile_sig, procedures_sig, workspace) -> 文本。
@@ -348,9 +348,12 @@ def _build_context_block(
             "</soul>"
         )
 
-    if inject_context == "full":
-        if identity:
-            sections.append(f"<identity>\n{identity}\n</identity>")
+    if inject_context == "full" and identity:
+        sections.append(f"<identity>\n{identity}\n</identity>")
+
+    # 对话模式（如法律专家 / 苏念陪伴）是用户在会话中显式切换的角色覆盖，
+    # 不属于默认 identity.md，因此 rules_profile 与 full 均应尊重。
+    if resolved_mode.key:
         try:
             from ethan.core.system_prompt import build_mode_identity_block, build_persona_block
             from ethan.skills.registry import SkillRegistry
@@ -509,6 +512,8 @@ def build_kernel_briefing(
         static_text = "\n\n".join(blocks)
         if system_files is None:
             with _LOCK:
+                if len(_CACHE) >= _MAX_CACHE_ENTRIES:
+                    _CACHE.pop(next(iter(_CACHE)))
                 _CACHE[key] = static_text
 
     rt_block = _format_runtime_context(runtime_context) if (want_context and not is_minimal) else ""
@@ -569,6 +574,7 @@ def match_kernel_skills(
 
     full_parts: list[str] = []
     brief_parts: list[str] = []
+    used_skills: list[Any] = []
     full_count = 0
 
     for s in matched:
@@ -582,11 +588,13 @@ def match_kernel_skills(
             if desc:
                 line += f" — {desc}"
             brief_parts.append(line)
+            used_skills.append(s)
             continue
 
         if full_count >= max_skills:
             continue
         full_count += 1
+        used_skills.append(s)
         content = (s.content or "").strip()
         if len(content) > _MAX_SKILL_CONTENT:
             content = content[:_MAX_SKILL_CONTENT] + "\n…(truncated)"
@@ -616,7 +624,7 @@ def match_kernel_skills(
             + "\n".join(brief_parts)
             + "\n</matched_skills_brief>"
         )
-    return "\n\n".join(blocks), matched
+    return "\n\n".join(blocks), used_skills
 
 
 def clear_briefing_cache() -> None:
