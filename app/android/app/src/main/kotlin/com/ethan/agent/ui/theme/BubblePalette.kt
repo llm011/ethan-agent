@@ -43,11 +43,12 @@ fun bubbleContainerColor(kind: MessageRoleKind): Color = when (kind) {
 }
 
 /**
- * 气泡左侧的强调色条 —— 隐藏头像后的主要识别标记。
+ * 气泡侧边的强调色条 —— 隐藏头像后的主要识别标记。
+ * （助手/工具消息画在气泡左侧，用户 query 气泡画在右侧，与气泡对齐方向一致。）
  *
  * 与 [bubbleContainerColor] 用同一个色但**不透明**：低透明度的底色在大面积上很柔和，
  * 但一条 3dp 的细线如果也是 10% 透明度就彻底看不见了。所以色条取实色，
- * 靠「细 + 短」来控制视觉重量，而不是靠透明度。
+ * 靠「细 + 贴边」来控制视觉重量，而不是靠透明度。
  */
 @Composable
 @ReadOnlyComposable

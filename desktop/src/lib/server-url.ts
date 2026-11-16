@@ -13,7 +13,7 @@ let configuredServerUrl = "";
 
 function normalizeServerUrl(raw: string | null | undefined): string {
   if (!raw) return "";
-  let url = raw.replace(/\/+$/, "");
+  let url = raw.trim().replace(/\/+$/, "");
   // 兼容：用户存了带 /api 的旧值，剥离后存储 base。
   if (url.endsWith("/api")) url = url.slice(0, -4);
   return url;
