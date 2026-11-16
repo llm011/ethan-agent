@@ -91,3 +91,23 @@ def test_node_modules_does_not_trigger(tmp_path):
 def test_check_never_raises_on_weird_input(tmp_path):
     """自检跑在服务启动路径上，任何异常都必须被吞掉。"""
     assert check_stale_web_dist(tmp_path / "a" / "b", tmp_path / "c") is None
+
+
+def test_docker_web_dist_path_is_skipped(tmp_path):
+    """Docker 布局（`WEB_DIST_PATH=/app/web_dist`）不该误报。
+
+    那种形态下 `.parent.parent` 是 `/`，推出的 `/web` 不存在 —— 必须静默跳过，
+    而不是去扫别的目录碰运气（猜错就会对完全无关的目录报警）。
+    """
+    from ethan.interface.web_dist_check import _guess_web_src
+
+    dist = tmp_path / "app" / "web_dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("<html>")
+
+    guessed = _guess_web_src(dist)
+    # 推导规则固定为 parent.parent / "web"：默认布局下正好是 <repo>/web，
+    # 而在 /app/web_dist 这种形态下会落到 / 下的 web（不存在 → 跳过）
+    assert guessed == dist.parent.parent / "web"
+    # 该目录不存在 → 检测直接跳过，不报警
+    assert check_stale_web_dist(dist) is None

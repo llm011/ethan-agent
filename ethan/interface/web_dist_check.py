@@ -76,6 +76,19 @@ def _newest_mtime(root: Path, patterns: tuple[str, ...], limit: int = 4000) -> f
     return newest
 
 
+def _guess_web_src(web_dist: Path) -> Path:
+    """推导 `web/` 源码目录。
+
+    默认布局是 `<repo>/ethan/web_dist` → `<repo>/web`，即 `web_dist.parent.parent / "web"`。
+
+    但 Docker 里 `WEB_DIST_PATH=/app/web_dist`（产物被放在 `ethan/` 之外，避免
+    挂载源码时被盖掉），此时 `.parent.parent` 是 `/`，推出的 `/web` 不存在。
+    这种部署形态下源码树本来就不在镜像里，直接返回那个不存在的路径让上层跳过——
+    不要"多走一层碰碰运气"，猜错了会扫到完全无关的目录并误报。
+    """
+    return web_dist.parent.parent / "web"
+
+
 def check_stale_web_dist(web_dist: Path, web_src: Path | None = None) -> str | None:
     """检查前端产物是否落后于源码。返回警告文本（不需要警告时返回 None）。"""
     try:
@@ -85,9 +98,9 @@ def check_stale_web_dist(web_dist: Path, web_src: Path | None = None) -> str | N
             return None
 
         if web_src is None:
-            web_src = web_dist.parent.parent / "web"
+            web_src = _guess_web_src(web_dist)
         if not web_src.is_dir():
-            # 从 wheel 安装、没有源码树（`web/`），无从比较
+            # 从 wheel 安装 / Docker 镜像：没有源码树（`web/`），无从比较
             return None
 
         dist_mtime = index.stat().st_mtime
