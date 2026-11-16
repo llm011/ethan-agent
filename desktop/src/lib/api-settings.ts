@@ -1,6 +1,6 @@
 /** Settings 相关类型和 API（Agent/Provider/System/Profile/ToolTiers/FastRules）。 */
 
-import { fetchWithTimeout, getApiUrl, getAuthToken, headers } from "./api-base";
+import { fetchWithTimeout, getApiUrl, getAuthToken, getServerUrl, headers } from "./api-base";
 import { bustCache } from "./local-cache";
 import type { UserIdentity } from "@ethan/shared/chat/user-identity";
 
@@ -429,8 +429,38 @@ export interface KernelsResponse {
   } | null;
 }
 
+function kernelEndpoint(path: string): string {
+  const server = getServerUrl();
+  if (!server) {
+    throw new Error("未配置后端 Server 地址，请在「通用」设置中填写或检查本地 ethan 服务配置");
+  }
+  if (!/^https?:\/\//i.test(server)) {
+    throw new Error(`后端 Server 地址格式无效（${server}），请以 http:// 或 https:// 开头`);
+  }
+  return `${getApiUrl()}${path}`;
+}
+
+async function parseKernelJson<T>(res: Response, endpoint: string): Promise<T> {
+  const contentType = res.headers.get("content-type") || "";
+  const rawText = await res.text();
+  try {
+    return JSON.parse(rawText) as T;
+  } catch {
+    // WKWebView 对 HTML/空串调用 res.json() 会直接抛 "The string did not match the expected pattern."。
+    // 常见诱因：旧版后端的 SPA fallback 把未知 /api/* 回落成了 200 index.html，或 Server 地址指向了前端/代理页。
+    const looksHtml = contentType.includes("text/html") || /^\s*</.test(rawText);
+    if (looksHtml) {
+      throw new Error(
+        `接口返回了网页而非 JSON（${endpoint}），可能连接到旧版后端或前端静态页，请确认后端 ethan-agent 已升级并重启，且 Server 地址配置正确`,
+      );
+    }
+    throw new Error(`接口响应不是有效 JSON（HTTP ${res.status}）`);
+  }
+}
+
 export async function fetchKernels(): Promise<KernelsResponse> {
-  const res = await fetchWithTimeout(`${getApiUrl()}/kernels`, { headers: headers() });
+  const url = kernelEndpoint("/kernels");
+  const res = await fetchWithTimeout(url, { headers: headers() });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const detail = typeof body?.detail === "string" ? body.detail : body?.detail?.message || "";
@@ -442,7 +472,11 @@ export async function fetchKernels(): Promise<KernelsResponse> {
     }
     throw new Error(detail || `获取内核列表失败（HTTP ${res.status}）`);
   }
-  return res.json();
+  const data = await parseKernelJson<KernelsResponse>(res, url);
+  if (!data || !Array.isArray(data.kernels)) {
+    throw new Error("后端返回的内核列表格式异常");
+  }
+  return data;
 }
 
 export interface KernelInstallResult {
@@ -459,7 +493,8 @@ export interface KernelInstallResult {
 
 /** 选中并安装。这是「用户选了就装，不用手敲命令」的入口。 */
 export async function installKernel(kind: string): Promise<KernelInstallResult> {
-  const res = await fetchWithTimeout(`${getApiUrl()}/kernels/install`, {
+  const url = kernelEndpoint("/kernels/install");
+  const res = await fetchWithTimeout(url, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ kind, auto_install: true }),
@@ -469,12 +504,13 @@ export async function installKernel(kind: string): Promise<KernelInstallResult> 
     const detail = await res.json().catch(() => ({}));
     throw new Error(detail?.detail?.message || detail?.detail || "安装失败");
   }
-  return res.json();
+  return parseKernelJson<KernelInstallResult>(res, url);
 }
 
 /** 切换默认内核。依赖装不上时后端返回 409，这里抛出带原因的错误。 */
 export async function selectKernel(kind: string): Promise<{ ok: boolean; default: string }> {
-  const res = await fetchWithTimeout(`${getApiUrl()}/kernels/select`, {
+  const url = kernelEndpoint("/kernels/select");
+  const res = await fetchWithTimeout(url, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ kind, auto_install: true }),
@@ -487,7 +523,7 @@ export async function selectKernel(kind: string): Promise<{ ok: boolean; default
     const reason = typeof d === "object" ? d?.reason : "";
     throw new Error(reason ? `${msg}：${reason}` : msg);
   }
-  const out = await res.json();
+  const out = await parseKernelJson<{ ok: boolean; default: string }>(res, url);
   bustCache("kernels");
   return out;
 }
@@ -495,13 +531,14 @@ export async function selectKernel(kind: string): Promise<{ ok: boolean; default
 export async function setKernelTaskRules(
   taskRules: Record<string, string>,
 ): Promise<{ ok: boolean; task_rules: Record<string, string> }> {
-  const res = await fetchWithTimeout(`${getApiUrl()}/kernels/task-rules`, {
+  const url = kernelEndpoint("/kernels/task-rules");
+  const res = await fetchWithTimeout(url, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ task_rules: taskRules }),
   });
   if (!res.ok) throw new Error("设置失败");
-  const out = await res.json();
+  const out = await parseKernelJson<{ ok: boolean; task_rules: Record<string, string> }>(res, url);
   bustCache("kernels");
   return out;
 }

@@ -329,6 +329,14 @@ if _WEB_DIST.exists():
 
     @app.get("/{path:path}")
     async def serve_spa(request: Request, path: str):
+        # API / WebSocket / MCP 路径绝不能回落到 index.html：
+        # 否则未命中路由（例如旧版后端缺少新接口）会返回 200 text/html，
+        # 前端 res.json() 在 Safari/WKWebView 中直接抛
+        # "SyntaxError: The string did not match the expected pattern."，
+        # 404 友好提示永远触发不到。
+        first_seg = path.lstrip("/").split("/", 1)[0]
+        if first_seg in {"api", "ws", "mcp", "kernel-tools", "v1"}:
+            return Response(status_code=404)
         file_path = _WEB_DIST / path
         # Exact static file (favicon, images, etc.)
         if file_path.is_file():

@@ -82,3 +82,17 @@ def test_chat_session_path_does_not_fall_to_root(tmp_path):
             break
     assert hit is not None
     assert "CHAT" in hit.read_text(), "回落到站点根了"
+
+
+def test_serve_spa_does_not_swallow_api_routes():
+    """未知 /api/* 路由绝不能由 serve_spa 回落成 200 index.html。
+
+    否则旧版后端缺少新接口（如 /api/kernels）时返回 200 HTML，
+    WKWebView 的 res.json() 直接报 'The string did not match the expected pattern.'。
+    """
+    api_src = (Path(__file__).resolve().parent.parent / "ethan/interface/api.py").read_text(encoding="utf-8")
+    idx = api_src.find("async def serve_spa(")
+    assert idx >= 0
+    block = api_src[idx : idx + 800]
+    assert '"api"' in block and "status_code=404" in block
+

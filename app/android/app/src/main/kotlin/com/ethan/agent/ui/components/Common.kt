@@ -345,13 +345,19 @@ fun ToolTimeline(steps: List<ToolStep>, modifier: Modifier = Modifier, isStreami
     val hasAnyCancelled = effectiveSteps.any { it.state == "cancelled" }
     val allDone = effectiveSteps.all { it.state != "running" && it.state != "start" }
 
-    // 默认展开，**执行过程中不再自动折叠**。
-    //
-    // 早前是 `expanded = userToggled ?: !allDone`：多轮工具执行时 allDone 会随
-    // 「call1 done → 模型生成 → call2 start」反复翻转（true→false→true…），
-    // 用户没手动点过时整张卡片就跟着折叠/展开来回跳，整个屏幕都在闪。
-    // 现在只有用户点击摘要行才会改变 expanded —— 状态不再被流式事件驱动。
-    var expanded by remember { mutableStateOf(true) }
+    // 流式生成中默认展开以便实时查看进度；历史消息或回复完成后默认收起，
+    // 避免多步工具日志在对话流里占满屏幕。
+    // 这里只跟踪 isStreaming（整个回复周期是否结束），不跟踪 allDone ——
+    // 多轮工具调用时 allDone 会在步骤间隙反复翻转导致闪跳，而 isStreaming 只在
+    // 整轮回复真正结束时才从 true 变成 false。
+    var expanded by remember { mutableStateOf(isStreaming) }
+    var prevStreaming by remember { mutableStateOf(isStreaming) }
+    LaunchedEffect(isStreaming) {
+        if (prevStreaming != isStreaming) {
+            prevStreaming = isStreaming
+            expanded = isStreaming
+        }
+    }
 
     // 整体带边框的日志卡片
     Surface(
