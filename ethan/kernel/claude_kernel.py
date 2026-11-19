@@ -95,6 +95,10 @@ class ACPKernelBase(KernelRuntime):
     def install_hint(self) -> str:
         return "见项目文档"
 
+    async def _resolve_kernel_model(self, request: KernelRequest) -> str | None:
+        """按本次会话请求的模型在外部内核中查找匹配项（子类覆写）。"""
+        return None
+
     async def run(
         self,
         request: KernelRequest,
@@ -209,6 +213,18 @@ class ACPKernelBase(KernelRuntime):
         async def _drive() -> None:
             """跑 delegate，结束时投哨兵。异常也转成事件，不让 run() 卡住。"""
             try:
+                extra_kwargs: dict[str, Any] = {}
+                if request.model:
+                    kernel_model = await self._resolve_kernel_model(request)
+                    if kernel_model:
+                        request.kernel_model = kernel_model
+                        extra_kwargs["model"] = kernel_model
+                        logger.info(
+                            "%s 内核已按会话模型 %r 切换为 %r（仅本次会话生效）",
+                            self.display_name,
+                            request.model,
+                            kernel_model,
+                        )
                 result = await delegate(
                     prompt=prompt,
                     cwd=request.working_dir or None,
@@ -220,6 +236,7 @@ class ACPKernelBase(KernelRuntime):
                     mirror=False,  # 内核模式下不落镜像会话，避免和主会话重复
                     on_event=_on_event,
                     mcp_config_path=mcp_cfg_path or None,
+                    **extra_kwargs,
                 )
                 queue.put_nowait(("__result__", result))
             except Exception as e:  # noqa: BLE001 - 必须兜住，否则消费者永久阻塞
@@ -367,3 +384,8 @@ class ClaudeCodeKernel(ACPKernelBase):
     @property
     def install_hint(self) -> str:
         return "npm i -g @anthropic-ai/claude-code"
+
+    async def _resolve_kernel_model(self, request: KernelRequest) -> str | None:
+        from ethan.kernel.model_sync import resolve_claude_model
+
+        return await resolve_claude_model(request.model)

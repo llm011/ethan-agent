@@ -56,6 +56,7 @@ async def delegate(
     mirror: bool = True,
     on_event: Optional[callable] = None,
     mcp_config_path: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> ACPResult:
     """Delegate a task to the best available local coding agent.
 
@@ -102,7 +103,7 @@ async def delegate(
     dispatch_on_event = _combined_on_event if (mirror_session is not None or on_event is not None) else None
     result = await _dispatch(
         prompt, work_dir, prefer, timeout, resume, reset_session, user_id, agent_name,
-        on_event=dispatch_on_event, mcp_config_path=mcp_config_path,
+        on_event=dispatch_on_event, mcp_config_path=mcp_config_path, model=model,
     )
 
     if mirror_session is not None:
@@ -123,6 +124,7 @@ async def _dispatch(
     agent_name: str,
     on_event: Optional[callable] = None,
     mcp_config_path: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> ACPResult:
     """实际分派到具体 Coding Agent。镜像会话由 delegate() 在外层包裹。"""
     if prefer == "opencode":
@@ -144,6 +146,7 @@ async def _dispatch(
         return await _run_codex(
             prompt, cwd=work_dir, timeout=timeout,
             resume_session_id=resume_sid, user_id=user_id, on_event=on_event,
+            model=model,
         )
 
     # 默认优先 Claude Code（支持多轮 + 子步骤）
@@ -156,12 +159,12 @@ async def _dispatch(
         return await _run_claude_code(
             prompt, cwd=work_dir, timeout=timeout,
             resume_session_id=resume_sid, user_id=user_id, on_event=on_event,
-            mcp_config_path=mcp_config_path,
+            mcp_config_path=mcp_config_path, model=model,
         )
     elif agent_name == "opencode":
         return await _run_opencode(prompt, cwd=work_dir, timeout=timeout, user_id=user_id, on_event=on_event)
     elif agent_name == "codex":
-        return await _run_codex(prompt, cwd=work_dir, timeout=timeout, user_id=user_id, on_event=on_event)
+        return await _run_codex(prompt, cwd=work_dir, timeout=timeout, user_id=user_id, on_event=on_event, model=model)
     else:
         return ACPResult(
             success=False,
