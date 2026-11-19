@@ -263,11 +263,15 @@ async def list_pi_models(binary: str = "pi") -> list[tuple[str, str]]:
             stderr=asyncio.subprocess.PIPE,
         )
         stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+        if proc.returncode != 0:
+            logger.debug("pi --list-models 非零退出 code=%s", proc.returncode)
+            return []
         combined = "\n".join(
             p for p in (stdout_b.decode(errors="replace"), stderr_b.decode(errors="replace")) if p
         )
         rows = parse_pi_list_models(combined)
-        _pi_cache[binary] = (now, rows)
+        if rows:
+            _pi_cache[binary] = (now, rows)
         return rows
     except Exception:
         logger.debug("探测 Pi 模型列表失败", exc_info=True)
@@ -314,7 +318,6 @@ async def _fetch_openai_models_list(
         async with httpx.AsyncClient(timeout=1.5) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                _http_models_cache[cache_key] = (now, [])
                 return []
             payload = resp.json()
         data = payload.get("data") if isinstance(payload, dict) else None
@@ -323,10 +326,10 @@ async def _fetch_openai_models_list(
             for item in data:
                 if isinstance(item, dict) and item.get("id"):
                     ids.append(str(item["id"]))
-        _http_models_cache[cache_key] = (now, ids)
+        if ids:
+            _http_models_cache[cache_key] = (now, ids)
         return ids
     except Exception:
-        _http_models_cache[cache_key] = (now, [])
         return []
 
 

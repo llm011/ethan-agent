@@ -495,3 +495,53 @@ def test_codex_and_claude_runners_pass_cli_model_flag(monkeypatch):
     asyncio.run(_run_codex("hello", cwd="/tmp", model="gpt-5.4"))
     assert "-m" in cmds[-1]
     assert cmds[-1][cmds[-1].index("-m") + 1] == "gpt-5.4"
+
+
+def test_list_pi_models_and_http_probe_do_not_cache_failures(monkeypatch):
+    from ethan.kernel import model_sync
+
+    model_sync.clear_model_sync_caches()
+
+    # 1) pi --list-models 非零退出不解析、不写缓存
+    calls = {"pi": 0}
+
+    class _FailProc:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"Error: failed"
+
+    async def fake_exec(*cmd, **kwargs):
+        calls["pi"] += 1
+        return _FailProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    assert asyncio.run(model_sync.list_pi_models("pi")) == []
+    assert asyncio.run(model_sync.list_pi_models("pi")) == []
+    assert calls["pi"] == 2  # 未命中缓存，每次失败后仍可重试
+
+    # 2) HTTP /models 返回非 200 或异常时不写负缓存
+    import httpx
+
+    http_calls = {"n": 0}
+
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, headers=None):
+            http_calls["n"] += 1
+            if http_calls["n"] == 1:
+                return SimpleNamespace(status_code=503, json=lambda: {})
+            return SimpleNamespace(status_code=200, json=lambda: {"data": [{"id": "gpt-5.4"}]})
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    assert asyncio.run(model_sync._fetch_openai_models_list("http://127.0.0.1:9999/v1/models")) == []
+    assert asyncio.run(model_sync._fetch_openai_models_list("http://127.0.0.1:9999/v1/models")) == ["gpt-5.4"]
+    assert http_calls["n"] == 2
