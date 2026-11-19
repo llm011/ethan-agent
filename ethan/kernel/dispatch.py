@@ -87,6 +87,7 @@ class KernelRunner:
         agent: Any = None,
         *,
         model: str = "",
+        requested_model: str = "",
         channel: str = "",
         user_id: str = "",
         mode: str = "",
@@ -105,6 +106,9 @@ class KernelRunner:
         self._task_kind = task_kind
         self._working_dir = working_dir
         self._model = model or (getattr(agent, "_provider", None) and agent._provider.model) or ""
+        # 保留带 provider 前缀的原始请求模型名（如 cliproxy/claude-sonnet-4.6），
+        # 供外部内核在自己的模型列表中精确匹配；未显式指定时为空。
+        self._requested_model = requested_model
         self.usage = KernelUsage()
         self.session_id = getattr(agent, "session_id", "") if agent is not None else ""
         self.runtime_context = getattr(agent, "runtime_context", "") if agent is not None else ""
@@ -113,6 +117,7 @@ class KernelRunner:
         # 用户需要它来在命令行里定位具体对话（如 `dsh --session-id <id>`），
         # 所以要在 UI 上展示 + 可复制。原生内核下为空（用 Ethan 的会话 id）。
         self.kernel_session_id: str = ""
+        self.kernel_model: str = ""
 
     # ── 属性代理：让既有代码以为它拿到的还是 Agent ──────────────────
 
@@ -178,6 +183,7 @@ class KernelRunner:
             channel=self._channel,
             mode=self._mode,
             session_id=self.session_id,
+            model=self._requested_model or self._model,
             working_dir=self._working_dir,
             task_kind=self._task_kind,
             runtime_context=runtime_ctx,
@@ -201,6 +207,8 @@ class KernelRunner:
                 # 供 producers 在流结束时 emit 给前端。
                 if request.kernel_session_id and request.kernel_session_id != self.kernel_session_id:
                     self.kernel_session_id = request.kernel_session_id
+                if request.kernel_model and request.kernel_model != self.kernel_model:
+                    self.kernel_model = request.kernel_model
                 if not isinstance(event, str):
                     # 只数「start」，避免同名工具的 done 事件重复计数
                     if getattr(event, "state", "") == "start":
@@ -238,6 +246,7 @@ def build_runner(
     channel: str = "",
     user_id: str = "",
     mode: str = "",
+    requested_model: str = "",
 ) -> KernelRunner:
     """根据配置选出内核并包成 runner。
 
@@ -266,6 +275,7 @@ def build_runner(
         runtime,
         agent,
         model=getattr(agent, "model", "") or "",
+        requested_model=requested_model,
         channel=channel or getattr(agent, "_channel", ""),
         user_id=user_id or getattr(agent, "_user_id", ""),
         mode=mode or getattr(agent, "_mode", ""),

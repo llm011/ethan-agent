@@ -143,6 +143,19 @@ class PiKernel(KernelRuntime):
     async def _consume(self, prompt: str, request: KernelRequest, queue: asyncio.Queue) -> None:
         # 关键：`--mode json`（不是 --output-format json）
         cmd = [self.cli_binary, "-p", "--mode", "json"]
+        if request.model:
+            from ethan.kernel.model_sync import resolve_pi_model
+
+            matched_model = await resolve_pi_model(request.model, binary=self.cli_binary)
+            if matched_model:
+                request.kernel_model = matched_model
+                cmd += ["--model", matched_model]
+                logger.info(
+                    "%s 内核已按会话模型 %r 切换为 %r（仅本次会话生效）",
+                    self.display_name,
+                    request.model,
+                    matched_model,
+                )
         if request.session_id and self._looks_like_pi_session(request.session_id):
             cmd += ["--session", request.session_id]
         cmd.append(prompt)

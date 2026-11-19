@@ -113,6 +113,7 @@ async def _run_codex(
     resume_session_id: Optional[str] = None,
     user_id: str = "",
     on_event: Optional[callable] = None,
+    model: Optional[str] = None,
 ) -> ACPResult:
     """Run Codex with `codex exec --json`，解析事件流，支持多轮续接。
 
@@ -128,8 +129,9 @@ async def _run_codex(
         return ACPResult(success=False, output="codex command not found.", agent="codex")
 
     work_dir = cwd or str(Path.cwd())
-    prov_args, prov_env, model = _codex_provider_overrides()
-    model_args = ["-m", model] if model else []
+    prov_args, prov_env, override_model = _codex_provider_overrides()
+    effective_model = model or override_model
+    model_args = ["-m", effective_model] if effective_model else []
     # --skip-git-repo-check：codex 默认拒绝在非 git 目录里跑（报
     # "Not inside a trusted directory"）。作为内核用时 working_dir 可能是任意目录
     # （甚至没传、用了进程 cwd），不加这个参数会直接失败且信息很晦涩。

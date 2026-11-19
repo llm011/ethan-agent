@@ -147,6 +147,18 @@ Web / Desktop / Android 三端。
 
 ---
 
+## 会话级模型同步（`model_sync.py`）
+
+用户在聊天框切换模型时，`KernelRequest.model` 会把当前会话选中的模型传入内核，**仅对当前会话生效，不修改全局 `defaults.model` 或各外部 CLI 自身配置文件**：
+
+1. **ACP 内核（DSH / OpenCode / Antigravity）**：`new_session()` 后从 `config_options`（`category="model"` 或 `id="model"`）里查找对应模型，命中则调用 `conn.set_config_option()` 切换；DSH 注入临时 `--patch` provider 时也会优先使用本次会话模型（仅限 OpenAI 兼容 provider）。
+2. **Pi**：通过 `pi --list-models`（缓存 60s）查找对应模型，命中则传入 `--model provider/model`。
+3. **Claude Code**：从 `~/.claude/settings(.local).json`、可选代理 `/v1/models` 及 `claude-*` / `sonnet` / `opus` / `haiku` 匹配，命中则传入 `--model <id>`。
+4. **Codex**：从 `$CODEX_HOME/config.toml`、可选自定义 provider `/models` 及 OpenAI/Codex 模型族匹配，命中则传入 `-m <id>`。
+5. **未命中时保持安全兜底**：外部内核找不到对应模型时静默沿用其自身默认模型，避免硬传不兼容 ID 导致失败。
+
+---
+
 ## 加一个新内核
 
 1. 选基类：走 ACP 协议 → `AcpClientKernel`（只需声明 `AcpAgentSpec`）；

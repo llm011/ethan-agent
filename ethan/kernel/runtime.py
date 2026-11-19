@@ -129,6 +129,11 @@ class KernelRequest:
     #
     # 内核建立连接后把自己的 id 写这里，由 runner 取走供 UI 展示 + 落库。
     kernel_session_id: str = ""
+    # 本次会话请求的模型（来自聊天框选择/会话设置），仅对本轮生效，不修改全局配置。
+    # 外部内核会在自身可用模型中查找匹配项，命中时按会话切过去，未命中则保留默认。
+    model: str = ""
+    # 外部内核实际匹配并切换到的模型标识（仅作记录/可观测性用）
+    kernel_model: str = ""
     # 工作目录：外部 coding runtime 靠它定位项目；原生内核靠它做相对路径解析
     working_dir: str = ""
     # 任务类型提示，供「按任务选内核」的路由用（如 "coding" / "chat" / "research"）

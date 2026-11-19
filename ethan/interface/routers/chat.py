@@ -428,7 +428,17 @@ async def chat(req: ChatRequest, request: Request, user_id: str = Depends(verify
         if req.resume_summary:
             _emit_resume_summary(run, req.resume_summary)
         run.task = asyncio.create_task(
-            _run_generation(run, agent, messages, store, req.session_id, user_id, consent, mode=req.mode)
+            _run_generation(
+                run,
+                agent,
+                messages,
+                store,
+                req.session_id,
+                user_id,
+                consent,
+                mode=req.mode,
+                requested_model=req.model or "",
+            )
         )
         return StreamingResponse(
             _sse_from_run(run),

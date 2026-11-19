@@ -37,6 +37,11 @@ class CodexKernel(ACPKernelBase):
     def install_hint(self) -> str:
         return "npm i -g @openai/codex"
 
+    async def _resolve_kernel_model(self, request) -> str | None:
+        from ethan.kernel.model_sync import resolve_codex_model
+
+        return await resolve_codex_model(request.model)
+
     async def run(self, request, context=None):
         """Codex 内核在执行前先关掉 ACP 层的 provider 覆盖。
 

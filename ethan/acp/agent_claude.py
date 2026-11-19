@@ -33,6 +33,7 @@ async def _run_claude_code(
     user_id: str = "",
     on_event: Optional[callable] = None,
     mcp_config_path: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> ACPResult:
     """Run Claude Code with stream-json output, parse sub-steps and final result.
 
@@ -70,6 +71,8 @@ async def _run_claude_code(
         # 只留我们给的。用户可能已经在 ~/.claude 里配了自己的 server，
         # 我们只是"额外挂一个"，不该把它们丢掉。
         cmd += ["--mcp-config", mcp_config_path]
+    if model:
+        cmd += ["--model", model]
 
     sub_steps: list[dict] = []
     pending: dict[str, dict] = {}  # tool_use_id → step dict（等待对应 tool_result）

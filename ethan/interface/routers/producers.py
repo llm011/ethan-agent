@@ -279,6 +279,7 @@ async def _run_generation(
     user_id: str = "",
     consent=None,
     mode: str = "",
+    requested_model: str = "",
 ) -> None:
     """Producer：后台任务跑 Agent 生成，把事件 emit 进 run 缓冲并扇出给订阅者。
 
@@ -311,6 +312,7 @@ async def _run_generation(
             channel=getattr(agent, "_channel", ""),
             user_id=user_id,
             mode=mode,
+            requested_model=requested_model,
         )
         if runner.kernel_kind != "ethan":
             # 让前端知道本轮换了内核（真实模型由外部 CLI 决定，model 事件据实报内核名）

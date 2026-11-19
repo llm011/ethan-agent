@@ -236,7 +236,7 @@ class AcpClientKernel(KernelRuntime):
         kernel = self
         patch_path, env_extra = ("", {})
         if self.spec and self.spec.inject_provider:
-            patch_path, env_extra = self._build_provider_patch()
+            patch_path, env_extra = self._build_provider_patch(model=request.model)
 
         class _Client(Client):
             """最小 ACP 客户端：把 update 转成 ethan 事件推进队列。"""
@@ -293,6 +293,8 @@ class AcpClientKernel(KernelRuntime):
             session = await conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
             # 写到独立字段，**不要改 request.session_id**（那是 Ethan 自己的会话 id）
             request.kernel_session_id = session.session_id
+            if request.model:
+                await self._apply_session_model(conn, session, request, has_ethan_patch=bool(patch_path))
             try:
                 await conn.prompt(
                     session_id=session.session_id,
@@ -507,10 +509,61 @@ class AcpClientKernel(KernelRuntime):
     def _local_port() -> int:
         return local_port()
 
+    # ── 会话模型同步 ─────────────────────────────────────────
+
+    async def _apply_session_model(
+        self,
+        conn: Any,
+        session: Any,
+        request: KernelRequest,
+        *,
+        has_ethan_patch: bool = False,
+    ) -> None:
+        """在 ACP `new_session` 返回的 `config_options` 中匹配并切换本会话模型。
+
+        找不到匹配模型时静默保持外部内核自身默认模型；失败时不阻断对话。
+        """
+        from ethan.kernel.model_sync import match_acp_model_option
+
+        config_options = getattr(session, "config_options", None) or []
+        if not config_options:
+            return
+        matched = match_acp_model_option(
+            request.model,
+            config_options,
+            preferred_group="ethan" if has_ethan_patch else "",
+        )
+        if matched is None:
+            return
+        config_id, value, current_value = matched
+        request.kernel_model = value
+        if value == current_value:
+            return
+        try:
+            await conn.set_config_option(
+                config_id=config_id,
+                session_id=session.session_id,
+                value=value,
+            )
+            logger.info(
+                "%s 内核已按会话模型 %r 切换为 %r（原 %r，仅本次会话生效）",
+                self.display_name,
+                request.model,
+                value,
+                current_value,
+            )
+        except Exception:
+            logger.warning(
+                "%s 内核切换会话模型 %r 失败，沿用默认模型",
+                self.display_name,
+                value,
+                exc_info=True,
+            )
+
     # ── provider 注入（仅 DSH 这类需要 token 的 agent 用）────────
 
-    def _build_provider_patch(self) -> tuple[str, dict[str, str]]:
-        """把 Ethan 的默认 provider 注入成 DSH 的 route。
+    def _build_provider_patch(self, model: str = "") -> tuple[str, dict[str, str]]:
+        """把 Ethan 的 provider 注入成 DSH 的 route（优先使用本次会话模型）。
 
         DSH 的 profile 默认要 `DEEPSEEK_API_KEY`，而用户可能只在 Ethan 里配过。
         用它提供的 `--patch` 覆盖机制注入，不修改用户的 `~/.dsh` 文件。
@@ -519,14 +572,31 @@ class AcpClientKernel(KernelRuntime):
             from ethan.core.config import get_config
 
             cfg = get_config()
-            provider_name, _, model = (cfg.defaults.model or "").partition("/")
-            if not provider_name:
-                return "", {}
-            prov = cfg.providers.get(provider_name)
-            if prov is None or not prov.base_url or not prov.api_key:
-                return "", {}
         except Exception:
             return "", {}
+
+        def _resolve_openai_compat(raw_model: str) -> tuple[str, str, Any] | None:
+            target = (raw_model or "").strip()
+            if not target:
+                return None
+            entry = cfg.get_model(target)
+            if entry is not None:
+                p_name, m_id = entry.provider, entry.id
+            elif "/" in target:
+                p_name, _, m_id = target.partition("/")
+            else:
+                return None
+            prov_obj = cfg.providers.get(p_name)
+            if prov_obj is None or not prov_obj.base_url or not prov_obj.api_key:
+                return None
+            if (getattr(prov_obj, "type", None) or "openai_compat") == "anthropic":
+                return None
+            return p_name, m_id, prov_obj
+
+        resolved = _resolve_openai_compat(model) or _resolve_openai_compat(cfg.defaults.model or "")
+        if resolved is None:
+            return "", {}
+        _provider_name, model_id, prov = resolved
 
         key_env = "ETHAN_ACP_PROVIDER_KEY"
         patch = [
@@ -538,12 +608,12 @@ class AcpClientKernel(KernelRuntime):
                             "apiKeyEnv": key_env,
                             "baseURL": prov.base_url.rstrip("/"),
                             "api": "openai-completions",
-                            "models": [{"id": model or "default"}],
+                            "models": [{"id": model_id or "default"}],
                         }
                     }
                 },
             },
-            {"id": "agent-default-model", "config": {"provider": "ethan", "model": model or "default"}},
+            {"id": "agent-default-model", "config": {"provider": "ethan", "model": model_id or "default"}},
         ]
         try:
             import tempfile
