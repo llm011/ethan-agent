@@ -214,6 +214,11 @@ jobs:
           releaseBody: '桌面端应用，下载对应平台的安装包即可使用。'
           releaseDraft: false
           prerelease: false
+          # 不在各平台并行 build 里上传 latest.json：先编完的平台会把只有自己一家的
+          # 半成品 latest.json 挂到已发布的 Release 上，导致其他平台用户在构建窗口期
+          # 检查更新报 "None of the fallback platforms ... were found"。统一交给下游
+          # fix-updater-json 在三平台全部上传完 .sig 和安装包后再一次性合成发布。
+          uploadUpdaterJson: false
           # Windows 用 NSIS（生成 .exe）而非 .msi，便于 updater 静默安装
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
@@ -234,6 +239,7 @@ jobs:
           releaseBody: '桌面端应用，下载对应平台的安装包即可使用。'
           releaseDraft: false
           prerelease: false
+          uploadUpdaterJson: false
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
 
@@ -323,19 +329,30 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Rewrite latest.json download URLs to CDN direct links
+      - name: Build or rewrite latest.json with CDN direct links
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           python3 - <<'PYEOF'
-          import json, os, subprocess, time
+          import datetime, json, os, re, subprocess, time
 
           repo = os.environ["REPO"]
           tag = os.environ["TAG"]
 
-          # 1. 反查 asset id -> 文件名（tauri-action 的 latest.json 里只有 id）
+          def pep440_to_semver(raw: str) -> str:
+              v = raw.lstrip("v")
+              m = re.match(r'^(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+))?$', v)
+              if not m:
+                  return v
+              base_ver, pre_tag, pre_num = m.group(1), m.group(2), m.group(3)
+              if not pre_tag:
+                  return base_ver
+              full = {"a": "alpha", "b": "beta", "rc": "rc"}[pre_tag]
+              return f"{base_ver}-{full}.{pre_num}"
+
+          # 1. 反查 asset id -> 文件名（含各平台打包上传的安装包与 .sig）
           #    release 可能由 docker workflow 后创建，先等它出现
           release = None
           for i in range(90):
@@ -352,22 +369,30 @@ jobs:
           id2name = {str(a["id"]): a["name"] for a in release["assets"]}
           print("asset map:", json.dumps(id2name, indent=2))
 
-          # 2. 下载当前 latest.json
+          # 2. 若 release 上已有 latest.json（carry-updater-json 搬运或手动修历史 release），
+          #    先下载下来；正常多平台 build 因 uploadUpdaterJson=false 尚未上传 latest.json，
+          #    此时从头合成一份完整清单再一次性上传，避免并行构建窗口期暴露半成品。
+          os.makedirs("/tmp/fixjson/sig", exist_ok=True)
           base = f"https://github.com/{repo}/releases/download/{tag}"
           dl = subprocess.run(
               ["gh", "release", "download", tag, "--repo", repo,
                "--pattern", "latest.json", "--dir", "/tmp/fixjson", "--clobber"],
               capture_output=True, text=True,
           )
-          if dl.returncode != 0:
-              print("No latest.json on this release, nothing to fix")
-              raise SystemExit(0)
-
-          with open("/tmp/fixjson/latest.json") as f:
-              data = json.load(f)
+          changed = 0
+          if dl.returncode == 0:
+              with open("/tmp/fixjson/latest.json", encoding="utf-8") as f:
+                  data = json.load(f)
+          else:
+              data = {
+                  "version": pep440_to_semver(tag),
+                  "notes": "桌面端应用，下载对应平台的安装包即可使用。",
+                  "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "platforms": {},
+              }
+              changed += 1
 
           # 3. 把 api.github.com 的 asset 地址替换为直链；无法映射的保持原样
-          changed = 0
           for plat, info in data.get("platforms", {}).items():
               url = info.get("url", "")
               if "api.github.com" in url:
@@ -380,56 +405,55 @@ jobs:
                   else:
                       print(f"WARNING: {plat}: asset id {asset_id} not in release, left as-is")
 
-          # 3.5 平台完整性校验：latest.json 必须覆盖所有要支持的平台。
-          #
-          # 背景：2026-11-02 macos-14 退役后，两个 macOS build job 在 1 秒内被取消，
-          # 但 fail-fast: false + needs.build.result=='success'（windows 那个 job 成功
-          # 就算 success）让后面的步骤照常跑，于是发布了一份**只有 Windows 的**
-          # latest.json。桌面端 updater 随即报：
-          #   None of the fallback platforms ["darwin-aarch64-app", "darwin-aarch64"]
-          #   were found in the response "platforms" object
-          # 用户看到的是"更新坏了"，而不是"构建失败"，排查成本很高。
-          # 这里显式校验，缺平台就让 workflow 失败（红），不再静默发布残档。
-          # 3.6 先尝试**补全**缺失的平台。
-          #
-          # 根因：三个 build job（macOS arm64 / macOS x64 / Windows）并行跑，
-          # 每个都会各自生成一份 latest.json 并上传覆盖 —— 最后一个写完的赢。
-          # 于是 macOS 的 job 后完成时，Windows 的条目就丢了。
-          # 实测 v1.0.0b11：latest.json 只有 4 个 darwin-* 平台，windows-x86_64 消失，
-          # 而 release 里 .exe 和 .exe.sig 明明都在。
-          #
-          # 好在 tauri-action 把每个平台的产物（含 .sig）都上传了，
-          # 所以可以从 asset 列表**反推重建**缺失的平台条目，不必让用户等一次重跑。
+          # 3.5 从 release assets 补全/构建全平台条目：
+          #     并行矩阵关闭 uploadUpdaterJson 后，三平台各自只上传安装包与 .sig，
+          #     由此处一次性拼出完整 latest.json；也能兜底历史残缺 release。
+          _PLATFORM_SUFFIXES = {
+              "darwin-aarch64": "_aarch64.app.tar.gz",
+              "darwin-aarch64-app": "_aarch64.app.tar.gz",
+              "darwin-x86_64": "_x64.app.tar.gz",
+              "darwin-x86_64-app": "_x64.app.tar.gz",
+              "windows-x86_64": "-setup.exe",
+              "windows-x86_64-nsis": "-setup.exe",
+          }
+          _sig_cache: dict[str, dict[str, str] | None] = {}
+
           def rebuild_platform(key: str):
-              """从 release assets 里重建某个平台条目。返回 dict 或 None。"""
-              # Windows NSIS：<name>_x64-setup.exe + .sig
-              if key in ("windows-x86_64", "windows-x86_64-nsis"):
-                  exe = next(
-                      (a for a in release["assets"]
-                       if a["name"].endswith("-setup.exe")), None
-                  )
-                  if not exe:
-                      return None
-                  sig_name = exe["name"] + ".sig"
-                  sig = subprocess.run(
-                      ["gh", "release", "download", tag, "--repo", repo,
-                       "--pattern", sig_name, "--dir", "/tmp/fixjson/sig", "--clobber"],
-                      capture_output=True, text=True,
-                  )
-                  sig_path = f"/tmp/fixjson/sig/{sig_name}"
-                  if sig.returncode != 0 or not os.path.exists(sig_path):
-                      return None
-                  with open(sig_path) as fh:
-                      signature = fh.read().strip()
-                  return {
-                      "signature": signature,
-                      "url": f"{base}/{exe['name']}",
-                  }
-              return None
+              """从 release assets 里构建某个平台条目。返回 dict 或 None。"""
+              suffix = _PLATFORM_SUFFIXES.get(key)
+              if not suffix:
+                  return None
+              if suffix in _sig_cache:
+                  return dict(_sig_cache[suffix]) if _sig_cache[suffix] else None
+              asset = next(
+                  (a for a in release["assets"] if a["name"].endswith(suffix)),
+                  None,
+              )
+              if not asset:
+                  _sig_cache[suffix] = None
+                  return None
+              sig_name = asset["name"] + ".sig"
+              sig = subprocess.run(
+                  ["gh", "release", "download", tag, "--repo", repo,
+                   "--pattern", sig_name, "--dir", "/tmp/fixjson/sig", "--clobber"],
+                  capture_output=True, text=True,
+              )
+              sig_path = f"/tmp/fixjson/sig/{sig_name}"
+              if sig.returncode != 0 or not os.path.exists(sig_path):
+                  _sig_cache[suffix] = None
+                  return None
+              with open(sig_path, encoding="utf-8") as fh:
+                  signature = fh.read().strip()
+              entry = {
+                  "signature": signature,
+                  "url": f"{base}/{asset['name']}",
+              }
+              _sig_cache[suffix] = entry
+              return dict(entry)
 
           platforms = data.setdefault("platforms", {})
           built = []
-          for key in ("darwin-aarch64", "darwin-x86_64", "windows-x86_64"):
+          for key in _PLATFORM_SUFFIXES:
               if key in platforms:
                   continue
               rebuilt = rebuild_platform(key)
@@ -437,10 +461,17 @@ jobs:
                   platforms[key] = rebuilt
                   built.append(key)
           if built:
-              print(f"重建了缺失的平台条目: {built}")
+              print(f"构建/补全了平台条目: {built}")
               changed += len(built)
 
-          REQUIRED = ["darwin-aarch64", "darwin-x86_64", "windows-x86_64"]
+          REQUIRED = [
+              "darwin-aarch64",
+              "darwin-aarch64-app",
+              "darwin-x86_64",
+              "darwin-x86_64-app",
+              "windows-x86_64",
+              "windows-x86_64-nsis",
+          ]
           missing = [pname for pname in REQUIRED if pname not in platforms]
           if missing:
               print(f"::error::latest.json 缺少平台 {missing}；"
@@ -454,7 +485,7 @@ jobs:
               print("All URLs already direct links, skipping upload")
               raise SystemExit(0)
 
-          with open("/tmp/fixjson/latest.json", "w") as f:
+          with open("/tmp/fixjson/latest.json", "w", encoding="utf-8") as f:
               json.dump(data, f, indent=2, ensure_ascii=False)
               f.write("\n")
 
@@ -464,7 +495,7 @@ jobs:
                "--clobber", "/tmp/fixjson/latest.json"],
               check=True,
           )
-          print(f"Rewrote {changed} URLs to direct links and uploaded")
+          print(f"Built/rewrote {changed} entries with direct links and uploaded")
           PYEOF
 
       # 发布后校验：latest.json 必须同时覆盖 Apple Silicon 和 Intel。
