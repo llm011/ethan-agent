@@ -61,6 +61,8 @@ class AnthropicProvider(BaseProvider):
                  vision: Optional[bool] = None):
         import anthropic  # lazy: SDK is heavy; only load when a provider instance is created
 
+        from ethan.core.context import get_session_id
+
         # httpx event hooks must be async; strip SDK fingerprint headers that
         # some third-party relays block, and replace the user-agent.
         async def _clean_headers(request: httpx.Request) -> None:
@@ -68,6 +70,9 @@ class AnthropicProvider(BaseProvider):
                 del request.headers[key]
             # Some relays block the default anthropic-python user-agent
             request.headers["user-agent"] = "python-httpx/0.28.1"
+            sid = get_session_id()
+            if sid and "x-session-id" not in request.headers:
+                request.headers["x-session-id"] = sid
 
         # trust_env=False：不读环境变量里的 all_proxy/HTTPS_PROXY。否则用户机器上
         # 的 `all_proxy=socks5://...` 会让 httpx 在构造 client 时因缺 optional 的

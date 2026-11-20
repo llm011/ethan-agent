@@ -293,6 +293,10 @@ async def _run_heartbeat_md() -> None:
         await store.save_message(hb_session.id, user_msg)
         await store.touch(hb_session.id)
 
+        from ethan.core.context import set_session_id
+        agent.session_id = hb_session.id
+        set_session_id(hb_session.id)
+
         # 用 stream_chat 执行，收集工具步骤 / 思考 / 正文
         tool_start_times: dict[str, float] = {}
         collected_tool_steps: list[dict] = []

@@ -14,11 +14,14 @@ from .ui import console
 async def run_once(agent: Agent, prompt: str) -> None:
     """单轮对话：发送一句，流式打印回复，退出。同时持久化到 session 列表。"""
     from ethan.core.config import get_config
-    from ethan.memory.session import _generate_id, get_session_store
-    from ethan.providers.base import ThinkingEvent, ToolEvent
 
     # 创建 session
+    from ethan.core.context import set_session_id
+    from ethan.memory.session import _generate_id, get_session_store
+    from ethan.providers.base import ThinkingEvent, ToolEvent
     session_id = _generate_id()
+    agent.session_id = session_id
+    set_session_id(session_id)
     store = await get_session_store()
     model_id = agent._provider.model or get_config().defaults.model
     await store.create_with_id(session_id, model_id, source="cli")

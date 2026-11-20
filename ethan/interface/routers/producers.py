@@ -294,6 +294,8 @@ async def _run_generation(
 
     if session_id:
         agent.session_id = session_id
+        from ethan.core.context import set_session_id
+        set_session_id(session_id)
     # 关联 ChatRun 到 ToolExecutor：使外部可通过 run.cancel_tool(tool_call_id) 取消单个工具。
     agent._executor.current_run = run
 

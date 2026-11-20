@@ -100,8 +100,11 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
 
     _banner()
 
-    # 当前 session 确定后，绑定到 consent provider 做 session 维度授权记忆
+    # 当前 session 确定后，绑定到 consent provider 做 session 维度授权记忆，并注入请求级 session_id
+    from ethan.core.context import set_session_id
     consent_provider.session_id = session.id
+    agent.session_id = session.id
+    set_session_id(session.id)
 
     # ── Provider setup (runs any time no API key is configured) ──
     from ethan.core.services.onboarding import ONBOARDING_MESSAGE, is_first_time, needs_provider_setup
@@ -288,6 +291,8 @@ async def run_repl(agent: Agent, resume_id: str | None = None, auto_consent: boo
                     session = result
                     session_persisted = True  # /resume 和 /new 返回的都是已持久化的 session
                     agent._mode = getattr(session, "mode", "") or ""  # 切会话同步模式
+                    agent.session_id = session.id
+                    set_session_id(session.id)
                     consent_provider.session_id = session.id  # 切换会话同步授权记忆作用域
                     history = list(session.messages)
                     approx_tokens = sum(len(m.content) for m in history)

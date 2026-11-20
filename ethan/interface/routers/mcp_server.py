@@ -115,6 +115,8 @@ async def ask_ethan(prompt: str, session_id: str | None = None, ctx: Context | N
     agent = create_agent(channel="mcp")
     agent.session_id = session_id
     agent.is_owner = False
+    from ethan.core.context import set_session_id
+    set_session_id(session_id)
 
     user_msg = Message(role="user", content=prompt)
     await store.save_message(session_id, user_msg)

@@ -117,6 +117,8 @@ async def completions(req: CompletionsRequest, request: Request, user_id: str = 
 
     session_id = req.session_id
     agent.session_id = session_id
+    from ethan.core.context import set_session_id
+    set_session_id(session_id)
     user_msg = Message(role=req.messages[-1].role, content=req.messages[-1].content)
     await store.save_message(session_id, user_msg)
 

@@ -248,10 +248,13 @@ async def _handle_message(msg: dict[str, Any], creds: Any) -> None:
 
     # ── Stream Agent ──────────────────────────────────────────────────────────
     from ethan.core.agent_factory import create_agent
+    from ethan.core.context import set_session_id
     from ethan.interface.channels.lark.tool_trace import sanitize_args_summary, sanitize_result_preview
     from ethan.tools.builtin.schedule import wechat_chat_id_var
+    set_session_id(session_id)
     wechat_token = wechat_chat_id_var.set(reply_to)
     agent = create_agent(channel="wechat", user_id=user_id, toolset="full")
+    agent.session_id = session_id
     final_answer = ""
 
     # 登记 task 供 /stop 取消（仅 Agent 流程；命令分支不登记，避免 /stop 取消自己）
