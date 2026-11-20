@@ -1,8 +1,19 @@
 # Ethan Agent v2 重构 — 进度与后续计划
 
-> 最后更新：2026-11-15
-> 状态：**重构主体已完成并待合入 main**。下方是核实过的真实进度。
-> 测试基线：1868 passed, 2 skipped。Android 已能真实编译出 APK。
+> 最后更新：2026-11-21
+> 状态：**重构已全部合入 main**。1992 个测试。四条发版流水线全绿。
+>
+> ### 待办清单（一眼看全）
+>
+> | 项 | 状态 |
+> |---|---|
+> | P0 多内核 | ✅ 完成（6 个内核，DSH/Claude 可共享 Ethan 工具） |
+> | P1 `tools.md` 结构性拆分 | ❌ **唯一未做**（34K 字符，占 prompt 66%） |
+> | P2 `skill_filter.py` | ✅ 已删除（零引用） |
+> | P3 Android 编译 / 设置页 | ✅ 完成（APK 可构建，内核/语音 Tab 有真实数据通道） |
+> | P4 8 种场景 / Power Bundles | ✅ 确认不做（现有 match + find_tools 已覆盖） |
+>
+> 发版流程的坑与自检清单见 [docs/release.md](docs/release.md)。
 
 ---
 
@@ -231,7 +242,15 @@ prompt 已经够小**。`tools_reference` 仍是 34.3K 全量，拆分是 P1 待
 
 已按「事件流对齐」重写，详见下方专章。
 
-### P1：`tools.md` 的结构性拆分（**高优先级，本次踩过坑 · 由另一分支负责，本轮不动**）
+### P1：`tools.md` 的结构性拆分（**唯一剩余的待办**）
+
+> **状态（2026-11-21）**：除本项外，P0/P2/P3/P4 全部完成或确认不做。
+>
+> 实测：`tools_reference` **34,317 字符，占 system prompt 52,160 的 66%**。
+> 每轮对话都要全量带上，且工具循环里每次迭代重复发送。
+>
+> 这不是「还能再省点」的优化，是当前 prompt 体积的**主要构成**。
+> 但要小心：上一轮曾误删有效细节（见下方教训），**拆分必须先确认内容清单**。
 
 **先说清楚它的定位**：`tools.md` 不是日志，是**操作手册**——教 agent 怎么用工具。
 机制是 `Agent._load_system_files()` → `<tools_reference>` → 每轮全量进 system prompt。
@@ -267,10 +286,11 @@ prompt cache（`docs/caching.md`）能省**费用**（稳定层命中 0.1×）�
 同时要治写入纪律：`system_file_guard.py` 有 200K 截断护栏，但根因是 agent 在往
 里面追加运行日志。文件头已加规则，还需在心跳/定时任务 prompt 里明确禁止。
 
-### P2：`skill_filter.py` 未接入
+### P2 ✅ `skill_filter.py`（已删除）
 
-`ethan/core/skill_filter.py` 定义了 `CORE_SKILLS` / `MEDIUM_SKILLS` 分级，但零引用。
-现在的分级逻辑直接在 `SkillRegistry.build_index_block()` 里实现了，**这个文件可以删**。
+`ethan/core/skill_filter.py`（155 行）定义了 `CORE_SKILLS` / `MEDIUM_SKILLS` 分级，
+但全仓库零引用 —— 分级逻辑直接在 `SkillRegistry.build_index_block()` 里实现了。
+已删除。
 
 ### P3 ✅ Android 设置页 / 编译问题（已解决）
 
@@ -292,7 +312,7 @@ Ktor `EthanApiService` → `EthanRepository` → `SettingsViewModel` → Compose
 **未做的验证**：没有真机/模拟器跑过。APK 能构建、dex 里能查到新类，
 但「点进去能用」需要装一次才能确认。
 
-### P4：需求文档里的「8 种场景 / Power Bundles」
+### P4 ✅ 确认不实现（现有机制已覆盖）
 
 现有 `SkillRegistry.match()` 的触发词 + 语义路由 + `find_tools` 按需激活已经覆盖
 这个需求。**不建议再加一层 SceneDetector**。如果确实需要「场景」概念做 UI 展示，
