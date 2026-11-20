@@ -42,6 +42,7 @@
 | [ACP 集成](./acp.md) | 外部 Coding Agent 委派协议、Claude Code / OpenCode / Codex 接入、多轮会话、sub_steps 解析 |
 | [ACP Server](./acp-server.md) | Ethan 作为 ACP runtime 被拉起（`ethan acp`）：协议映射、Multica 接入、consent 桥接、渠道差异 |
 | [安装指南](./installation.md) | pip / Docker / 源码 / 桌面端（macOS + Windows）四种安装方式 |
+| [发版流程](./release.md) | 版本号来源、tag 触发、四条发布流水线、**踩过的 5 个坑**、客户端更新检测 |
 | [Computer Use Bridge](./computer-use-bridge.md) | Docker 容器内 ethan 操控宿主机桌面（cua-bridge TCP→UDS 桥） |
 | [浏览器控制 · 总览与架构](./browser/overview.md) | 调用链总览、三段链路职责、端到端时序、代码地图 |
 | [浏览器控制 · 传输层与协议](./browser/transport-protocol.md) | WebSocket 选型、JSON-RPC 信封、method/error 表、req-id 配对、超时/断连、last-wins |
