@@ -135,6 +135,15 @@ class OpenAICompatProvider(BaseProvider):
     def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None,
                  vision: Optional[bool] = None):
         from openai import AsyncOpenAI  # lazy: SDK is heavy; only load when a provider instance is created
+
+        from ethan.core.context import get_session_id
+
+        # 透传当前 Ethan 会话 ID，供下游网关（如 buddy-proxy）按会话轮转账号并保持前缀缓存。
+        async def _inject_session_header(request: httpx.Request) -> None:
+            sid = get_session_id()
+            if sid and "x-session-id" not in request.headers:
+                request.headers["x-session-id"] = sid
+
         # 必须显式关闭 trust_env，否则 httpx 会读取环境变量里的 all_proxy/HTTPS_PROXY。
         # 用户机器上常见 `all_proxy=socks5://127.0.0.1:7890`（走本地代理），而 httpx 的
         # SOCKS 支持需要可选的 socksio 包 —— 没装时 httpx 在**构造 client 时**直接抛
@@ -146,6 +155,7 @@ class OpenAICompatProvider(BaseProvider):
             proxy=proxy if proxy else None,
             trust_env=False,
             timeout=httpx.Timeout(120.0, connect=10.0),
+            event_hooks={"request": [_inject_session_header]},
         )
         self._client = AsyncOpenAI(
             api_key=provider_cfg.api_key or "none",

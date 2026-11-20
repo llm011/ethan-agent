@@ -128,12 +128,13 @@ class ACPSession:
     async def _make_agent(self):
         from ethan.core.agent_factory import create_agent
         from ethan.core.consent import set_consent_provider
-        from ethan.core.context import set_working_dir
+        from ethan.core.context import set_session_id, set_working_dir
 
         # ACP 的 cwd 是 runtime 契约：Multica 给每个任务分配独立工作目录。
         # ContextVar 让文件/搜索/shell 工具的相对路径按 session 隔离解析；同时把
         # cwd 放进 system runtime_context，避免模型继续把 ~/.ethan 当任务 workspace。
         set_working_dir(self.cwd)
+        set_session_id(self.session_id)
         agent = create_agent(channel="acp")
         agent.session_id = self.session_id
         agent.runtime_context = (
