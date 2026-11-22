@@ -511,6 +511,16 @@ async def _midnight_loop() -> None:
                 finally:
                     ETHAN_USER_ID.reset(token)
             logger.info("[Heartbeat] Midnight consolidation done, stored %d new memories across all users", total_added)
+
+            # 每周体检 system/*.md 体积（内部按 7 天节流，每天进来只做事一次）。
+            # 只报告不动手 —— 自动归档会误伤「标题像日志、内容是活规则」的章节，
+            # 详见 system_files_check 的模块 docstring。
+            try:
+                from ethan.core.services.system_files_check import check_system_files
+
+                check_system_files()
+            except Exception:
+                logger.debug("[Heartbeat] system files check failed", exc_info=True)
         except asyncio.CancelledError:
             raise
         except Exception:
