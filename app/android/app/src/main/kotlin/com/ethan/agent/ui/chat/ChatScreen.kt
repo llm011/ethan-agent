@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.AlertDialog
@@ -200,6 +201,7 @@ fun ChatScreen(
     var showAutoConsentConfirm by remember { mutableStateOf(false) }
     // 阅读模式（双击气泡进入）：非空时全屏覆盖在聊天页之上
     var readingMessage by remember { mutableStateOf<UiMessage?>(null) }
+    var shareDefaultIndex by remember { mutableStateOf<Int?>(null) }
     // 全屏编辑模式（对齐 Web 的「展开为 Markdown 编辑器」）：长文本写作时输入框
     // 只有 5 行上限，展开后占满全屏（Dialog usePlatformDefaultWidth=false）
     var showFullEditor by remember { mutableStateOf(false) }
@@ -638,6 +640,20 @@ fun ChatScreen(
                         Icon(
                             Icons.Default.Link,
                             contentDescription = "复制会话链接",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                if (state.messages.any { !it.isStreaming && (it.content.isNotBlank() || it.cards.isNotEmpty()) }) {
+                    IconButton(onClick = {
+                        val lastIdx = state.messages.indexOfLast {
+                            !it.isStreaming && (it.content.isNotBlank() || it.cards.isNotEmpty())
+                        }
+                        if (lastIdx >= 0) shareDefaultIndex = lastIdx
+                    }) {
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = "分享对话",
                             tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
@@ -1296,6 +1312,9 @@ fun ChatScreen(
     BackHandler(enabled = readingMessage != null) {
         readingMessage = null
     }
+    BackHandler(enabled = shareDefaultIndex != null) {
+        shareDefaultIndex = null
+    }
     // 全屏编辑模式：Dialog 占满全屏（usePlatformDefaultWidth=false），顶部 关闭/标题/发送，
     // 正文多行输入吃满剩余空间。返回键由 Dialog 自身的 onDismissRequest 处理（收起而非退出会话）。
     if (showFullEditor) {
@@ -1371,6 +1390,13 @@ fun ChatScreen(
 
     readingMessage?.let { msg ->
         ReadingModeScreen(message = msg, onClose = { readingMessage = null })
+    }
+    shareDefaultIndex?.let { idx ->
+        ShareModeScreen(
+            messages = state.messages,
+            defaultSelectedIndex = idx,
+            onClose = { shareDefaultIndex = null },
+        )
     }
 
     // 超级权限二次确认：只在关→开时弹一次。取消则不改状态（保持关闭）。

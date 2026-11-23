@@ -14,6 +14,7 @@ import '../role_palette.dart';
 import '../services/api_service.dart';
 import '../widgets/common.dart';
 import 'session_media_screens.dart';
+import 'share_mode_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen(
@@ -884,6 +885,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           const SnackBar(content: Text('已复制会话链接')));
                     },
                     icon: const Icon(Icons.link_rounded)),
+              if (messages.any((m) =>
+                  !m.isStreaming &&
+                  (m.text.trim().isNotEmpty || m.cards.isNotEmpty)))
+                IconButton(
+                    tooltip: '分享对话',
+                    onPressed: () {
+                      final lastIdx = messages.lastIndexWhere((m) =>
+                          !m.isStreaming &&
+                          (m.text.trim().isNotEmpty || m.cards.isNotEmpty));
+                      if (lastIdx < 0) return;
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ShareModeScreen(
+                            messages: messages,
+                            defaultSelectedIndex: lastIdx,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.share_rounded)),
               PopupMenuButton<String>(
                   onSelected: (v) {
                     if (v == 'model') _pickModel();
