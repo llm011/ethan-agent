@@ -229,7 +229,9 @@ export async function consumeStream(
       //   1. 把占位气泡的 `liveId` 盖到那条旁路消息上 → 两条兄弟节点 **同 key**
       //      （React 折叠/重复渲染，正是本 PR 要修的现象）；
       //   2. 本流已累积的正文被写进旁路消息，真正的占位气泡则永远停在旧内容上。
-      const idx = next.findIndex(m => m.role === "assistant" && m.id === liveId);
+      const idx = next.findIndex(
+        m => m.role === "assistant" && (m.id === liveId || (messageId != null && m.id === messageId)),
+      );
       if (idx >= 0) {
         next[idx] = buildMsg(extra);
         return next;
@@ -696,7 +698,9 @@ export async function consumeStream(
     // 与 flushAssistant 同理：只能按 **id** 定位本次流自己的那条气泡。
     // `chunk.new_message` 会在末尾追加旁路消息，若这里仍按「末位」定稿，就会把
     // 主流的正文 / 真实 message_id 写到旁路消息上，真正的占位气泡则永远停在空内容上。
-    const idx = msgs.findIndex(m => m.role === "assistant" && m.id === liveId);
+    const idx = msgs.findIndex(
+      m => m.role === "assistant" && (m.id === liveId || (messageId != null && m.id === messageId)),
+    );
     if (idx >= 0) {
       const last = msgs[idx];
       const settledId = messageId ?? last.id ?? liveId;
