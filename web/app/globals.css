@@ -228,9 +228,13 @@
   }
   body {
     @apply bg-background text-foreground;
+    overscroll-behavior: none;
+    overflow: hidden;
   }
   html {
     @apply font-sans;
+    overscroll-behavior: none;
+    overflow: hidden;
   }
   button:not([disabled]) {
     @apply cursor-pointer;
