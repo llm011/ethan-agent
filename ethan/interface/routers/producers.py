@@ -356,6 +356,13 @@ async def _run_generation(
     # id 记在 progress_msg_id；每完成一个工具就 UPDATE 这条（覆盖式更新 tool_steps），
     # 流结束后把同一条更新为最终内容（content/usage/a2ui），避免「占位行 + 最终行」重复两条。
     progress_msg_id: int | None = None
+    from ethan.providers.openai_compat import set_retry_status_hook
+    def _on_retry_status(msg: str | None) -> None:
+        if msg:
+            run.emit({"bg_polling": True, "polling_message": msg})
+        else:
+            run.emit({"bg_polling": False})
+    _retry_hook_token = set_retry_status_hook(_on_retry_status)
     try:
         async for item in runner.stream_chat(messages):
             if isinstance(item, ConsentEvent):

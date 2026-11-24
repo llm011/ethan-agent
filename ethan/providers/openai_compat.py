@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Optional
+from contextvars import ContextVar
+from typing import Any, AsyncIterator, Callable, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -58,8 +59,33 @@ _MAX_STREAM_BREAK_RETRIES = 2
 # 建连/发请求阶段（create() 调用）对瞬态连接类错误的最大重试次数。
 # SDK 内部重试已禁用（max_retries=0，见 __init__ 注释），重试上移到应用层：
 # 可观测（有日志）、有界（最坏 ~1.6s 退避）、只对连接类错误生效。
-_MAX_CONNECT_RETRIES = 2
-_CONNECT_RETRY_BACKOFF = 0.8  # 秒，按 attempt 线性退避
+_MAX_CONNECT_RETRIES = 6
+_CONNECT_RETRY_BACKOFFS = (2, 10, 30, 60, 180, 300)  # 秒：2s, 10s, 30s, 60s, 3min, 5min
+_RETRY_STATUS_HOOK: ContextVar[Optional[Callable[[Optional[str]], None]]] = ContextVar(
+    "ethan_retry_status_hook", default=None
+)
+
+
+def set_retry_status_hook(hook: Optional[Callable[[Optional[str]], None]]):
+    return _RETRY_STATUS_HOOK.set(hook)
+
+
+def reset_retry_status_hook(token) -> None:
+    _RETRY_STATUS_HOOK.reset(token)
+
+
+async def _sleep_with_countdown(wait_s: float, attempt: int, max_attempts: int, label: str) -> None:
+    hook = _RETRY_STATUS_HOOK.get()
+    total_s = max(1, int(round(wait_s)))
+    if hook is None:
+        await asyncio.sleep(wait_s)
+        return
+    try:
+        for rem in range(total_s, 0, -1):
+            hook(f"⏳ {label}，{rem}s 后第 {attempt}/{max_attempts} 次重试…")
+            await asyncio.sleep(1)
+    finally:
+        hook(None)
 # 首请求超时（APITimeoutError）的最大重试次数。与连接类错误的 2 次区分：
 # 超时单次要等满 120s 客户端超时，重试多了就是分钟级挂起——但只重试 1 次
 # 最坏 2×120s≈4 分钟，能接住「上游偶发 120s 内不吐首字节」的瞬态抖动
@@ -223,11 +249,12 @@ class OpenAICompatProvider(BaseProvider):
                         continue
                 elif connect_retries < _MAX_CONNECT_RETRIES and _is_transient_connect_error(e):
                     connect_retries += 1
+                    wait_s = _CONNECT_RETRY_BACKOFFS[min(connect_retries - 1, len(_CONNECT_RETRY_BACKOFFS) - 1)]
                     _lg.warning(
-                        "[stream_chat] connect error with no output, retry %d/%d: %s",
-                        connect_retries, _MAX_CONNECT_RETRIES, e,
+                        "[stream_chat] connect error with no output, retry %d/%d in %ds: %s",
+                        connect_retries, _MAX_CONNECT_RETRIES, wait_s, e,
                     )
-                    await asyncio.sleep(_CONNECT_RETRY_BACKOFF * connect_retries)
+                    await _sleep_with_countdown(wait_s, connect_retries, _MAX_CONNECT_RETRIES, "上游连接异常")
                     continue
                 if dump_request_on_fail:
                     _lg.error("[stream_chat] API error: %s", e)
