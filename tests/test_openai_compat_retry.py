@@ -186,7 +186,8 @@ def test_retry_then_success():
     assert provider._client.chat.completions.create.await_count == 2
 
 
-def test_retries_exhausted_raises():
+def test_retries_exhausted_raises(monkeypatch):
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
     provider = _make_provider()
 
     provider._client.chat.completions.create = AsyncMock(
@@ -196,8 +197,8 @@ def test_retries_exhausted_raises():
     kwargs = {"model": "test-model", "messages": [{"role": "user", "content": "hi"}]}
     with pytest.raises(ConnectionError):
         asyncio.run(provider._create_stream_with_retry(kwargs))
-    # 初始 + _MAX_CONNECT_RETRIES 次重试
-    assert provider._client.chat.completions.create.await_count == 1 + 2
+    # 初始 + _MAX_CONNECT_RETRIES(6) 次重试
+    assert provider._client.chat.completions.create.await_count == 1 + 6
 
 
 def test_real_api_connection_error_retried():

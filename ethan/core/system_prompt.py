@@ -235,8 +235,9 @@ def build_previous_run_summary(messages: list[Message]) -> str | None:
         preview = (step.get("result_preview") or "").strip()
         if preview:
             preview = preview.replace("\n", " ")
-            if len(preview) > 60:
-                preview = preview[:57] + "…"
+            limit = 250 if (state == "error" or idx >= len(steps) - 1) else 100
+            if len(preview) > limit:
+                preview = preview[: limit - 1] + "…"
             parts.append(f" → {preview}")
         lines.append(" ".join(parts))
     if not lines:
