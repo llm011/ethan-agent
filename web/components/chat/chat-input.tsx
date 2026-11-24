@@ -114,6 +114,12 @@ export function ChatInput({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalDraft]);
 
+  useEffect(() => {
+    if (sessionId == null) {
+      inputRef.current?.focus();
+    }
+  }, [sessionId, inputRef]);
+
   const readImageFile = (file: File): PendingFile => ({
     name: file.name,
     path: "",

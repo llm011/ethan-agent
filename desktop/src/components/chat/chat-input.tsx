@@ -119,6 +119,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   useImperativeHandle(ref, () => ({
     restoreInput: (text: string) => setInput(text),
   }), [setInput]);
+
+  useEffect(() => {
+    if (sessionId == null) {
+      inputRef.current?.focus();
+    }
+  }, [sessionId, inputRef]);
   const [dragging, setDragging] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
