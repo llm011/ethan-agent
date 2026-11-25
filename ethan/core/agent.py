@@ -244,6 +244,9 @@ class Agent:
         self.is_owner: bool = True
         # 当前会话 ID（由路由层设置），用于 web_fetch 结果存文件的目录隔离
         self.session_id: str = ""
+        # 运行检查点（条目 6）：每轮工具执行后更新的结构化运行快照。中断/超时时由
+        # 路由层写入 messages.run_checkpoint，续跑时读回注入，避免从零重新推理。
+        self._run_checkpoint: dict = {}
         self._load_system_files()
 
     @property
@@ -2050,6 +2053,18 @@ class Agent:
             enforce_context_budget(working, self.session_id)  # 新 tool result 进上下文前管控体积，防撑爆
             compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
             monitor.record(tool_calls, had_error)
+            # 更新运行检查点（条目 6）：记录本轮进度，中断/超时时由路由层落库，
+            # 续跑读回即可知道「跑到第几轮、最后在做什么、哪些失败了」。
+            self._run_checkpoint = {
+                "iter": i + 1,
+                "max_iters": max_iters,
+                "last_tools": [tc.name for tc in tool_calls],
+                "last_had_error": had_error,
+                "tool_names": list(monitor._tool_names[-8:]),
+                "signatures": list(monitor._signatures[-4:]),
+                "reflections_used": monitor.reflections_used,
+                "updated_at": time.time(),
+            }
             # 单次工具失败 → 下一轮 system 附针对性提醒（不等连续失败才补偿，条目 5）。
             if had_error:
                 _err_result = results[-1].content if results else ""
