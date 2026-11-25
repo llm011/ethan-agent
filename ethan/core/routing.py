@@ -168,9 +168,9 @@ def classify_instant(text: str) -> InstantResult | None:
 
 
 def _match_keyword(kw: str, text: str) -> bool:
-    """关键词匹配，支持通配符 *。"""
+    """Literal substring matching with only * interpreted as a wildcard."""
     if "*" in kw:
-        pattern = re.compile(kw.replace("*", ".*"))
+        pattern = re.compile(re.escape(kw).replace(r"\*", ".*"))
         return bool(pattern.search(text))
     return kw in text
 
