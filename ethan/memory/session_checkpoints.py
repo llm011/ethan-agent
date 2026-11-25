@@ -27,6 +27,62 @@ class SessionCheckpointsMixin(SessionWireMixin):
         await asyncio.to_thread(persist)
 
 
+    async def save_schedule_message(self, session_id: str, message, progress_id: int | None,
+                                    job_id: str, user_id: str) -> int:
+        """Commit assistant message and exact schedule attribution together."""
+        import aiosqlite
+
+        from ethan.memory.session import SessionStore
+
+        class TransactionConnection:
+            def __init__(self, connection):
+                self.connection = connection
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+            async def commit(self):
+                pass  # existing message helpers cannot commit this transaction
+
+        async with aiosqlite.connect(str(self._db_path), timeout=30) as connection:
+            await connection.execute("PRAGMA foreign_keys=ON")
+            await connection.execute("BEGIN IMMEDIATE")
+            isolated = SessionStore(self._db_path, _singleton=True)
+            isolated._db = TransactionConnection(connection)
+            isolated._transaction_owned = True
+            try:
+                if progress_id is None:
+                    row_id = await isolated.save_message(session_id, message)
+                else:
+                    await isolated.update_message(progress_id, session_id, message)
+                    row_id = progress_id
+                await connection.execute(
+                    "CREATE TABLE IF NOT EXISTS schedule_message_attribution ("
+                    "message_id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, "
+                    "job_id TEXT NOT NULL, user_id TEXT NOT NULL, "
+                    "FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE, "
+                    "FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE)"
+                )
+                cursor = await connection.execute(
+                    "SELECT session_id,job_id,user_id FROM schedule_message_attribution WHERE message_id=?", (row_id,)
+                )
+                existing = await cursor.fetchone()
+                await cursor.close()
+                if existing and tuple(existing) != (session_id, job_id, user_id):
+                    raise ValueError("Schedule message attribution is immutable")
+                await connection.execute(
+                    "INSERT OR IGNORE INTO schedule_message_attribution(message_id,session_id,job_id,user_id) VALUES(?,?,?,?)",
+                    (row_id, session_id, job_id, user_id),
+                )
+                await connection.execute("CREATE INDEX IF NOT EXISTS idx_schedule_cost_job ON schedule_message_attribution(user_id,job_id)")
+                import time
+                await connection.execute("UPDATE sessions SET updated_at=? WHERE id=?", (time.time(), session_id))
+                await connection.commit()
+                from ethan.core.checkpoint_lifecycle import consume_final_message
+                consume_final_message(self._db_path, session_id, row_id)
+                return row_id
+            except BaseException:
+                await connection.rollback()
+                raise
+
     async def load_wire_transcripts(self, session_id: str) -> dict[int, list]:
         from ethan.core.run_checkpoint import complete_wire, restore_wire
         async with self._db.execute(

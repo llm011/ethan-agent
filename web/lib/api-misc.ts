@@ -7,6 +7,18 @@ import type { SessionInfo } from "./api-sessions";
 
 export type ScheduleCategory = "one_off" | "recurring" | "timeline";
 
+export interface ScheduleCost {
+  window_days: number;
+  run_count: number;
+  input_tokens: number;
+  cache_tokens: number;
+  cache_hit_rate: number | null; // percentage, not fraction
+  average_steps: number | null;
+  usage_run_count: number;
+  attribution: "message";
+  unattributed_runs: number; // profile-wide; never assigned by title/session
+}
+
 export interface ScheduleJob {
   id: string;
   name: string;
@@ -15,6 +27,7 @@ export interface ScheduleJob {
   status: "paused" | "active";
   prompt: string;
   session_id: string;
+  cost?: ScheduleCost | null;
   category: ScheduleCategory;
   source_timeline?: string;
   source_phase?: string;

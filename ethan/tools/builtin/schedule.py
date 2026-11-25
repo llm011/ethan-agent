@@ -241,6 +241,8 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
 
         try:
             from ethan.core.config import get_config as _gc
+            from ethan.core.context import set_user_id
+            set_user_id(user_id)
 
             store = await _open_store()
             set_session_id(session_id)
@@ -377,11 +379,8 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                     total_ms=collector.total_ms,
                     model=agent._provider.model,
                 )
-                if progress_msg_id:
-                    await store.update_message(progress_msg_id, session_id, asst_msg)
-                else:
-                    await store.save_message(session_id, asst_msg)
-                await store.touch(session_id)
+                from ethan.scheduler.cost import save_attributed_message
+                await save_attributed_message(store, session_id, asst_msg, progress_msg_id, job_id, user_id)
 
             # 触发记忆沉淀：仅在 server loop 上 fire（_maybe_consolidate 内部用单例
             # store，fallback 临时 loop 上单例连接绑主 loop 会崩；且 asyncio.run()
@@ -406,14 +405,12 @@ def fire_schedule_job(session_id: str, prompt: str, channel: str = "web", channe
                 err_msg = Message(
                     role="assistant",
                     content=err_content,
+                    usage=collector.usage_dict if collector else None,
                     tool_steps=collector.tool_steps if collector else [],
                     model=agent._provider.model if agent else None,
                 )
-                if progress_msg_id:
-                    await err_store.update_message(progress_msg_id, session_id, err_msg)
-                else:
-                    await err_store.save_message(session_id, err_msg)
-                await err_store.touch(session_id)
+                from ethan.scheduler.cost import save_attributed_message
+                await save_attributed_message(err_store, session_id, err_msg, progress_msg_id, job_id, user_id)
             except Exception as e2:
                 _logger.error("Failed to log schedule error to session: %s", e2)
         finally:
