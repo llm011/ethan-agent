@@ -194,10 +194,21 @@ result_compressor.maybe_compress(tool_name, result)
 
 | 模块 | 职责 |
 |------|------|
-| `core/agent.py` | `Agent` 类：路由、循环控制、provider 兜底重试、工具执行编排 |
+| `core/agent.py` | 兼容门面：Agent 公共接口、路由、prompt/provider 辅助与旧 re-export |
+| `core/agent_loop.py` | 唯一七步编排：注入、生成、响应判定、工具、监控、补偿、预算 |
+| `core/agent_loop_state.py` | 单次请求状态、决策与动态注入 |
+| `core/agent_generation.py` | Chat/StreamTransport：生成、重试、首字和流事件政策 |
+| `core/agent_tool_phase.py` | StreamToolPhase：授权、特殊交互、工具事件与执行 |
 | `core/reply_quality.py` | 错误归类（图片 400 / 可重试连接错误）、空回复兜底文案、退化回复判定、合成 user 消息前缀识别、图片剥离重试 |
 | `core/loop_control.py` | `LoopMonitor`（卡住检测）、反思/决策/失败提醒文案、收尾指令 |
 | `core/stream_collector.py` | 统一流消费器：tool_steps 计时、正文/reasoning 累积、已输出去重 |
 
-拆分的边界是「不依赖 `self` 状态」：`reply_quality` 的函数都是纯函数，可以直接单测；循环控制流仍留在 `Agent` 内，因为它的状态（`monitor` / `pending_suffix` / 各类 `_xxx_retried` 标志）在单次调用内紧密耦合。
+循环控制流已从 Agent 提取为 request-owned `LoopState`，公共方法仍分别选择传输政策，
+不是 `chat → stream_chat + join`。Chat 返回最后的原始 Message、保留其 usage/reasoning/images，
+无新增 instant 分支；Stream 保留工具授权、等待交互、主 provider 辅助收尾和有界网络重试。
+历史差异不在结构 PR 中偷改。兼容门面保留 module monkeypatch seam、`Agent.__new__` 和旧引用路径。
+
+六个核心/测试文件分别为 530/230/112/180/293/319 行，均 ≤700。
+先在旧实现跑 17 项 characterization，再将同一公开行为套件扩到 24 项，旧、新两边均通过；
+纯重构相关 168 项回归通过。此 PR 不包含持久检查点、wire 历史恢复、首轮记忆或分级路由功能。
 

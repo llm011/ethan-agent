@@ -55,6 +55,11 @@ docker compose up -d
 
 ---
 
+## 原生循环结构
+
+`Agent.chat` 与 `stream_chat` 共用七步编排，生成/工具执行保留各自传输政策；
+不通过公开流式接口拼接替代 chat。循环核心各文件均 ≤700 行，详见 [Agent Loop](docs/agent-loop.md)。
+
 ## 🧠 多内核
 
 内核决定「由谁执行这一轮对话」。原生内核用 Ethan 的全部能力；外部内核把执行权
