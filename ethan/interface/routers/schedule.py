@@ -74,11 +74,19 @@ def _infer_category(job) -> str:
     return "recurring"
 
 
-@router.get("", dependencies=[Depends(verify_token)])
-async def get_schedules():
+@router.get("")
+async def get_schedules(user_id: str = Depends(verify_token)):
     scheduler = get_scheduler()
     from ethan.scheduler.cron import AGENDA_JOB_PREFIX
-    jobs = [j for j in scheduler._scheduler.get_jobs() if not j.id.startswith(AGENDA_JOB_PREFIX)]
+    jobs = [j for j in scheduler._scheduler.get_jobs()
+            if not j.id.startswith(AGENDA_JOB_PREFIX)
+            and (j.kwargs or {}).get("user_id", "") == user_id]
+    from ethan.scheduler.cost import get_costs
+    try:
+        costs = await get_costs([j.id for j in jobs], user_id)
+    except Exception:
+        logger.warning("Schedule costs unavailable", exc_info=False)
+        costs = {}
     result = []
     for job in jobs:
         kwargs = job.kwargs or {}
@@ -97,6 +105,7 @@ async def get_schedules():
             "source_phase": kwargs.get("source_phase", ""),
             "scene": kwargs.get("scene", "work"),
             "cron": kwargs.get("cron", ""),
+            "cost": costs.get(job.id),
         })
     return {"jobs": result}
 

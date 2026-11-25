@@ -27,6 +27,7 @@ import {
 import { Input } from "@ethan/shared/ui/input";
 import { Textarea } from "@ethan/shared/ui/textarea";
 import { MdEditor } from "@ethan/shared/components/md-editor";
+import { ScheduleCostSummary } from "./schedule-cost-summary";
 
 // all 模式截断展示的时间窗：今天 + 未来 2 天；更远期的折叠进「还有 N 个…点击展开」
 const ALL_VIEW_FUTURE_DAYS = 2;
@@ -575,6 +576,7 @@ export function ScheduleView() {
                         <Clock className="h-3 w-3" />
                         <span className="truncate">{formatTrigger(job.trigger)}</span>
                       </div>
+                      <ScheduleCostSummary cost={job.cost} />
                     </div>
                   </CardContent>
                   <CardFooter className="pt-2 pb-3 flex justify-end gap-1 border-t border-border/30 mt-auto">
@@ -718,6 +720,7 @@ export function ScheduleView() {
                                   onClick={() => openEditPrompt(job)}
                                   title="点击编辑内容"
                                 >{job.prompt}</p>
+                                <ScheduleCostSummary cost={job.cost} />
                               </div>
                             </div>
                           </div>
