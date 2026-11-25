@@ -308,14 +308,33 @@ class OpenAICompatProvider(BaseProvider):
     _REASONING_MODEL_PATTERNS = ("deepseek-r1", "deepseek-reasoner")
 
     def _wants_reasoning(self) -> bool:
-        """当前模型是否走 reasoning 协议（序列化历史 reasoning_content + 注入顶层 thinking）。
+        """当前模型是否**主动声明**走 reasoning 协议（注入顶层 thinking extra_body）。
 
         只看模型名，不看历史：会话中途从 reasoning 模型切到普通模型（如 gpt-4o）时，
-        历史里存的 reasoning 不再发给新端点——严格校验的 API 收到额外字段会 400
+        不该再给新端点发 thinking 字段——严格校验的 API 收到额外字段会 400
         (Extra inputs are not permitted)，与 _skip_thinking_field 是同族防护。
+
+        注意：这只控制「主动开启 thinking」。历史 reasoning_content 的**回传**走
+        `_history_carries_reasoning()`——后者是证据驱动的，能覆盖模型名表里没有、
+        但实际返回了 reasoning_content 的新模型（如 deepseek-v4.1-flash）。
         """
         model = (self._model or "").lower()
         return any(k in model for k in self._REASONING_MODEL_PATTERNS)
+
+    @staticmethod
+    def _history_carries_reasoning(messages: list) -> bool:
+        """历史里最近一条 assistant 消息是否携带了 reasoning_content。
+
+        证据驱动：只要上一轮 API 返回过 reasoning_content，下一轮带 tools 的请求
+        就必须原样回传，否则 400「The reasoning_content in the thinking mode must
+        be passed back to the API」。看「最近一条 assistant」而非全部历史：
+        会话切到普通模型后，最近一条是普通模型生成的（无 reasoning）→ 不回传，
+        避免污染新端点；同模型续跑时最近一条带 reasoning → 回传整条历史。
+        """
+        for m in reversed(messages):
+            if getattr(m, "role", None) == "assistant":
+                return bool(getattr(m, "reasoning", None))
+        return False
 
     def _supports_vision(self) -> bool:
         """当前模型是否支持图像输入（content 中可含 image_url blocks）。
@@ -366,7 +385,10 @@ class OpenAICompatProvider(BaseProvider):
         disable_thinking: bool = False,
     ) -> Message:
         reasoning = self._wants_reasoning()
-        oai_messages = self._to_openai_messages(messages, include_reasoning=reasoning)
+        # 历史 reasoning_content 回传：模型名匹配 OR 最近一条 assistant 带 reasoning
+        # （证据驱动，覆盖 deepseek-v4.1-flash 等模型名表之外的 reasoning 模型）。
+        include_reasoning = reasoning or self._history_carries_reasoning(messages)
+        oai_messages = self._to_openai_messages(messages, include_reasoning=include_reasoning)
         if system:
             oai_messages.insert(0, {"role": "system", "content": system})
 
@@ -397,7 +419,9 @@ class OpenAICompatProvider(BaseProvider):
         system: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         reasoning = self._wants_reasoning()
-        oai_messages = self._to_openai_messages(messages, include_reasoning=reasoning)
+        # 历史 reasoning_content 回传：模型名匹配 OR 最近一条 assistant 带 reasoning。
+        include_reasoning = reasoning or self._history_carries_reasoning(messages)
+        oai_messages = self._to_openai_messages(messages, include_reasoning=include_reasoning)
         if system:
             oai_messages.insert(0, {"role": "system", "content": system})
 

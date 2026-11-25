@@ -371,7 +371,13 @@ GROUP BY 1 ORDER BY 2 DESC;
     前缀更稳定，见条目 1）。
 - [ ] 条目 3 定时任务成本报表 — 未开始（可选）。本次先做条目 1+2；报表涉及双端前端（Web + Desktop），
   工作量较大，待条目 1 线上复测数据出来后再排期。
-- [ ] 条目 4 `reasoning_content` 回传 — 未开始
+- [x] 条目 4 `reasoning_content` 回传 — 已实现（2026-11-25，工作区 `ethan-ai-reasoning`，分支 `feature/reasoning-backprop`）。
+  修复三处：
+  - 流式 `_pump`（agent.py）累积 reasoning 到 `round_reasoning`，回填 assistant Message 时带上（此前只转 ThinkingEvent 往外吐、不累积，回填消息丢 reasoning）。
+  - 非流式 `parse_choice`（`_responses.py`）读取 `message.reasoning_content` 挂到 Message（此前根本没读，Message.reasoning 总为 None）。
+  - 协议判定新增证据驱动 `_history_carries_reasoning()`：最近一条 assistant 带 reasoning 即回传历史，不再只靠模型名匹配 `_wants_reasoning()`——覆盖 `deepseek-v4.1-flash` 等模型名表之外的 reasoning 模型。切到普通模型后最近一条无 reasoning → 不回传，避免污染新端点。
+  验收：`tests/test_reasoning_backprop.py` 覆盖 parse_choice 挂 reasoning、证据驱动判定、序列化回传、以及「缺回传即抛 DeepSeek 400」的假客户端回归（禁用修复后该测试红，证明能抓 bug）。`ruff` 通过。
+  - ⏳ 经网关对 `deepseek-v4.1-flash` 跑一次两步工具调用不报 400 的线上验证待部署后补。
 - [ ] 条目 5 状态补偿 + 去重 — 未开始
 - [ ] 条目 6 运行检查点 — 未开始
 - [ ] 条目 7 循环拆分 — 未开始

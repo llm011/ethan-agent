@@ -75,9 +75,16 @@ def parse_choice(choice, usage=None) -> Message:
     if usage:
         usage_dict = parse_usage(usage)
 
+    # reasoning_content（思考过程）：DeepSeek reasoning 模型 / 兼容 thinking 的中转
+    # 会在非流式响应的 message.reasoning_content 里返回。必须原样挂到 Message 上，
+    # 下一轮请求回传——否则带 tools 的 thinking 模式请求会 400：
+    # 「The reasoning_content in the thinking mode must be passed back to the API.」
+    reasoning = getattr(msg, "reasoning_content", None) or None
+
     return Message(
         role="assistant",
         content=content_text,
         tool_calls=tool_calls,
         usage=usage_dict,
+        reasoning=reasoning,
     )
