@@ -32,6 +32,11 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 Web/Desktop 定时任务支持近 7 天成本报表，展示真实输入与缓存 token、最终运行次数及平均工具步数；按消息精确归因，无法归因的历史明确提示。见 [成本报表](docs/schedule-cost.md)。
 
+## 安全事件与心跳检查
+
+外部事件默认关闭；显式启用并配置专用 HMAC 后支持 GitHub push/CI 与受限告警，仅生成无工具人工复核摘要。
+可选本地变化检查跳过无变化心跳；未配置时保留原周期任务。见 [事件触发](docs/event-triggers.md)。
+
 ## 特性
 
 **多内核**
