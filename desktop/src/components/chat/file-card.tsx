@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type SyntheticEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { AudioLines, FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Eye, RotateCw, Video } from "lucide-react";
+import { AudioLines, FileText, FileSpreadsheet, FileArchive, File as FileIcon, Presentation, Download, ImageIcon, Eye, RotateCw, Video, ZoomIn } from "lucide-react";
 import { getApiUrl, getAuthToken } from "@/lib/api-base";
 import { openUrl } from "@/lib/external-link";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
@@ -13,6 +13,10 @@ export type { FileCard };
 
 // 图片类 kind：交付后渲染缩略图，点击开 Lightbox 放大（不走下载）
 const IMAGE_KINDS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]);
+
+export function isImageFileCard(card: FileCard): boolean {
+  return IMAGE_KINDS.has((card.kind || "").toLowerCase());
+}
 
 const KIND_ICON: Record<string, typeof FileIcon> = {
   pptx: Presentation,
@@ -60,52 +64,144 @@ async function signedViewUrl(path: string, sid: string): Promise<string> {
   return `${getApiUrl()}/files/view?path=${encodeURIComponent(path)}${sid}${sigQ}`;
 }
 
-// 交付的图片：卡片内渲染缩略图，点击开 Lightbox 全屏放大。
-function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
-  const [url, setUrl] = useState<string>("");
+// 交付的图片网格：
+// - 1 张：单张展示（限制最大宽高并用 object-cover，超长/超宽图不会拉成细条或留大块空白）
+// - 2 张：2 列等宽方图，统一 8px 间隙
+// - 3+ 张：每行 3 张等宽方图，object-cover 填满格面，图与图之间统一 8px 间隙
+// 点击任意图片打开共享 Lightbox，可左右切换全部交付图片。
+export function ImageFileGrid({ cards, sessionId }: { cards: FileCard[]; sessionId?: string | null }) {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [failedPaths, setFailedPaths] = useState<Record<string, boolean>>({});
   const [open, setOpen] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [index, setIndex] = useState(0);
+
+  const pathsKey = cards.map((c) => c.path).join("\0");
 
   useEffect(() => {
     let alive = true;
+    const paths = Array.from(new Set(cards.map((c) => c.path).filter(Boolean)));
+    if (paths.length === 0) return;
     const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
-    void signedViewUrl(card.path, sid)
-      .then((u) => { if (alive) setUrl(u); })
-      // 签名失败不再产生 unhandled rejection：降级为明确失败态 + 下载入口
-      .catch(() => { if (alive) setFailed(true); });
+    void signFileUrl(getApiUrl(), getAuthToken(), paths)
+      .then((sigs) => {
+        if (!alive) return;
+        const next: Record<string, string> = {};
+        const nextFailed: Record<string, boolean> = {};
+        for (const p of paths) {
+          const s = sigs[p];
+          if (!s) {
+            nextFailed[p] = true;
+            continue;
+          }
+          const sigQ = `&user=${encodeURIComponent(s.user)}&sig=${encodeURIComponent(s.sig)}`;
+          next[p] = `${getApiUrl()}/files/view?path=${encodeURIComponent(p)}${sid}${sigQ}`;
+        }
+        setUrls(next);
+        setFailedPaths(nextFailed);
+      })
+      .catch(() => {
+        if (!alive) return;
+        const nextFailed: Record<string, boolean> = {};
+        for (const p of paths) nextFailed[p] = true;
+        setFailedPaths(nextFailed);
+      });
     return () => { alive = false; };
-  }, [card.path, sessionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathsKey, sessionId]);
+
+  if (cards.length === 0) return null;
+
+  const isSingle = cards.length === 1;
+  const gridClass = isSingle
+    ? "not-prose"
+    : cards.length === 2
+      ? "not-prose grid grid-cols-2 gap-2"
+      : "not-prose grid grid-cols-3 gap-2";
+
+  const lightboxImages = cards
+    .map((c) => ({ url: urls[c.path] || "", title: c.title || c.filename }))
+    .filter((item) => item.url);
+
+  const openAt = (cardIndex: number) => {
+    const targetPath = cards[cardIndex]?.path;
+    const targetUrl = targetPath ? urls[targetPath] : "";
+    if (!targetUrl) return;
+    const lbIndex = lightboxImages.findIndex((img) => img.url === targetUrl);
+    setIndex(lbIndex >= 0 ? lbIndex : 0);
+    setOpen(true);
+  };
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => url && setOpen(true)}
-        className="block rounded-lg border border-border/50 overflow-hidden hover:border-border transition-colors cursor-zoom-in max-w-[320px]"
-      >
-        {url ? (
-          <img src={url} alt={card.title || card.filename} className="block max-w-full max-h-[240px] object-contain bg-muted/30" />
-        ) : (
-          <span className="flex flex-col items-center justify-center gap-1 w-[240px] h-[160px] bg-muted/30 text-muted-foreground">
-            <ImageIcon className="w-6 h-6" />
-            {failed && <span className="text-xs text-destructive">图片加载失败</span>}
-          </span>
-        )}
-        <span className="block px-3 py-1.5 text-xs text-muted-foreground truncate border-t border-border/50">
-          {card.title || card.filename}
-          {card.size_kb != null && ` · ${fmtSize(card.size_kb)}`}
-        </span>
-      </button>
-      {url && (
+      <div className={gridClass} data-slot="image-file-grid">
+        {cards.map((card, i) => {
+          const url = urls[card.path];
+          const failed = !!failedPaths[card.path];
+          const label = card.title || card.filename;
+          return (
+            <button
+              key={`${card.path}-${i}`}
+              type="button"
+              title={label}
+              onClick={() => openAt(i)}
+              className={
+                isSingle
+                  ? "group relative block w-fit max-w-full sm:max-w-[360px] rounded-lg border border-border/50 overflow-hidden hover:border-border transition-colors cursor-zoom-in bg-muted/20"
+                  : "group relative block aspect-square w-full rounded-lg border border-border/50 overflow-hidden hover:border-border transition-colors cursor-zoom-in bg-muted/20"
+              }
+            >
+              {url && !failed ? (
+                <>
+                  <img
+                    src={url}
+                    alt={label}
+                    onError={() => setFailedPaths((prev) => ({ ...prev, [card.path]: true }))}
+                    className={
+                      isSingle
+                        ? "my-0 block min-w-[140px] min-h-[120px] max-w-full sm:max-w-[360px] max-h-[280px] w-auto h-auto object-cover"
+                        : "my-0 block w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                    }
+                  />
+                  <span className="pointer-events-none absolute top-1.5 right-1.5 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    <ZoomIn className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="pointer-events-none absolute inset-x-0 bottom-0 px-2 py-1 bg-gradient-to-t from-black/60 to-transparent text-[10px] text-white/95 truncate text-left opacity-0 group-hover:opacity-100 transition-opacity">
+                    {label}
+                    {card.size_kb != null && ` · ${fmtSize(card.size_kb)}`}
+                  </span>
+                </>
+              ) : (
+                <span
+                  className={
+                    isSingle
+                      ? "flex flex-col items-center justify-center gap-1 w-[240px] h-[160px] bg-muted/30 text-muted-foreground"
+                      : "flex flex-col items-center justify-center gap-1 w-full h-full bg-muted/30 text-muted-foreground"
+                  }
+                >
+                  <ImageIcon className="w-6 h-6" />
+                  {failed && <span className="text-xs text-destructive">图片加载失败</span>}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {lightboxImages.length > 0 && (
         <Lightbox
-          images={[{ url, title: card.title || card.filename }]}
-          index={0}
+          images={lightboxImages}
+          index={index}
           open={open}
           onOpenChange={setOpen}
+          onIndexChange={setIndex}
         />
       )}
     </>
   );
+}
+
+// 交付的图片：单张复用网格实现，保持一致裁切与 Lightbox 交互。
+function ImageFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {
+  return <ImageFileGrid cards={[card]} sessionId={sessionId} />;
 }
 
 function VideoFileCard({ card, sessionId }: { card: FileCard; sessionId?: string | null }) {

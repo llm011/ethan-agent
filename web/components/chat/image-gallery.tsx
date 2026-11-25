@@ -46,9 +46,10 @@ function getImageSrc(card: ImageCard): string {
   return card.url;
 }
 
-// 图片横向滚动画廊：点击图片或 hover 的「放大查看」按钮可打开 Lightbox
-// 有 local_path 时走 /api/images/<filename>（后端 serve 本地文件，无防盗链问题），
-// 否则 fallback 到远程 URL（可能 403，卡片上会显示破图但 layout 不乱）。
+// 图片画廊：
+// - 1 张：按自然比例在合理上限内展示（超长/超宽图适度裁切，避免变成细条）
+// - 2 张：2 列等宽方图，均分间隙
+// - 3+ 张：每行 3 张等宽方图，object-cover 填满格面、消除空白，图间保持统一 8px 间隙
 export function ImageGallery({ cards }: ImageGalleryProps) {
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
@@ -59,19 +60,34 @@ export function ImageGallery({ cards }: ImageGalleryProps) {
     source: c.source,
   }));
 
+  const isSingle = cards.length === 1;
+  const gridClass = isSingle
+    ? "not-prose"
+    : cards.length === 2
+      ? "not-prose grid grid-cols-2 gap-2"
+      : "not-prose grid grid-cols-3 gap-2";
+
   return (
     <>
-      <div className="flex gap-2 overflow-x-auto pb-2">
+      <div className={gridClass}>
         {cards.map((card, i) => (
           <div
             key={`${card.url}-${i}`}
-            className="group relative min-w-[160px] w-[160px] h-[120px] rounded-lg overflow-hidden border border-border/50 flex-shrink-0"
+            className={
+              isSingle
+                ? "group relative w-fit max-w-full sm:max-w-[360px] rounded-lg overflow-hidden border border-border/50 bg-muted/20"
+                : "group relative aspect-square w-full rounded-lg overflow-hidden border border-border/50 bg-muted/20"
+            }
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={getImageSrc(card)}
               alt={card.title || ""}
-              className="w-full h-full object-cover cursor-zoom-in"
+              className={
+                isSingle
+                  ? "my-0 block min-w-[140px] min-h-[120px] max-w-full sm:max-w-[360px] max-h-[280px] w-auto h-auto object-cover cursor-zoom-in"
+                  : "my-0 block w-full h-full object-cover cursor-zoom-in transition-transform duration-200 group-hover:scale-[1.03]"
+              }
               onClick={() => {
                 setIndex(i);
                 setOpen(true);
@@ -84,20 +100,20 @@ export function ImageGallery({ cards }: ImageGalleryProps) {
                 setIndex(i);
                 setOpen(true);
               }}
-              className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+              className="absolute top-1.5 right-1.5 p-1 rounded bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity"
               aria-label="放大查看"
             >
               <ZoomIn className="h-3.5 w-3.5" />
             </button>
             {/* 已下载标签 */}
             {card.local_path && (
-              <span className="absolute bottom-1 left-1 px-1 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium">
+              <span className="absolute bottom-1.5 left-1.5 px-1 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium">
                 已下载
               </span>
             )}
             {/* 来源标签 */}
             {card.source && (
-              <span className="absolute bottom-1 right-1 px-1 py-0.5 rounded bg-black/60 text-white text-[9px] truncate max-w-[80px]">
+              <span className="absolute bottom-1.5 right-1.5 px-1 py-0.5 rounded bg-black/60 text-white text-[9px] truncate max-w-[80px]">
                 {card.source}
               </span>
             )}

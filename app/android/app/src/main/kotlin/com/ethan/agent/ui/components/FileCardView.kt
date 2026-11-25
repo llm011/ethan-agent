@@ -8,10 +8,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.BrokenImage
@@ -30,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -48,6 +54,8 @@ import com.ethan.agent.core.model.FileSignatureFreshness
 import kotlinx.coroutines.launch
 
 private val IMAGE_KINDS = setOf("png", "jpg", "jpeg", "gif", "webp", "svg", "bmp")
+
+fun isImageFileCard(card: FileCard): Boolean = IMAGE_KINDS.contains(card.kind.lowercase())
 private val AUDIO_KINDS = setOf("mp3", "m4a", "wav", "ogg", "flac")
 private val VIDEO_KINDS = setOf("mp4", "mov", "avi", "mkv", "webm")
 
@@ -224,6 +232,146 @@ fun FileCardView(
             onNeedFreshUrl = { usableSignature()?.let { signedUrl("view", it) } },
             onDismiss = { playingUrl = null },
         )
+    }
+}
+
+@Composable
+fun ImageFileGrid(
+    cards: List<FileCard>,
+    serverUrl: String,
+    sessionId: String?,
+    signFile: (suspend (String) -> FileSignature?)? = null,
+) {
+    if (cards.isEmpty()) return
+
+    val urls = remember { mutableStateMapOf<String, String>() }
+    val pendingPaths = remember { mutableStateMapOf<String, Boolean>() }
+    val failedPaths = remember { mutableStateMapOf<String, Boolean>() }
+    var lightboxIndex by remember { mutableStateOf<Int?>(null) }
+
+    fun signedViewUrl(path: String, sig: FileSignature): String {
+        val base = "${serverUrl.trimEnd('/')}/api/files/view?path=${Uri.encode(path)}"
+        val sid = if (sessionId != null) "&session_id=${Uri.encode(sessionId)}" else ""
+        return "$base$sid&user=${Uri.encode(sig.user)}&sig=${Uri.encode(sig.sig)}"
+    }
+
+    val pathsKey = remember(cards) { cards.map { it.path }.distinct() }
+    LaunchedEffect(pathsKey, sessionId, signFile) {
+        val signer = signFile
+        if (signer == null) {
+            pathsKey.forEach { failedPaths[it] = true }
+            return@LaunchedEffect
+        }
+        pathsKey.forEach { path ->
+            if (urls.containsKey(path)) return@forEach
+            pendingPaths[path] = true
+            val sig = try {
+                signer(path)
+            } catch (_: Exception) {
+                null
+            }
+            pendingPaths[path] = false
+            if (sig != null) {
+                urls[path] = signedViewUrl(path, sig)
+                failedPaths[path] = false
+            } else {
+                failedPaths[path] = true
+            }
+        }
+    }
+
+    val loadedUrls = cards.mapNotNull { urls[it.path] }
+    fun openLightboxFor(card: FileCard) {
+        val target = urls[card.path] ?: return
+        val idx = loadedUrls.indexOf(target)
+        if (idx >= 0) lightboxIndex = idx
+    }
+
+    val isSingle = cards.size == 1
+    if (isSingle) {
+        val card = cards.first()
+        val viewUrl = urls[card.path]
+        val pending = pendingPaths[card.path] == true
+        Surface(
+            modifier = Modifier
+                .widthIn(min = 120.dp, max = 260.dp)
+                .heightIn(min = 120.dp, max = 240.dp)
+                .clip(MaterialTheme.shapes.small)
+                .clickable(enabled = viewUrl != null) { openLightboxFor(card) },
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+        ) {
+            ImageGridTileContent(card = card, viewUrl = viewUrl, pending = pending)
+        }
+    } else {
+        val columns = if (cards.size == 2) 2 else 3
+        val rows = cards.chunked(columns)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            rows.forEach { rowCards ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (col in 0 until columns) {
+                        val card = rowCards.getOrNull(col)
+                        if (card != null) {
+                            val viewUrl = urls[card.path]
+                            val pending = pendingPaths[card.path] == true
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .clip(MaterialTheme.shapes.small)
+                                    .clickable(enabled = viewUrl != null) { openLightboxFor(card) },
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+                            ) {
+                                ImageGridTileContent(card = card, viewUrl = viewUrl, pending = pending)
+                            }
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val activeIdx = lightboxIndex
+    if (activeIdx != null && loadedUrls.isNotEmpty()) {
+        Lightbox(
+            urls = loadedUrls,
+            initialIndex = activeIdx.coerceIn(0, loadedUrls.lastIndex),
+            onDismiss = { lightboxIndex = null },
+        )
+    }
+}
+
+@Composable
+private fun ImageGridTileContent(card: FileCard, viewUrl: String?, pending: Boolean) {
+    if (viewUrl != null) {
+        AsyncImage(
+            model = viewUrl,
+            contentDescription = card.title ?: card.filename,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+    } else {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (pending) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    Icons.Default.BrokenImage,
+                    contentDescription = "图片加载失败",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 

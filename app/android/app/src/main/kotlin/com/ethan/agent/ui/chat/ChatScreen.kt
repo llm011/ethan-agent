@@ -1804,11 +1804,25 @@ private fun MessageBubble(message: UiMessage, serverUrl: String = "", sessionId:
                             }
                         }
                     }
-                    // 文件卡片
+                    // 文件卡片（图片卡片合并为网格横排，最多每行 3 张，其余文件卡片纵向展示）
                     if (message.cards.isNotEmpty()) {
                         Spacer(Modifier.height(6.dp))
+                        val imageCards = message.cards.filter {
+                            com.ethan.agent.ui.components.isImageFileCard(it)
+                        }
+                        val otherCards = message.cards.filterNot {
+                            com.ethan.agent.ui.components.isImageFileCard(it)
+                        }
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            message.cards.forEach { card ->
+                            if (imageCards.isNotEmpty()) {
+                                com.ethan.agent.ui.components.ImageFileGrid(
+                                    cards = imageCards,
+                                    serverUrl = serverUrl,
+                                    sessionId = sessionId,
+                                    signFile = signFile,
+                                )
+                            }
+                            otherCards.forEach { card ->
                                 com.ethan.agent.ui.components.FileCardView(
                                     card = card,
                                     serverUrl = serverUrl,
