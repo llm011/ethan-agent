@@ -281,6 +281,28 @@ def test_chat_does_not_apply_stream_channel_policy(monkeypatch, mode):
         assert p.requests[1][1][-1].content == "denied by channel policy"
 
 
+def test_chat_empty_finalize_drains_supplement_before_minimal_retry(monkeypatch):
+    inbox = []
+    answer = terminal("answer incorporating supplement")
+    p = ScriptProvider(
+        [Message("assistant", ""), answer],
+        on_call=lambda n: inbox.append("IMPORTANT supplement") if n == 1 else None,
+    )
+    a = wire(monkeypatch, p, max_iters=1)
+
+    def drain():
+        out = inbox[:]
+        inbox.clear()
+        return out
+
+    a.drainer = drain
+    assert run(a, "chat") is answer
+    assert len(p.requests) == 2
+    assert "IMPORTANT supplement" in p.requests[1][1][-1].content
+    assert p.requests[1][3].startswith("SYSTEM")
+    assert a.usage.input_tokens == 3 and a.usage.output_tokens == 2
+
+
 def test_agent_owned_consent_extra_survives_multiple_tools(monkeypatch):
     import ethan.core.consent as consent
     from ethan.core.consent import ConsentResult

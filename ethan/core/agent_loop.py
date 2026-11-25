@@ -108,7 +108,7 @@ async def run_loop(agent, messages, transport):
                 state.monitor.awaiting_decision_response = False
                 working.append(Message("user", "[继续执行任务。请直接调用工具完成下一步，不要用文字描述你的决策。]"))
                 continue
-            if not transport.streaming or (finalize and not response.content):
+            if transport.streaming and finalize and not response.content:
                 async for event in transport.ensure_nonempty(agent, state, "finalize"):
                     yield event
             injected = state.late_injection()
@@ -117,6 +117,9 @@ async def run_loop(agent, messages, transport):
                     yield InjectEvent(messages=list(injected))
                 continue
             if not transport.streaming:
+                # Chat drains supplements before spending a minimal retry on stale context.
+                async for event in transport.ensure_nonempty(agent, state, "finalize"):
+                    yield event
                 yield state.response
             return
         if finalize and transport.stop_finalize_tools:
