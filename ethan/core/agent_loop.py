@@ -31,6 +31,8 @@ async def run_loop(agent, messages, transport):
     compat.enforce_context_budget(working, agent.session_id)
     compat.compress_previous_round_tools(working, agent.session_id)
     route, system, tools_list, max_iters = agent._select_route(working)
+    from ethan.core.session_memory import prepare_session_memory
+    await prepare_session_memory(agent, working, route)
     provider = agent._provider_for_route(route)
     agent._trim_input_if_needed(working, system)
     state = LoopState(working, system, tools_list, max_iters, provider)

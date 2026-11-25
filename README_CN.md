@@ -11,6 +11,9 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 `Agent.chat` 与 `stream_chat` 共用七步编排，生成/工具执行保留各自传输政策；
 不通过公开流式接口拼接替代 chat。循环核心各文件均 ≤700 行，详见 [Agent Loop](docs/agent-loop.md)。
 
+新 owner 会话首轮准备一次本地记忆快照，独立于 System Prompt 并跨重启重用；
+非主人/minimal/instant 不准备，后续仍可按需 recall。见 [首轮记忆](docs/session-memory.md)。
+
 ## 特性
 
 **多内核**
