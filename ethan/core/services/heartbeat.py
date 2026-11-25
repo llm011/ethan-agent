@@ -12,7 +12,10 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from ethan.core.heartbeat_changes import LocalChangeGate
+
 logger = logging.getLogger(__name__)
+_local_change_gate = LocalChangeGate()
 
 
 # ── 画像每日 consolidation（A 方案：平铺 bullet + 分区差异化压缩）──────
@@ -223,6 +226,20 @@ def _guard_hb_prompt(prompt: str) -> str:
 
 
 async def _run_heartbeat_md() -> None:
+    """Run in the trusted heartbeat owner's isolated profile/session context."""
+    from ethan.core.context import ETHAN_SESSION_ID, ETHAN_USER_ID
+    from ethan.core.users import get_user_store
+
+    user_token = ETHAN_USER_ID.set(get_user_store().get_admin_user_id())
+    session_token = ETHAN_SESSION_ID.set("")
+    try:
+        await _run_heartbeat_md_for_user()
+    finally:
+        ETHAN_SESSION_ID.reset(session_token)
+        ETHAN_USER_ID.reset(user_token)
+
+
+async def _run_heartbeat_md_for_user() -> None:
     """读取 heartbeat.md，若有内容则作为 agent 任务执行，结果保存到专属 session。"""
     from ethan.core.config import get_config
     from ethan.memory.session import _is_placeholder_title, get_session_store
@@ -238,6 +255,8 @@ async def _run_heartbeat_md() -> None:
     # 过滤掉纯注释行（# 开头）和空行，没有实质任务就不执行
     effective_lines = [line for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
     if not effective_lines:
+        return
+    if not _local_change_gate.changed(Path(workspace), content):
         return
 
     # 心跳 MVP 归到 admin 用户
@@ -360,6 +379,7 @@ async def _run_heartbeat_md() -> None:
         )
         await store.save_message(hb_session.id, asst_msg)
         await store.touch(hb_session.id)
+        _local_change_gate.commit(Path(workspace))
         logger.info("[Heartbeat] heartbeat.md task done")
     except Exception:
         logger.exception("[Heartbeat] heartbeat.md execution failed")

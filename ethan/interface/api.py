@@ -26,6 +26,7 @@ from ethan.interface.routers import (
     consent,
     docs,
     documents,
+    events,
     feishu_doc,
     files,
     images,
@@ -218,6 +219,8 @@ async def lifespan(app: FastAPI):
     from ethan.interface.channels.wechat.events import stop_wechat_listener
     stop_wechat_listener()
     stop_heartbeat()
+    from ethan.core.event_producer import stop_event_tasks
+    await stop_event_tasks()
     stop_idle_sweep()
     await app.state.api_key_store.close()
     # 关闭 reranker/classifier 缓存的 provider 连接池（长跑进程退出时释放 fd）
@@ -259,6 +262,7 @@ app.add_middleware(
 # 模块级 import 卡冷启动。lark_send.py 里所有的 lark_oapi 都是函数内 lazy import，是
 # 正确的延迟加载模式。
 
+app.include_router(events.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
