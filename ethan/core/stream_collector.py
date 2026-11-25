@@ -41,7 +41,7 @@ class StreamCollector:
     def __init__(self):
         self.full: str = ""
         self.thought: str = ""
-        self.reasoning: str = ""  # 模型思考链（reasoning_content / thinking），与正文分流：
+        self._reasoning: str = ""  # 模型思考链（reasoning_content / thinking），与正文分流：
                                  # - 用于 DeepSeek / Anthropic 等 reasoning 模型的续轮回传
                                  #   （API 要求：上一轮返回过 reasoning_content，下一轮必须原样
                                  #   带回；否则返回 400）
@@ -78,6 +78,7 @@ class StreamCollector:
             self._handle_tool_event(item)
             return None
         if isinstance(item, ThinkingEvent):
+            self._reasoning += item.delta
             return None  # 思考内容不计入正文
         if isinstance(item, InjectEvent):
             self._pending_injected.extend(item.messages)
@@ -89,7 +90,7 @@ class StreamCollector:
         # Anthropic thinking 作为 StreamChunk.reasoning 传入，需要回放给下一轮请求。
         rc = getattr(item, "reasoning", "")
         if rc:
-            self.reasoning += rc
+            self._reasoning += rc
             # reasoning 只做累积，不对外 yield（渠道 UI 层通常不会显示思考过程）
         # 文本块
         text = item if isinstance(item, str) else getattr(item, "content", "")
@@ -207,6 +208,19 @@ class StreamCollector:
             last = self.tool_steps[-1]
             last["injected"] = (last.get("injected") or []) + self._pending_injected
             self._pending_injected.clear()
+
+    @property
+    def wire_transcript(self) -> list:
+        return list(getattr(self._agent, "_wire_transcript", []) or [])
+
+    @property
+    def reasoning(self) -> str:
+        # The UI bubble aggregates many rounds; never attach concatenated
+        # reasoning to that single assistant. Full rounds live in the transcript.
+        assistants = [m for m in self.wire_transcript if m.role == "assistant"]
+        if assistants:
+            return assistants[-1].reasoning or ""
+        return self._reasoning
 
     @property
     def usage_dict(self) -> dict:

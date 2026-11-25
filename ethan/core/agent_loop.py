@@ -1,6 +1,7 @@
 """Shared seven-step agent orchestration, with explicit transport policies."""
 import logging
 import time
+from dataclasses import replace
 
 from ethan.core import agent as compat
 from ethan.core import loop_control as control
@@ -21,7 +22,8 @@ async def run_loop(agent, messages, transport):
     """The single orchestration shared by chat and streaming, not public delegation."""
     agent._executor.reset_cache()
     reset_active_tools()
-    working = list(messages)
+    working = expand_wire_history(messages)
+    agent._wire_transcript = []
     async for event in transport.instant(agent, working):
         yield event
     if getattr(transport, "instant_handled", False):
@@ -35,7 +37,8 @@ async def run_loop(agent, messages, transport):
     await prepare_session_memory(agent, working, route)
     provider = agent._provider_for_route(route)
     agent._trim_input_if_needed(working, system)
-    state = LoopState(working, system, tools_list, max_iters, provider)
+    state = LoopState(working, system, tools_list, max_iters, provider,
+                      wire_transcript=agent._wire_transcript)
     if transport.streaming and agent.last_matched_skills:
         yield SkillsMatchedEvent(skills=[{
             "name": name, "is_default": getattr(agent._skills.get(name) if agent._skills else None, "is_default", False),
@@ -58,6 +61,7 @@ async def run_loop(agent, messages, transport):
             yield event
         response = state.response
         working.append(response)
+        await record_generation(agent, state)
 
         # 3. Response controls: stream truncation, nudge, natural finish, decide.
         final = state.final_chunk
@@ -74,6 +78,7 @@ async def run_loop(agent, messages, transport):
                 yield event
             working.pop()
             response = state.response
+            await record_generation(agent, state)
             retry_success = bool(response.content if transport.streaming else (response.content or "").strip())
             if retry_success or response.is_tool_call:
                 working.append(response)
@@ -90,6 +95,7 @@ async def run_loop(agent, messages, transport):
                 async for event in transport.generate(agent, state, None,
                         system + control.finalize_system_suffix("max_iters"), purpose="nudge_exhausted"):
                     yield event
+                await record_generation(agent, state)
                 async for event in transport.ensure_nonempty(agent, state, "nudge_exhausted" if transport.streaming else "finalize"):
                     yield event
                 injected = state.late_injection(state.response, append_response=True)
@@ -119,7 +125,6 @@ async def run_loop(agent, messages, transport):
                     yield InjectEvent(messages=list(injected))
                 continue
             if not transport.streaming:
-                # Chat drains supplements before spending a minimal retry on stale context.
                 async for event in transport.ensure_nonempty(agent, state, "finalize"):
                     yield event
                 yield state.response
@@ -163,6 +168,7 @@ async def run_loop(agent, messages, transport):
                 async for event in transport.generate(agent, state, None,
                         system + control.finalize_system_suffix(reason), purpose=reason):
                     yield event
+                await record_generation(agent, state)
                 async for event in transport.ensure_nonempty(agent, state, reason):
                     yield event
                 injected = state.late_injection(state.response, append_response=True)
@@ -182,6 +188,16 @@ async def run_loop(agent, messages, transport):
         yield Message("assistant", "[max tool iterations reached]")
 
 
+async def record_generation(agent, state):
+    wire = state.generated_wire or state.response
+    # decide is an internal control signal, not an executable wire tool.
+    if any(call.name == "decide" for call in wire.tool_calls):
+        wire = replace(wire, tool_calls=[call for call in wire.tool_calls if call.name != "decide"])
+        if not wire.tool_calls and not wire.content:
+            return
+    agent._wire_transcript.append(wire)
+
+
 async def dispatch_tools(agent, state, transport):
     calls = state.response.tool_calls
     allowed = calls
@@ -190,12 +206,19 @@ async def dispatch_tools(agent, state, transport):
         async for event in phase.prepare(agent, calls, state.working, state.gen_ms):
             yield event
         allowed = phase.allowed_calls
+    # Persist synthetic interaction results as well as executor results.
+    known = {m.tool_call_id for m in agent._wire_transcript if m.role == "tool"}
+    for message in state.working:
+        if message.role == "tool" and message.tool_call_id in {c.id for c in calls} and message.tool_call_id not in known:
+            agent._wire_transcript.append(message)
     results = await agent._executor.execute(allowed) if allowed or not transport.streaming else []
     state.results = results
     for result, call in zip(results, allowed):
         if transport.streaming:
             yield result_event(result, call)
-        state.working.append(tool_message(agent, call, result))
+        message = tool_message(agent, call, result)
+        state.working.append(message)
+        agent._wire_transcript.append(message)
     compat.enforce_context_budget(state.working, agent.session_id)
     compat.compress_previous_round_tools(state.working, agent.session_id)
     had_error = any(getattr(r, "is_error", False) for r in results)
@@ -233,3 +256,14 @@ def result_event(result, call):
         entity_id=compat.extract_entity_id(call.name, call.arguments),
         skill_category=compat.resolve_skill_category(call.name, call.arguments),
     )
+
+
+def expand_wire_history(messages):
+    working = []
+    for message in messages:
+        wire = getattr(message, "_wire_transcript", None)
+        if message.role == "assistant" and wire:
+            working.extend(wire)
+        else:
+            working.append(message)
+    return working

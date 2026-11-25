@@ -31,6 +31,8 @@ class LoopState:
     final_chunk: object = None
     gen_ms: int = 0
     results: list = field(default_factory=list)
+    generated_wire: Message | None = None
+    wire_transcript: list = field(default_factory=list)
 
     @property
     def finalize(self):
@@ -39,6 +41,7 @@ class LoopState:
 
     def append_injection(self, injected):
         text = "\n\n".join(f"[用户运行中补充]：{m}" for m in injected)
+        self.wire_transcript.append(Message("user", text))
         if self.working and self.working[-1].role == "user":
             msg = self.working[-1]
             self.working[-1] = Message("user", (msg.content or "") + "\n\n" + text, images=msg.images)

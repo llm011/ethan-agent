@@ -36,6 +36,7 @@ class ChatTransport:
             response = await provider.chat(state.working, tools=tools, system=system)
         agent.usage.add(response.usage)
         state.response = response
+        state.generated_wire = response
         state.final_chunk = None
         if False:
             yield None
@@ -137,9 +138,12 @@ class StreamTransport:
             calls = agent._parse_stream_text_tool_calls(content)
             if calls:
                 content = strip_text_calls(content)
-        # Auxiliary stream paths retain the legacy reasoning prompt policy.
+        # Existing nudge/finalize paths discarded reasoning in working. Keep that
+        # legacy prompt policy, but recorder receives the full generated wire.
         prompt_reasoning = reasoning if purpose == "main" else ""
         state.response = Message("assistant", content, tool_calls=calls, reasoning=prompt_reasoning or None)
+        state.generated_wire = Message("assistant", content, tool_calls=calls, reasoning=reasoning or None,
+                                       usage=final.usage if final else None)
         state.final_chunk = final
 
     async def ensure_nonempty(self, agent, state, reason):

@@ -529,7 +529,9 @@ class Agent:
         async for event in run_loop(self, messages, ChatTransport()):
             if isinstance(event, Message):
                 result = event
-        return result or Message(role="assistant", content="[max tool iterations reached]")
+        result = result or Message(role="assistant", content="[max tool iterations reached]")
+        result._wire_transcript = list(self._wire_transcript)
+        return result
 
     async def stream_chat(self, messages: list[Message]):
         """Emit every generation round and interaction through the stream transport."""
