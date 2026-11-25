@@ -18,10 +18,11 @@ import pytest
 from ethan.core.context_budget import (
     _OFFLOADED_MARKER,
     OFFLOAD_KEEP_PREFIX,
+    compress_previous_round_tools,
     context_tool_budget_chars,
     enforce_context_budget,
 )
-from ethan.providers.base import Message
+from ethan.providers.base import Message, ToolCall
 
 _SESSION_ID = "test_ctx_budget_stability"
 
@@ -112,6 +113,34 @@ class TestOffloadIdempotency:
         assert open(path, encoding="utf-8").read() == _tool_msg(0, 12000).content
         # 上下文里保留了逐字前缀开头
         assert stub.startswith(_OFFLOADED_MARKER)
+
+
+class TestEnforceCompressInteraction:
+    def test_offloaded_result_not_rewritten_by_compress(self, _clean_tmp):
+        """入口定稿（带 _OFFLOADED_MARKER）的结果，后续 compress_previous_round_tools
+        不得二次改写——否则 2000 字逐字前缀会被换成纯指针，破坏前缀稳定契约。
+
+        复现实测 bug：web_fetch/web_search >8000 字结果先被 enforce 落盘保留前缀，
+        再被 compress 压成纯文件指针（丢前缀）。
+        """
+        tc = ToolCall(id="call_web", name="web_fetch", arguments={"url": "https://x.com"})
+        asst = Message(role="assistant", content="", tool_calls=[tc])
+        big_content = "页面标题\nhttps://x.com/a\n" + "x" * 9000
+        tool = Message(role="tool", content=big_content, tool_call_id="call_web")
+        working = [asst, tool]
+
+        enforce_context_budget(working, _SESSION_ID)
+        stub = working[1].content
+        assert _OFFLOADED_MARKER in stub, "应已入口定稿落盘"
+
+        # 追加一条最新 assistant，让上面那条 web_fetch 结果变成「旧的」，触发 compress
+        working.append(Message(role="assistant", content="已抓取，开始分析"))
+        compress_previous_round_tools(working, _SESSION_ID)
+
+        assert working[1].content == stub, (
+            "compress 改写了已入口定稿的结果，前缀稳定契约被破坏"
+        )
+        assert _OFFLOADED_MARKER in working[1].content
 
 
 class TestNoSessionBackwardCompat:

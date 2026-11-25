@@ -372,9 +372,12 @@ def compress_previous_round_tools(working: list[Message], session_id: str = "") 
         content = msg.content or ""
         if not content:
             continue
-        # 已压缩过的跳过（含本模块的标记 + web.py 自身的 offload 标记）
+        # 已压缩过的跳过（含本模块的标记 + web.py 自身的 offload 标记）；
+        # 也跳过入口定稿（_OFFLOADED_MARKER）的结果：enforce_context_budget
+        # 已把它落盘并保留逐字前缀，这里再压会把前缀换成纯指针、破坏前缀稳定。
         if (
-            _COMPRESSED_MARKER in content
+            _OFFLOADED_MARKER in content
+            or _COMPRESSED_MARKER in content
             or _FETCH_OFFLOADED_MARKER in content
             or _WEB_FETCH_OFFLOADED_MARKER in content
         ):
