@@ -174,6 +174,7 @@ async def lark_webhook(request: Request):
         token = lark_chat_id_var.set(chat_id)
         try:
             agent = _create_agent(user_id=lark_user_id)
+            agent.session_id = session_id
             response = await agent.chat([user_msg])
         finally:
             lark_chat_id_var.reset(token)

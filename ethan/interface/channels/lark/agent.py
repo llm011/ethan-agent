@@ -250,6 +250,7 @@ async def _handle_agent_message(
         skills = SkillRegistry()
         skills.load()
         agent = Agent(tool_registry=registry, skill_registry=skills, channel="lark", mode=session_mode)
+        agent.session_id = session_id
         agent.is_owner = is_owner  # 非主人时跳过记忆召回（隐私保护）
 
         # 注入主人/授权运行时上下文，配合 soul.md 的主人准则判断是否执行有副作用操作
@@ -732,4 +733,3 @@ async def _handle_agent_message(
         task.add_done_callback(lambda t: logger.error("consolidate failed", exc_info=t.exception()) if not t.cancelled() and t.exception() else None)
     except Exception:
         pass
-

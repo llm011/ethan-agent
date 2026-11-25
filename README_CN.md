@@ -25,6 +25,9 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 原生多工具轮的 reasoning 与 tool-call ID 单独持久化，最终 UI 汇总消息与 wire 历史同事务提交；
 下一请求只展开完整配对轮次。见 [协议历史](docs/wire-transcripts.md)。
 
+持久原生会话按 iteration、授权前与单个工具完成保存检查点；续跑保留完成事实，未知副作用禁止自动重放。
+外部内核不自动重连原进程。见 [运行检查点](docs/run-checkpoints.md)。
+
 ## 特性
 
 **多内核**

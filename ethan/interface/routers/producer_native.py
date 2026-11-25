@@ -101,6 +101,22 @@ async def _run_generation(
     # id 记在 progress_msg_id；每完成一个工具就 UPDATE 这条（覆盖式更新 tool_steps），
     # 流结束后把同一条更新为最终内容（content/usage/a2ui），避免「占位行 + 最终行」重复两条。
     progress_msg_id: int | None = None
+    checkpoint = None
+    previous_checkpoint_callback = getattr(agent, "_checkpoint_callback", None)
+    if session_id and hasattr(store, "persist_run_checkpoint"):
+        from ethan.core.run_checkpoint import RunCheckpointRecorder
+        try:
+            progress_msg_id = await store.save_message(session_id, Message(role="assistant", content="", status="running"))
+            checkpoint = RunCheckpointRecorder(store, session_id, progress_msg_id, messages)
+            await checkpoint({"kind": "created"})
+            agent._checkpoint_callback = checkpoint
+        except BaseException:
+            if progress_msg_id is not None:
+                await asyncio.shield(store.update_message_status(progress_msg_id, "interrupted"))
+            run.emit({"error": "无法保存运行检查点，已停止执行以避免丢失副作用状态。"})
+            run.finish()
+            _RunManager_schedule_removal(run.session_id)
+            raise
     from ethan.providers.openai_compat import set_retry_status_hook
     def _on_retry_status(msg: str | None) -> None:
         if msg:
@@ -238,7 +254,7 @@ async def _run_generation(
                     run.emit(evt)
                 # 工具事件（start/done/error）后实时落库进度：把当前全部 tool_steps
                 # 写到这条进度消息上。首次创建，后续 UPDATE 同一条（progress_msg_id 复用）。
-                if session_id and consent is not None:
+                if session_id:
                     try:
                         progress_msg_id = await _save_progress(
                             store,
@@ -255,6 +271,9 @@ async def _run_generation(
                 collector.feed(item)
                 run.emit({"content": item})
     except asyncio.CancelledError:
+        if checkpoint is not None:
+            await asyncio.shield(checkpoint.finish("interrupted"))
+            await asyncio.shield(store.update_message_status(progress_msg_id, "interrupted"))
         # 被取消有两种情形：
         # (1) 用户主动 /stop（run.stop_requested=True）：保存已生成的部分内容，标记 [已停止]
         # (2) 新 run 替换旧 run：直接丢弃，不入库
@@ -289,7 +308,10 @@ async def _run_generation(
                     await store.update_message(progress_msg_id, session_id, stopped_msg)
                     await store.touch(session_id, mark_read=bool(run.subscribers))
                 else:
-                    await store.delete_message_by_id(progress_msg_id)
+                    if checkpoint is not None:
+                        await store.update_message_status(progress_msg_id, "interrupted")
+                    else:
+                        await store.delete_message_by_id(progress_msg_id)
             except Exception:
                 logger.exception("清理/定稿进度占位行失败 session=%s row=%s", session_id, progress_msg_id)
         elif getattr(run, "stop_requested", False) and session_id and (collector.full or collector.thought):
@@ -331,6 +353,11 @@ async def _run_generation(
         _RunManager_schedule_removal(run.session_id)
         raise
     except Exception as e:
+        if checkpoint is not None:
+            try:
+                await checkpoint.finish("interrupted")
+            except Exception:
+                logger.exception("保存异常检查点失败 session=%s", session_id)
         logger.exception("Generation failed session=%s", session_id)
         err_text = _friendly_error(e, agent)
         if not err_text:
@@ -377,11 +404,6 @@ async def _run_generation(
                     await store.update_message(progress_msg_id, session_id, err_msg)
                 else:
                     await store.save_message(session_id, err_msg)
-                # 运行检查点（条目 6）：中断瞬间的快照落库，续跑时读回让模型知道
-                # 跑到第几轮、最后在做什么，而不是从零重新推理。
-                _ckpt = getattr(agent, "_run_checkpoint", None)
-                if progress_msg_id and _ckpt:
-                    await store.save_run_checkpoint(progress_msg_id, _ckpt)
                 await store.touch(session_id, mark_read=bool(run.subscribers))
             except Exception:
                 logger.exception("保存错误消息失败 session=%s", session_id)
@@ -390,6 +412,9 @@ async def _run_generation(
         _RunManager_schedule_removal(run.session_id)
         return
     finally:
+        agent._checkpoint_callback = previous_checkpoint_callback
+        from ethan.providers.openai_compat import reset_retry_status_hook
+        reset_retry_status_hook(_retry_hook_token)
         # 流结束（正常/异常）时取消未决授权 Future，避免泄漏
         if consent is not None:
             consent.cancel_all()
@@ -505,6 +530,10 @@ async def _run_generation(
             await retry_on_db_locked(store.touch, session_id, mark_read=bool(run.subscribers))
         except Exception:
             logger.warning("touch 会话时间戳失败（重试耗尽）session=%s", session_id, exc_info=True)
+
+    if checkpoint is not None:
+        await store.update_message_status(progress_msg_id, "completed", expected="running")
+        await checkpoint({"kind": "completed", "phase": "completed", "messages": collector.wire_transcript})
 
     # --- Get笔记 异步任务后台轮询 ---
     # 从 agent 回复中提取 getnote task_id，后台轮询直到完成，

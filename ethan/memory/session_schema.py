@@ -71,6 +71,15 @@ class SessionSchemaMixin:
             )
         """)
         await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS run_checkpoints (
+                message_id INTEGER PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+        """)
+        await self._db.execute("""
             CREATE TABLE IF NOT EXISTS background_tasks (
                 session_id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,

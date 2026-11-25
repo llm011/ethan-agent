@@ -18,6 +18,12 @@ class SessionMessagesMixin:
             return await self._message_transaction("save_message", session_id, msg)
         import json
 
+        from ethan.core.checkpoint_lifecycle import claim_final_message
+        checkpoint_row = claim_final_message(self._db_path, session_id, msg)
+        if checkpoint_row is not None:
+            await self.update_message(checkpoint_row, session_id, msg)
+            return checkpoint_row
+
         tool_calls_json = (
             json.dumps([{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in msg.tool_calls])
             if msg.tool_calls
@@ -81,6 +87,9 @@ class SessionMessagesMixin:
         if not getattr(self, "_transaction_owned", False):
             return await self._message_transaction("update_message", row_id, session_id, msg)
         import json
+
+        from ethan.core.checkpoint_lifecycle import attach_final_wire
+        attach_final_wire(self._db_path, session_id, row_id, msg)
 
         tool_calls_json = (
             json.dumps([{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in msg.tool_calls])
