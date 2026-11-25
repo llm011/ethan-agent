@@ -287,6 +287,26 @@ def reflection_message(monitor: LoopMonitor, last_result: str = "") -> str:
     )
 
 
+def tool_error_hint(last_result: str = "", tool_name: str = "") -> str:
+    """单次工具失败后的轻量针对性提醒（不等连续失败才触发，对应计划条目 5）。
+
+    与 reflection_message 的区别：reflection 只在 is_stuck（连续同签名报错 /
+    精确重复 / 频率熔断）时触发；单次失败没有任何补偿，模型容易原样重试。
+    本提示注入到下一轮 system，让模型先想「失败原因 + 换路」而非机械重试。
+    连续失败时 is_stuck 会用更重的 reflection 接管，两者不冲突（stuck 路径会
+    覆盖 pending_suffix）。
+    """
+    result_hint = f"\n- 工具返回（节选）：{last_result[:200]}" if last_result else ""
+    tool_hint = f"（{tool_name}）" if tool_name else ""
+    return (
+        f"上一步工具调用{tool_hint}失败了。在重试之前，请先判断失败原因："
+        "是参数错、路径/目标不存在、权限不足、还是上游临时异常？"
+        "如果原因明确，换一个不同的方法（改参数 / 换工具 / 先确认前置条件），"
+        "不要用完全相同的参数原样重试；如果是上游临时异常，可重试一次，仍失败就换路。"
+        f"{result_hint}"
+    )
+
+
 def reflection_followup_message() -> str:
     """反思后仍重复同一操作时的二次强提醒。"""
     return (
