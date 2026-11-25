@@ -14,6 +14,11 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 新 owner 会话首轮准备一次本地记忆快照，独立于 System Prompt 并跨重启重用；
 非主人/minimal/instant 不准备，后续仍可按需 recall。见 [首轮记忆](docs/session-memory.md)。
 
+## RouteDecision
+
+路由同时记录 `fast/full` 档位和 `strong/medium/weak` 信号强度：明确技能命中提前装载正文与引用工具，
+不确定时保守 full，不改变迭代预算，也不放宽非主人权限。详见 [路由决策](docs/routing.md)。
+
 ## 特性
 
 **多内核**
