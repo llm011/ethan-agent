@@ -26,6 +26,9 @@ class SessionWireMixin:
             try:
                 result = await getattr(isolated, operation)(*args)
                 await connection.commit()
+                from ethan.core.checkpoint_lifecycle import consume_final_message
+                row_id = result if operation == "save_message" else args[0]
+                consume_final_message(self._db_path, args[0] if operation == "save_message" else args[1], row_id)
                 return result
             except BaseException:
                 await connection.rollback()

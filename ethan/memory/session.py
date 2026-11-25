@@ -18,12 +18,12 @@ from typing import Any
 
 from . import session_titles as _titles
 from .session_assets import SessionAssetsMixin
+from .session_checkpoints import SessionCheckpointsMixin
 from .session_maintenance import SessionMaintenanceMixin
 from .session_messages import SessionMessagesMixin
 from .session_metadata import SessionMetadataMixin
 from .session_queries import SessionQueriesMixin
 from .session_schema import SessionSchemaMixin
-from .session_wire import SessionWireMixin
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ for _mixin in (SessionSchemaMixin, SessionAssetsMixin, SessionMessagesMixin, Ses
         if isinstance(_value, _types.FunctionType):
             setattr(_mixin, _name, _bind_function(_value))
 
-class SessionStore(SessionWireMixin, SessionSchemaMixin, SessionAssetsMixin, SessionMessagesMixin, SessionMetadataMixin, SessionQueriesMixin, SessionMaintenanceMixin):
+class SessionStore(SessionCheckpointsMixin, SessionSchemaMixin, SessionAssetsMixin, SessionMessagesMixin, SessionMetadataMixin, SessionQueriesMixin, SessionMaintenanceMixin):
     """SQLite-backed session storage; responsibility-specific mixins keep this API stable."""
 
 # ── 进程级单例 SessionStore ──────────────────────────────────────────────────

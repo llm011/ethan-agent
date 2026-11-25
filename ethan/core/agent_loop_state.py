@@ -15,6 +15,7 @@ class LoopState:
     tools_list: list
     max_iters: int
     provider: object
+    history_len: int
     monitor: object = field(default_factory=control.LoopMonitor)
     iteration: int = 0
     extra_rounds: int = 0
@@ -74,6 +75,13 @@ class LoopState:
         self.decision_injected = self.enhanced_injected = False
         return injected
 
+    async def checkpoint(self, agent, kind, **extra):
+        callback = getattr(agent, "_checkpoint_callback", None)
+        if callback:
+            payload = {"kind": kind, "iter": self.iteration + 1, "max_iters": self.max_iters,
+                       "history_len": self.history_len, "messages": list(agent._wire_transcript)}
+            payload.update(extra)
+            await callback(payload)
 
 
 async def inject_decision_context(agent, state):

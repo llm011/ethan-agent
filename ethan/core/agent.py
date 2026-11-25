@@ -525,22 +525,36 @@ class Agent:
         return await provider.request(description, tool, detail)
 
     async def chat(self, messages: list[Message]) -> Message:
-        """Return the terminal provider Message through the shared chat transport."""
+        """Non-streaming transport: return the terminal provider Message unchanged."""
         from ethan.core.agent_generation import ChatTransport
         from ethan.core.agent_loop import run_loop
+        from ethan.core.checkpoint_lifecycle import begin_checkpoint, end_checkpoint
 
-        result = None
-        async for event in run_loop(self, messages, ChatTransport()):
-            if isinstance(event, Message):
-                result = event
-        result = result or Message(role="assistant", content="[max tool iterations reached]")
-        result._wire_transcript = list(self._wire_transcript)
-        return result
+        recorder = await begin_checkpoint(self, messages)
+        status = "interrupted"
+        try:
+            result = None
+            async for event in run_loop(self, messages, ChatTransport()):
+                if isinstance(event, Message):
+                    result = event
+            result = result or Message(role="assistant", content="[max tool iterations reached]")
+            result._wire_transcript = list(self._wire_transcript)
+            status = "completed"
+            return result
+        finally:
+            await end_checkpoint(self, recorder, status)
 
     async def stream_chat(self, messages: list[Message]):
-        """Emit every generation round and interaction through the stream transport."""
+        """Streaming transport: emit all rounds and interaction events."""
         from ethan.core.agent_generation import StreamTransport
         from ethan.core.agent_loop import run_loop
+        from ethan.core.checkpoint_lifecycle import begin_checkpoint, end_checkpoint
 
-        async for event in run_loop(self, messages, StreamTransport()):
-            yield event
+        recorder = await begin_checkpoint(self, messages)
+        status = "interrupted"
+        try:
+            async for event in run_loop(self, messages, StreamTransport()):
+                yield event
+            status = "completed"
+        finally:
+            await end_checkpoint(self, recorder, status)

@@ -46,6 +46,12 @@
 
 ---
 
+## 持久运行事实
+
+进程内 `_REGISTRY` 仍不是持久任务队列；有 session_id 的原生循环另保存每轮与逐工具完成
+检查点，服务重启后可从会话显式续跑，不重连原进程或自动重放未知副作用。
+见 [运行检查点](run-checkpoints.md)。
+
 ## 终止
 
 `background_task_stop` 工具或 `POST /api/background-tasks/{id}/stop` 都走 `RunManager.instance().stop(session_id)`——标记 `stop_requested` 并取消 producer 任务，已生成的部分内容会被保存（复用 streaming 生成的停止语义，见 [agent-loop.md](./agent-loop.md) 的 RunManager 部分）。任务状态置为 `stopped`。

@@ -1,7 +1,7 @@
 """Shared seven-step agent orchestration, with explicit transport policies."""
 import logging
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 from ethan.core import agent as compat
 from ethan.core import loop_control as control
@@ -37,7 +37,7 @@ async def run_loop(agent, messages, transport):
     await prepare_session_memory(agent, working, route)
     provider = agent._provider_for_route(route)
     agent._trim_input_if_needed(working, system)
-    state = LoopState(working, system, tools_list, max_iters, provider,
+    state = LoopState(working, system, tools_list, max_iters, provider, len(working),
                       wire_transcript=agent._wire_transcript)
     if transport.streaming and agent.last_matched_skills:
         yield SkillsMatchedEvent(skills=[{
@@ -48,6 +48,7 @@ async def run_loop(agent, messages, transport):
     for iteration in range(max_iters + MAX_INJECT_EXTRA_ROUNDS):
         # 1. Drain inbound context and choose bounded tool availability.
         state.iteration = iteration
+        await state.checkpoint(agent, "iteration")
         injected = state.begin_round()
         if injected and transport.streaming:
             yield InjectEvent(messages=list(injected))
@@ -194,13 +195,16 @@ async def record_generation(agent, state):
     if any(call.name == "decide" for call in wire.tool_calls):
         wire = replace(wire, tool_calls=[call for call in wire.tool_calls if call.name != "decide"])
         if not wire.tool_calls and not wire.content:
+            await state.checkpoint(agent, "generation")
             return
     agent._wire_transcript.append(wire)
+    await state.checkpoint(agent, "generation")
 
 
 async def dispatch_tools(agent, state, transport):
     calls = state.response.tool_calls
     allowed = calls
+    await state.checkpoint(agent, "prepared", tool_calls=[asdict(c) for c in calls])
     if transport.streaming:
         phase = StreamToolPhase()
         async for event in phase.prepare(agent, calls, state.working, state.gen_ms):
@@ -211,28 +215,56 @@ async def dispatch_tools(agent, state, transport):
     for message in state.working:
         if message.role == "tool" and message.tool_call_id in {c.id for c in calls} and message.tool_call_id not in known:
             agent._wire_transcript.append(message)
-    results = await agent._executor.execute(allowed) if allowed or not transport.streaming else []
+            call = next(call for call in calls if call.id == message.tool_call_id)
+            await state.checkpoint(agent, "finished", result=message, tool_call=asdict(call), call_id=call.id)
+    await state.checkpoint(agent, "prepared", tool_calls=[asdict(c) for c in allowed])
+    finished = {}
+    callback = getattr(agent, "_checkpoint_callback", None)
+    executor = agent._executor
+    old_hook = getattr(executor, "checkpoint_hook", None)
+
+    async def hook(kind, call, result):
+        if old_hook:
+            await old_hook(kind, call, result)
+        extra = {"tool_call": asdict(call), "call_id": call.id}
+        if result is not None:
+            message = tool_message(agent, call, result)
+            finished[call.id] = message
+            agent._wire_transcript.append(message)
+            extra.update(result=message, had_error=result.is_error)
+        await state.checkpoint(agent, kind, **extra)
+
+    if callback:
+        executor.checkpoint_hook = hook
+    try:
+        results = await executor.execute(allowed) if allowed or not transport.streaming else []
+    finally:
+        if callback:
+            executor.checkpoint_hook = old_hook
     state.results = results
     for result, call in zip(results, allowed):
         if transport.streaming:
             yield result_event(result, call)
-        message = tool_message(agent, call, result)
+        message = finished.get(call.id) or tool_message(agent, call, result)
         state.working.append(message)
-        agent._wire_transcript.append(message)
+        if call.id not in finished:
+            agent._wire_transcript.append(message)
+            await state.checkpoint(agent, "finished", result=message, tool_call=asdict(call),
+                                   call_id=call.id, had_error=result.is_error)
     compat.enforce_context_budget(state.working, agent.session_id)
     compat.compress_previous_round_tools(state.working, agent.session_id)
     had_error = any(getattr(r, "is_error", False) for r in results)
     state.monitor.record(calls, had_error)
-    if transport.streaming:
-        agent._run_checkpoint = {
-            "iter": state.iteration + 1, "max_iters": state.max_iters,
-            "last_tools": [c.name for c in calls], "last_had_error": had_error,
-            "tool_names": list(state.monitor._tool_names[-8:]), "signatures": list(state.monitor._signatures[-4:]),
-            "reflections_used": state.monitor.reflections_used, "updated_at": time.time(),
-        }
+    agent._run_checkpoint = {
+        "iter": state.iteration + 1, "max_iters": state.max_iters,
+        "last_tools": [c.name for c in calls], "last_had_error": had_error,
+        "tool_names": list(state.monitor._tool_names[-8:]), "signatures": list(state.monitor._signatures[-4:]),
+        "reflections_used": state.monitor.reflections_used, "updated_at": time.time(),
+    }
     if had_error:
         state.pending_suffix = "\n\n[System: " + control.tool_error_hint(
             results[-1].content if results else "", calls[0].name if calls else "") + "]"
+    await state.checkpoint(agent, "transcript", had_error=had_error)
 
 
 def tool_message(agent, call, result):

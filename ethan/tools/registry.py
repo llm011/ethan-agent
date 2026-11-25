@@ -88,6 +88,7 @@ class ToolExecutor:
         # 当前关联的 ChatRun（由 producer 在 stream_chat 前设置）：用于注册 tool task 引用，
         # 使外部可通过 run.cancel_tool(tool_call_id) 取消单个工具。
         self._current_run = None
+        self.checkpoint_hook = None
 
     def reset_cache(self) -> None:
         """每次新的 chat() 调用前重置。"""
@@ -105,8 +106,17 @@ class ToolExecutor:
         run = self._current_run
         # 逐个创建 asyncio.Task 并注册到 run.tool_tasks，使外部可按 tool_call_id 取消。
         tasks: dict[str, asyncio.Task] = {}
+        async def _checkpointed(tc):
+            hook = self.checkpoint_hook
+            if hook is not None:
+                await hook("started", tc, None)
+            result = await self._run_one(tc)
+            if hook is not None:
+                await hook("cancelled" if getattr(result, "is_cancelled", False) else "finished", tc, result)
+            return result
+
         for tc in tool_calls:
-            t = asyncio.create_task(self._run_one(tc))
+            t = asyncio.create_task(_checkpointed(tc))
             tasks[tc.id] = t
             if run is not None:
                 run.tool_tasks[tc.id] = t
