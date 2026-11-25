@@ -33,7 +33,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CHAT = ROOT / "app/android/app/src/main/kotlin/com/ethan/agent/ui/chat/ChatScreen.kt"
+CHAT = ROOT / "app/android/app/src/main/kotlin/com/ethan/agent/ui/chat/ChatMessageBubble.kt"
 COMMON = ROOT / "app/android/app/src/main/kotlin/com/ethan/agent/ui/components/Common.kt"
 
 

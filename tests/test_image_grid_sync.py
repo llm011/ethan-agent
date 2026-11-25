@@ -34,7 +34,7 @@ def test_android_image_file_grid_contract():
         ROOT / "app/android/app/src/main/kotlin/com/ethan/agent/ui/components/FileCardView.kt"
     ).read_text(encoding="utf-8")
     chat_kt = (
-        ROOT / "app/android/app/src/main/kotlin/com/ethan/agent/ui/chat/ChatScreen.kt"
+        ROOT / "app/android/app/src/main/kotlin/com/ethan/agent/ui/chat/ChatMessageBubble.kt"
     ).read_text(encoding="utf-8")
 
     assert "fun ImageFileGrid(" in file_card_kt
