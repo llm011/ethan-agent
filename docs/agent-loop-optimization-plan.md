@@ -346,7 +346,9 @@ GROUP BY 1 ORDER BY 2 DESC;
 
 ### 阶段二总结（2026-11-26）
 
-条目 4/5/6 已实现并合并上线（服务 v1.0.0b41），条目 7 部分完成。四个 PR：
+历史阶段曾记录条目 4/5/6 已实现并合并上线（服务 v1.0.0b41），条目 7 部分完成。
+**本轮源码复核修正：#485 只有内存快照与中断异常时保存，不满足每轮/派发前持久化，
+#483 也未覆盖真实 UI 持久化后下一请求的逐轮 reasoning 配对。不能视为两项完整验收。** 四个历史 PR：
 
 | 条目 | PR | 核心改动 |
 |---|---|---|
@@ -443,3 +445,35 @@ GROUP BY 1 ORDER BY 2 DESC;
 - [ ] 条目 10 事件触发 — 候选，待确认场景
 
 **遗留问题**：凌晨 0 点几次 4 步运行零命中，未解释；心跳的 token 占比未测。
+
+### 本轮源码复核与补完（2026-11-26）
+
+上面的阶段记录与复选框保留历史口径（不再作为当前待办）；下表是当前复核后的真实状态，**实现不等于线上验收**。
+
+| 条目 | 当前状态与证据 | 尚需验收 |
+|---|---|---|
+| 1 | 已实现；40轮12K结果零前缀改写 regression | 上线三天真实≥80%命中率；夜间零命中原因 |
+| 2 | 已实现；fast/full稳定层与分割回归；默认协议预算 PR #495 squash `bb08f4f8`，7051→5948正文字符，独立151项通过，安全/secrets逐字保留 | 三天实测收益；发布模板不覆盖用户运行时定制，不能将模板预算冒充全量prompt预算 |
+| 3 | PR #497 squash `c6da069b`；双端7天input/cache/次数/平均步骤，消息+wire+精确归因同事务；独立后端57项、Desktop256项及双构建通过；review修复小数token舍零，双端6契约通过，唯一线程resolve、CI绿 | 旧历史不猜归因，未扫描整体归档；checkpoint结束到channel定稿的退出可显示未归因；安装的Desktop仍需新Tauri包 |
+| 4 | PR #490 squash `4a5f7fff`；真实Agent→producer→SQLite→下一请求严格reasoning/call-id配对；独立118项绿，两条review修复并resolve，含chat/stream兜底与异常/停止6终止组合 | 真实网关两步无400但reasoning为0，非空thinking回传仍未实证 |
+| 5 | 已实现；原状态补偿与短输出去重回归保持 | 真实用户体验持续观察 |
+| 6 | PR #494 squash `19fd224d`；每轮/授权前/派发前/单工具完成持久化，原生自动Recorder；真实子进程SIGKILL与未知工具禁止重放；独立89项绿；review修复检查点失败时兄弟工具cancel/drain，唯一线程resolve、最新CI绿 | 外部内核内部工具不可见；临时无sid CLI不强制DB；跨进程任务不可reattach |
+| 7 | 完成纯结构拆分，独立PR #488 squash `d1d088b7`；Agent530行、七步共享编排，Chat/Stream政策分别保留；同24 characterization旧新皆绿；修复review顺序回归后25项绿，唯一线程resolve、CI绿 | 已合并；服务最终部署时再核验 |
+| 8 | PR #489 squash `d70edd00`；独立固定时间戳、profile/mode隔离快照，9项单测；独立72项通过，review无阻塞、CI绿；真实Agent假provider一轮早餐无recall往返；见session-memory.md | 真实个人问答质量A/B，不捏造提升比例 |
+| 9 | PR #491 squash `45db2b1d`；RouteDecision strong/medium/weak，显式技能完整加载及channel/mode隔离；独立98项通过；新装触发词括号崩溃后继 PR #493 `b31fd5c8` 修为仅星号glob，其余字面转义，真实新装先2红后绿、新20项通过 | 生产延迟/质量对照；medium是强度不是旧字数轨 |
+| 10 | PR #496 squash `ed48fdc6`；默认关闭、专用HMAC/白名单/限流/持久去重、本地心跳变化检查；review修复换delivery重放与极简兜底策略丢失，保留真实reasoning前缀；独立严格18项/扩展60项，双线程resolve、最新CI绿 | 外部账号未连接；只读人工复核摘要；心跳真实token占比未测；旧ledger无原始body不能补造历史摘要 |
+
+条目3独立 worktree 验证：Desktop全量256项通过，双端小数展示契约6项通过，Web（webpack）与Desktop生产构建、构建后串行双端tsc通过。构建不等于已安装Desktop新包；Web仍需部署静态产物。
+早期 completion 整合 Python 全量 **2156 passed / 3 skipped**，不是最终合并主线证据。基础 main `19fd224d` 全量2160通过、3跳过，末尾1失败/13错误均为复制未跟踪技能node_modules导致内置盘满（errno28），不是协议断言失败；已清理本次独占79GB临时目录，最终统一代码在干净worktree与外置盘临时根重新全量验证。最终统一主线 `ed48fdc6` 干净worktree全量 **2204 passed / 3 skipped / 11 warnings，100.14s，exit0**；旧 aiosqlite 关线程与依赖废弃 warning 如实保留。
+第一轮8失败已核实修复：3项worktree缺.venv、2项拆分后旧源码定位改真实迁移/producer执行、
+1项默认协议精简后恢复判断标准，2项serve测试隔离开关/进程锁并阻止真实启动。
+真实已配置网关 `deepseek-v4.1-flash` 两组各3请求：均 step1→step2→OK，无400，
+但普通/显式thinking探针 reasoning_chars 都为0，**不能证明非空思考字段线上回传验收**。
+独立review实证修复：事件override缺fast参数；共享连接提前commit半成品message/wire。
+AOCI MCP未挂载，本轮只按源码证据实施，未伪造认知收据或索引维护。
+
+本轮实际独立依赖顺序：纯结构7（#488）→ 记忆8（#489）→ 路由9（#491）→ 协议4（#490）→ 新装glob修复（#493）与默认协议预算（#495）→ 检查点6（#494）→ 成本3（#497）与事件10（#496）。另 #492 隔离测试启动环境，阻止测试误启真实服务。
+已有条目1/2/5不重复开发；线上三天观察属于部署后时间窗，不可能在本轮立即宣称完成。
+本轮部署前只读聚合近3天：schedule 31个有usage的assistant样本，input 125885002、cache
+50810880，命中率 **40.36%**（不是未来部署收益，不达≥80%）。api 4样本11.67%，web 1样本0%。
+该历史聚合还不能按具体job定位，需要新成本归因开始积累后再核验；不输出用户消息内容。
