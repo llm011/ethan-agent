@@ -269,26 +269,24 @@ async def _run_generation(
             try:
                 if getattr(run, "stop_requested", False):
                     stopped_content = (collector.full or "") + "\n\n_（已停止）_"
-                    await store.update_message(
-                        progress_msg_id,
-                        session_id,
-                        Message(
-                            role="assistant",
-                            content=stopped_content,
-                            thought=collector.thought,
-                            reasoning=collector.reasoning,
-                            usage=collector.usage_dict,
-                            tool_steps=collector.tool_steps or [],
-                            a2ui=collector.a2ui or None,
-                            mcp_apps=collector.mcp_apps or None,
-                            cards=collector.cards or None,
-                            matched_skills=collector.matched_skills or None,
-                            ttfb_ms=collector.ttfb_ms,
-                            total_ms=collector.total_ms,
-                            status="stopped",
-                            model=runner.model,
-                        ),
+                    stopped_msg = Message(
+                        role="assistant",
+                        content=stopped_content,
+                        thought=collector.thought,
+                        reasoning=collector.reasoning,
+                        usage=collector.usage_dict,
+                        tool_steps=collector.tool_steps or [],
+                        a2ui=collector.a2ui or None,
+                        mcp_apps=collector.mcp_apps or None,
+                        cards=collector.cards or None,
+                        matched_skills=collector.matched_skills or None,
+                        ttfb_ms=collector.ttfb_ms,
+                        total_ms=collector.total_ms,
+                        status="stopped",
+                        model=runner.model,
                     )
+                    stopped_msg._wire_transcript = collector.wire_transcript
+                    await store.update_message(progress_msg_id, session_id, stopped_msg)
                     await store.touch(session_id, mark_read=bool(run.subscribers))
                 else:
                     await store.delete_message_by_id(progress_msg_id)
@@ -313,6 +311,7 @@ async def _run_generation(
                     status="stopped",
                     model=runner.model,
                 )
+                stopped_msg._wire_transcript = collector.wire_transcript
                 await store.save_message(session_id, stopped_msg)
                 await store.touch(session_id, mark_read=bool(run.subscribers))
             except Exception:
@@ -372,6 +371,7 @@ async def _run_generation(
                 model=runner.model,
                 error=err_text,
             )
+            err_msg._wire_transcript = collector.wire_transcript
             try:
                 if progress_msg_id:
                     await store.update_message(progress_msg_id, session_id, err_msg)

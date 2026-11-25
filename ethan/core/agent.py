@@ -275,6 +275,10 @@ class Agent:
             mini_sys = "请用中文简洁回答用户的问题。如果任务已完成，请总结你做了什么。如果遇到问题，请说明卡在哪里。"
             resp = await self._provider.chat(mini_msgs, tools=None, system=mini_sys)
             self.usage.add(resp.usage)
+            # Preserve the actual retry round, including its own reasoning. The
+            # public helper still returns the legacy stripped text to consumers.
+            if hasattr(self, "_wire_transcript"):
+                self._wire_transcript.append(resp)
             return (resp.content or "").strip() or None
         except Exception:
             logger.warning("极简 prompt 重试失败", exc_info=True)

@@ -15,8 +15,9 @@ async def make_store(path):
     return store, session, row
 
 
-def test_real_producer_persists_wire_and_terminal_paths(tmp_path, monkeypatch):
-    termination = "completed"
+@pytest.mark.parametrize("termination", ["completed", "error", "stopped"])
+@pytest.mark.parametrize("progress", [False, True])
+def test_real_producer_persists_wire_and_terminal_paths(tmp_path, monkeypatch, termination, progress):
     import ethan.core.paths as paths
     from ethan.core.agent import Agent
     from ethan.core.run_manager import ChatRun
@@ -31,6 +32,15 @@ def test_real_producer_persists_wire_and_terminal_paths(tmp_path, monkeypatch):
         return None
     for name in ("_maybe_consolidate", "_maybe_generate_skill", "_maybe_regen_title", "_close_browser_sessions"):
         monkeypatch.setattr(producers, name, noop)
+
+    monkeypatch.setattr(producers, "_RunManager_schedule_removal", lambda *args: None)
+
+    class Consent:
+        def policy_check(self, *args):
+            return None
+
+        def cancel_all(self):
+            pass
 
     class Tool(BaseTool):
         name = "fixture_read"
@@ -56,7 +66,9 @@ def test_real_producer_persists_wire_and_terminal_paths(tmp_path, monkeypatch):
             if self.calls == 3:
                 if termination == "error":
                     raise RuntimeError("fixture provider failure")
-                if termination == "cancelled":
+                if termination == "stopped":
+                    # Leave partial visible text for the non-progress stop path.
+                    yield StreamChunk("fixture partial")
                     raise asyncio.CancelledError()
             if self.calls <= 2:
                 call = ToolCall(f"call-{self.calls}", "fixture_read", {})
@@ -82,8 +94,12 @@ def test_real_producer_persists_wire_and_terminal_paths(tmp_path, monkeypatch):
             agent._prepare_session_memory = noop
             agent._skills = None
             chat_run = ChatRun(session.id)
-            task = producers._run_generation(chat_run, agent, [Message("user", "fixture goal")], store, session.id)
-            if termination == "cancelled":
+            chat_run.stop_requested = termination == "stopped"
+            task = producers._run_generation(
+                chat_run, agent, [Message("user", "fixture goal")], store, session.id,
+                consent=Consent() if progress else None,
+            )
+            if termination == "stopped":
                 with pytest.raises(asyncio.CancelledError):
                     await task
             else:
@@ -91,18 +107,97 @@ def test_real_producer_persists_wire_and_terminal_paths(tmp_path, monkeypatch):
             loaded = await store.load(session.id)
             assert len(loaded.messages) == 1
             bubble = loaded.messages[0]
-            assert bubble.status == ("completed" if termination == "completed" else "interrupted")
+            assert bubble.status == {"completed": "completed", "error": "interrupted", "stopped": "stopped"}[termination]
             wire = bubble._wire_transcript
             assert [m.reasoning for m in wire if m.tool_calls] == ["reason-1", "reason-2"]
             assert [m.tool_call_id for m in wire if m.role == "tool"] == ["call-1", "call-2"]
             if termination == "completed":
                 assert bubble.reasoning == "final-reason"
-                # A NEW actual agent request expands DB history, not handmade history.
-                async for _ in agent.stream_chat([*loaded.messages, Message("user", "continue fixture")]):
-                    pass
-                assert any(m.get("tool_calls") for m in provider.captured[-1])
+            # A NEW actual agent request expands DB history for every terminal path.
+            async for _ in agent.stream_chat([*loaded.messages, Message("user", "continue fixture")]):
+                pass
+            assert any(m.get("tool_calls") for m in provider.captured[-1])
         finally:
             await store.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("retry_content", ["  recovered answer  ", ""])
+def test_minimal_retry_round_survives_load_and_next_request(tmp_path, monkeypatch, streaming, retry_content):
+    import ethan.core.paths as paths
+    from ethan.core.agent import Agent
+    from ethan.core.stream_collector import StreamCollector
+    from ethan.providers.base import StreamChunk
+
+    monkeypatch.setenv("ETHAN_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(paths, "user_procedures_path", lambda: tmp_path / "procedures.json")
+
+    async def noop(*args, **kwargs):
+        pass
+
+    class Provider:
+        model = "fake"
+
+        def __init__(self):
+            self.captured = []
+            self.retry_response = None
+
+        async def chat(self, messages, tools=None, system=None, **kwargs):
+            self.captured.append(list(messages))
+            if system.startswith("请用中文简洁回答"):
+                self.retry_response = Message("assistant", retry_content, reasoning="retry-own-reasoning")
+                return self.retry_response
+            return Message("assistant", "", reasoning="empty-round-reasoning")
+
+        async def stream_chat(self, messages, **kwargs):
+            self.captured.append(list(messages))
+            yield StreamChunk("", reasoning="empty-round-reasoning", is_final=True)
+
+    async def run():
+        store = SessionStore(tmp_path / "s.db")
+        await store.init()
+        session = await store.create("fake")
+        try:
+            agent = Agent(tool_registry=ToolRegistry())
+            provider = Provider()
+            agent._provider = provider
+            agent._select_route = lambda messages: ("full", "fixture system", [], 1)
+            agent._provider_for_route = lambda route: provider
+            agent._prepare_session_memory = noop
+            agent._skills = None
+            initial = [Message("user", "fixture goal")]
+            if streaming:
+                collector = StreamCollector().bind(agent)
+                async for item in agent.stream_chat(initial):
+                    collector.feed(item)
+                bubble = Message("assistant", collector.full, reasoning=collector.reasoning)
+                bubble._wire_transcript = collector.wire_transcript
+            else:
+                bubble = await agent.chat(initial)
+            expected = retry_content.strip() if retry_content else bubble.content
+            assert bubble.content == expected
+            assert expected
+            assert any(message is provider.retry_response for message in bubble._wire_transcript)
+            await store.save_message(session.id, bubble)
+            loaded = await store.load(session.id)
+            wire = loaded.messages[0]._wire_transcript
+            assert any(m.content == retry_content and m.reasoning == "retry-own-reasoning" for m in wire)
+            if not retry_content:
+                assert wire[-1].content == expected
+            next_messages = [*loaded.messages, Message("user", "continue fixture")]
+            first_request = len(provider.captured)
+            if streaming:
+                async for _ in agent.stream_chat(next_messages):
+                    pass
+            else:
+                await agent.chat(next_messages)
+            outgoing = provider.captured[first_request]
+            assert any(m.content.strip() == expected for m in outgoing)
+            assert any(m.content == retry_content and m.reasoning == "retry-own-reasoning" for m in outgoing)
+        finally:
+            await store.close()
+
     asyncio.run(run())
 
 

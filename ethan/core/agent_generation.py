@@ -42,7 +42,13 @@ class ChatTransport:
             yield None
 
     async def ensure_nonempty(self, agent, state, reason):
-        state.response = await agent._ensure_non_empty(state.response, state.working, state.monitor, reason)
+        previous = state.response
+        recorded = len(state.wire_transcript)
+        state.response = await agent._ensure_non_empty(previous, state.working, state.monitor, reason)
+        if state.response is not previous:
+            retry_rounds = state.wire_transcript[recorded:]
+            if not any((message.content or "").strip() for message in retry_rounds):
+                state.wire_transcript.append(state.response)
         if False:
             yield None
 
@@ -150,13 +156,19 @@ class StreamTransport:
         if state.response.content:
             return
         text = None
+        recorded = len(state.wire_transcript)
         if not state.empty_retried:
             state.empty_retried = True
             text = await agent._minimal_retry(state.working)
+        retry_succeeded = bool(text)
         if not text:
             calls = [m for m in state.working if m.role == "assistant" and m.tool_calls]
             text = compat._empty_reply_fallback_text(reason, len(calls))
         state.response = Message("assistant", text)
+        # _minimal_retry records the real provider Message. Only synthesize a
+        # wire round for fallback text or compatibility helpers that return text.
+        if not retry_succeeded or len(state.wire_transcript) == recorded:
+            state.wire_transcript.append(state.response)
         yield text
 
 

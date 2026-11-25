@@ -81,12 +81,61 @@ def test_store_has_save_method():
     assert hasattr(SessionStore, "save_kernel_session")
 
 
-def test_migration_adds_columns():
-    """建表迁移里要有这两列（老库升级靠它）。"""
-    src = (ROOT / "ethan/memory/session.py").read_text(encoding="utf-8")
-    assert "kernel_session_id" in src
-    assert "ADD COLUMN kernel_session_id" in src
-    assert "ADD COLUMN kernel_kind" in src
+@pytest.fixture
+def anyio_backend():
+    # SessionStore / producer 使用 asyncio；不要求环境安装 trio。
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_migration_adds_columns(tmp_path):
+    """真实旧库经 init 升级，默认值、持久化及重复升级均可用。"""
+    import sqlite3
+
+    from ethan.memory.session import SessionStore
+
+    db_path = tmp_path / "old-sessions.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute("""
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, model TEXT NOT NULL,
+                created_at REAL NOT NULL, updated_at REAL NOT NULL,
+                source TEXT NOT NULL DEFAULT 'web', mode TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        db.execute("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?)",
+                   ("s_ethan_old", "旧对话", "m", 1, 2, "web", ""))
+        columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
+        assert "kernel_session_id" not in columns
+        assert "kernel_kind" not in columns
+
+    store = SessionStore(db_path=db_path)
+    try:
+        await store.init()
+        async with store._db.execute("PRAGMA table_info(sessions)") as cursor:
+            columns = {row[1]: row for row in await cursor.fetchall()}
+        for name in ("kernel_session_id", "kernel_kind"):
+            assert columns[name][2] == "TEXT"
+            assert columns[name][3] == 1  # NOT NULL
+            assert columns[name][4] == "''"
+        old = await store.load("s_ethan_old")
+        assert old.id == "s_ethan_old"
+        assert old.title == "旧对话"
+        assert old.kernel_session_id == old.kernel_kind == ""
+        await store.save_kernel_session(old.id, "dsh-uuid", "dsh")
+    finally:
+        await store.close()
+
+    # 重开数据库再 init，确认迁移幂等且 id 与持久化字段没有混淆。
+    reopened = SessionStore(db_path=db_path)
+    try:
+        await reopened.init()
+        loaded = await reopened.load("s_ethan_old")
+        assert loaded.id == "s_ethan_old"
+        assert loaded.kernel_session_id == "dsh-uuid"
+        assert loaded.kernel_kind == "dsh"
+    finally:
+        await reopened.close()
 
 
 def test_api_exposes_fields():
@@ -96,11 +145,77 @@ def test_api_exposes_fields():
     assert '"kernel_kind"' in src
 
 
-def test_stream_event_carries_fields():
-    """done 事件里要带出去，前端在流结束时就地展示。"""
-    src = (ROOT / "ethan/interface/routers/producers.py").read_text(encoding="utf-8")
-    assert 'done_evt["kernel_session_id"]' in src
-    assert 'done_evt["kernel_kind"]' in src
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("kernel_kind", "kernel_session_id", "exposed"),
+    [("dsh", "dsh-uuid", True), ("claude_code", "claude-uuid", True),
+     ("dsh", "", False), ("ethan", "s_ethan_native", False)],
+)
+async def test_stream_event_carries_fields(tmp_path, monkeypatch, kernel_kind, kernel_session_id, exposed):
+    """执行真实 producer：done 即时下发、落库，且不泄露原生内核 id。"""
+    from types import SimpleNamespace
+
+    from ethan.core.run_manager import ChatRun
+    from ethan.interface.routers import producers
+    from ethan.kernel import dispatch
+    from ethan.memory.session import SessionStore
+    from ethan.providers.base import Message
+
+    async def noop(*args, **kwargs):
+        return None
+
+    # 仅隔离内核执行及与字段契约无关的后台服务，保留 collector / done / DB 真逻辑。
+    for name in ("_maybe_consolidate", "_maybe_generate_skill", "_maybe_regen_title", "_close_browser_sessions"):
+        monkeypatch.setattr(producers, name, noop)
+    monkeypatch.setattr(producers, "_RunManager_schedule_removal", lambda session_id: None)
+
+    class Runner:
+        model = "fixture-model"
+        real_model = "fixture-model"
+        kernel_name = "fixture-kernel"
+        usage = SimpleNamespace(input_tokens=1, output_tokens=2, cache_tokens=0)
+
+        async def stream_chat(self, messages):
+            yield "fixture reply"
+
+    runner = Runner()
+    runner.kernel_kind = kernel_kind
+    runner.kernel_session_id = kernel_session_id
+    monkeypatch.setattr(dispatch, "build_runner", lambda *args, **kwargs: runner)
+    agent = SimpleNamespace(_executor=SimpleNamespace(), _skills=None, last_matched_skills=[])
+
+    store = SessionStore(db_path=tmp_path / "sessions.db")
+    try:
+        await store.init()
+        session = await store.create(model=runner.model)
+        run = ChatRun(session.id)
+        queue, _ = run.subscribe()
+        await producers._run_generation(run, agent, [Message("user", "fixture prompt")], store, session.id)
+        assert run.done
+        assert not any("error" in event for event in run.events)
+        done_events = [event for event in run.events if event.get("done")]
+        assert len(done_events) == 1
+        done = done_events[0]
+        assert done["model"] == runner.model
+        # 不只检查 replay 缓冲：正在订阅的前端也确实收到了同一 done 事件。
+        delivered = []
+        while not queue.empty():
+            delivered.append(queue.get_nowait())
+        assert done in delivered
+        loaded = await store.load(session.id)
+        assert loaded.id == session.id
+        assert [message.content for message in loaded.messages] == ["fixture reply"]
+        if exposed:
+            assert done["kernel_session_id"] == kernel_session_id
+            assert done["kernel_kind"] == kernel_kind
+            assert loaded.kernel_session_id == kernel_session_id
+            assert loaded.kernel_kind == kernel_kind
+        else:
+            assert "kernel_session_id" not in done
+            assert "kernel_kind" not in done
+            assert loaded.kernel_session_id == loaded.kernel_kind == ""
+    finally:
+        await store.close()
 
 
 # ── 三端 UI ──────────────────────────────────────────────────
