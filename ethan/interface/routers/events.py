@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
@@ -56,7 +57,9 @@ async def _receive_event(source: str, request: Request):
                 body.extend(chunk)
         delivery = authenticate(settings, source, bytes(body), request.headers)
         event = normalize_event(settings, source, bytes(body), request.headers)
-        duplicate = await asyncio.to_thread(ledger.claim, source, delivery)
+        # GitHub signs raw body, not delivery headers: block captured-body replays.
+        digest = hashlib.sha256(body).hexdigest() if source == "github" else None
+        duplicate = await asyncio.to_thread(ledger.claim, source, delivery, digest)
         if duplicate:
             return duplicate
         claimed = True

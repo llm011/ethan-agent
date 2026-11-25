@@ -60,14 +60,26 @@ Agent 无 tools/skills，`is_owner=False`，硬拒绝所有工具请求，防注
 
 - 原始 body ≤64 KiB，支持流式累计检查；读取超时 10 秒；入站每 worker 最多 8 个请求。
 - 单独 SQLite 事务原子去重与全 worker admission：最多 2 个运行中事件、每分钟最多 10 次新事件。
-- HMAC/类型/schema 检查通过后才 claim；拒绝不会占用 delivery。重复返回 `status=duplicate`，不再启动模型。
+- HMAC/类型/schema 检查通过后才 claim；拒绝不会占用 delivery。重复返回 `status=duplicate`，不再启动模型或消耗 admission 配额。
+- GitHub 同时以 `(source, SHA256(raw_body))` 唯一索引去重；改 delivery header 重放完全相同的签名 body
+  仍返回原记录。检查摘要、delivery、配额与写入在同一个 SQLite 写事务内完成。
+  同一原始 body 永久视为同一事件（即使合法发送方换 id）；不同事件应有不同的签名正文。
 - admission/执行失败记录 `failed`/`interrupted`；相同 id 仍不自动重跑，避免不确定结果重复执行。
 - Agent 执行上限 120 秒。graceful shutdown 取消事件 task 并记录 interrupted；进程硬崩溃后的
   `running` reservation **不自动过期**（避免长运行 lease 到期重复执行）。操作员先确认原进程已停止，
-  再在独立事件库把残留 state 改为 `interrupted`，可释放并发名额；需要重试使用新的 delivery id。
+  再在独立事件库把残留 state 改为 `interrupted`，可释放并发名额；重试需要新的 delivery id，
+  GitHub 还需要新的合法签名正文，否则 body 去重仍会拒绝重跑。
 - 去重库不自动清理，保留跨重启去重；长期部署需要操作员按保留策略管理磁盘。
-- GitHub 标准签名不绑定 delivery header，无发送时间戳；不能承诺对已捕获签名 body 换 id 的防重放。
-  TLS、网关限流、保护 secret 必需。告警协议通过签名绑定 id/时间戳规避此问题。
+- GitHub 标准签名不绑定 delivery header、事件类型 header，也没有发送时间戳。body 摘要阻止已经
+  记录的签名正文换 id 重放，但不能验证首次收到的旧签名正文是否新鲜。TLS、网关限流、保护 secret 必需。
+  告警协议通过签名绑定 id/时间戳限制重放；其合法同 body 不同 id 告警仍是不同事件。
+- 旧账本幂等新增可空 `body_digest` 列和部分唯一索引。历史记录没有原始 body，保持 NULL，不编造或
+  从后来同 id 请求回填摘要；历史 id 仍去重，历史 body 换新 id 在首次记录摘要前无法追溯防重放。
+- 模型空回复最终兜底不调用通用 `_minimal_retry` 或第四次模型，避免丢失固定事件策略。
+  会输出“摘要生成失败、无法复核、请人工检查、未执行操作”的确定性文本；仅替换通用合成兜底，
+  wire/检查点保留此前真实生成轮的 reasoning，并与 UI 使用同一失败文本。聚合 usage 仍计入所有真实调用；
+  当前 wire schema 存协议字段与 reasoning，不逐轮持久化 usage。
+  此消息和 delivery 可以是 completed/done（处理已经结束），**不表示事件复核成功**。
 
 ## 本地便宜心跳检查
 
@@ -108,6 +120,6 @@ ETHAN_NO_WATCHDOG=1 PYTHONPATH="$PWD" /path/to/main/.venv/bin/python -m pytest \
 真实 Agent 集成还验证空工具广播、payload 不进入 system、usage/正文落库、delivery 完成状态与
 单条 assistant 进度行复用（绑定当前运行检查点接口，避免重复空消息）。
 
-在独立 `feature/event-triggers` worktree、main 基线 `19fd224d` 上运行上述命令：**21 passed**；
+在独立 `feature/event-triggers` worktree、main 基线 `19fd224d` 上运行上述命令：**24 passed**；
 对应修改文件 ruff 与 `git diff --check` 通过。仅使用本 worktree 的 `PYTHONPATH` 和主仓库现有解释器，
 不叠加其他 worktree 代码。线上 token 节省未测，不能视为收益验收。

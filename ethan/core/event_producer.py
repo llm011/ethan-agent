@@ -38,10 +38,18 @@ async def prepare_event(settings: EventSettings, event: dict, source: str, deliv
             # policy, never any field/header/body supplied by the webhook sender.
             return super()._build_system(messages, fast=fast, fast_rule=fast_rule) + "\n\n" + _POLICY
 
+        async def _minimal_retry(self, working):
+            # The base retry bypasses _build_system. Fail closed instead of sending
+            # untrusted event data with its generic system prompt to another model.
+            self._event_summary_unavailable = True
+            self._event_real_wire_count = len(self._wire_transcript)
+            return None
+
     agent = EventAgent(tool_registry=ToolRegistry(), skill_registry=None,
                        channel="event", user_id=settings.user_id, mode="minimal")
     agent.is_owner = False
     agent.runtime_context = _POLICY  # constant trusted policy; no payload interpolation
+    agent._event_summary_unavailable = False
     session = await store.create(agent.model, source="event", mode="minimal",
                                  title=f"[事件] {event['type']}")
     message = Message(role="user", content="UNTRUSTED_EVENT_DATA_JSON\n" + json.dumps(event, ensure_ascii=True))
@@ -95,10 +103,23 @@ async def _produce(agent, run, store, message, settings, source, delivery):
         run.emit({"model": agent.model})
         async with asyncio.timeout(120):
             async for item in agent.stream_chat([message]):
+                if agent._event_summary_unavailable:
+                    # Discard the generic success-like fallback synthesized by Agent.
+                    continue
                 text = collector.feed(item)
                 if text:
                     run.emit({"content": text})
-        result = Message(role="assistant", content=collector.full, reasoning=collector.reasoning or None,
+        content = collector.full
+        if agent._event_summary_unavailable:
+            content = "事件摘要生成失败，无法复核该事件。请人工检查原始事件；未执行任何操作。"
+            # Preserve real empty generations (including their reasoning), replacing
+            # only the generic synthetic tail added after our fail-closed retry.
+            agent._wire_transcript = agent._wire_transcript[:agent._event_real_wire_count] + [
+                Message(role="assistant", content=content)]
+            if recorder is not None:
+                await recorder({"kind": "generation", "messages": agent._wire_transcript})
+            run.emit({"content": content})
+        result = Message(role="assistant", content=content, reasoning=collector.reasoning or None,
                          usage=collector.usage_dict, status="completed")
         result._wire_transcript = list(getattr(agent, "_wire_transcript", []) or [])
         await store.update_message(progress_id, run.session_id, result)

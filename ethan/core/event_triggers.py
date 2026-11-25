@@ -142,25 +142,42 @@ class DeliveryLedger:
     def _connect(self):
         self.settings.db_path.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(self.settings.db_path, timeout=2)
-        db.execute("CREATE TABLE IF NOT EXISTS deliveries (source TEXT, delivery TEXT, "
-                   "created REAL, state TEXT, session_id TEXT DEFAULT '', PRIMARY KEY(source, delivery))")
-        db.commit()
-        return db
+        try:
+            # Serialize schema discovery/migration across workers as well as admission.
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("CREATE TABLE IF NOT EXISTS deliveries (source TEXT, delivery TEXT, "
+                       "created REAL, state TEXT, session_id TEXT DEFAULT '', body_digest TEXT, "
+                       "PRIMARY KEY(source, delivery))")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(deliveries)")}
+            if "body_digest" not in columns:
+                db.execute("ALTER TABLE deliveries ADD COLUMN body_digest TEXT")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS deliveries_body_digest "
+                       "ON deliveries(source, body_digest) WHERE body_digest IS NOT NULL")
+            db.commit()
+            return db
+        except BaseException:
+            db.close()
+            raise
 
-    def claim(self, source: str, delivery: str) -> dict | None:
+    def claim(self, source: str, delivery: str, body_digest: str | None = None) -> dict | None:
+        if body_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", body_digest):
+            raise ValueError("Invalid body digest")
         db = self._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT state, session_id FROM deliveries WHERE source=? AND delivery=?",
                              (source, delivery)).fetchone()
+            if row is None and body_digest is not None:
+                row = db.execute("SELECT state, session_id FROM deliveries WHERE source=? AND body_digest=?",
+                                 (source, body_digest)).fetchone()
             if row:
                 return {"status": "duplicate", "state": row[0], "session_id": row[1]}
             active = db.execute("SELECT count(*) FROM deliveries WHERE state='running'").fetchone()[0]
             recent = db.execute("SELECT count(*) FROM deliveries WHERE created>?", (time.time() - 60,)).fetchone()[0]
             if active >= self.settings.max_concurrent or recent >= self.settings.per_minute:
                 raise EventError(429, "Event admission limit reached")
-            db.execute("INSERT INTO deliveries(source, delivery, created, state) VALUES (?, ?, ?, 'running')",
-                       (source, delivery, time.time()))
+            db.execute("INSERT INTO deliveries(source, delivery, created, state, body_digest) "
+                       "VALUES (?, ?, ?, 'running', ?)", (source, delivery, time.time(), body_digest))
             db.commit()
             return None
         finally:
