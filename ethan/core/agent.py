@@ -664,7 +664,7 @@ class Agent:
         from ethan.core.artifacts import inject_artifacts_prompt
 
         inject_artifacts_prompt(working)  # 注入本会话已生成/交付的文件清单，供后续轮次直接引用
-        enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
+        enforce_context_budget(working, self.session_id)  # 历史 tool result 也可能很大，进循环前先管控
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
@@ -982,7 +982,7 @@ class Agent:
                             images=r.images or [],
                         )
                     )
-                enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
+                enforce_context_budget(working, self.session_id)  # 新 tool result 进上下文前管控体积，防撑爆
                 compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
                 monitor.record(response.tool_calls, had_error)
 
@@ -1148,7 +1148,7 @@ class Agent:
         from ethan.core.artifacts import inject_artifacts_prompt
 
         inject_artifacts_prompt(working)  # 注入本会话已生成/交付的文件清单，供后续轮次直接引用
-        enforce_context_budget(working)  # 历史 tool result 也可能很大，进循环前先管控
+        enforce_context_budget(working, self.session_id)  # 历史 tool result 也可能很大，进循环前先管控
         compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
         _route, system, tools_list, max_iters = self._select_route(working)
         provider = self._provider_for_route(_route)
