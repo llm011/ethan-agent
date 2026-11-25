@@ -178,6 +178,9 @@ defaults:
 
 在任意 Skill 的 `SKILL.md` frontmatter 中加入 `fast_path: true`，该 Skill 的所有 trigger 关键词同时成为快轨入口。
 
+路由关键词（规则 keywords / 技能 trigger）只支持 `*` 通配，其余字符均按字面匹配，
+不是正则表达式；例如 `关*灯` 可匹配「关客厅灯」，`.`、`(`、`[` 不具有正则含义。
+
 ---
 
 ## 设计原则
