@@ -188,6 +188,11 @@ result_compressor.maybe_compress(tool_name, result)
 
 ---
 
+## 真实 wire 历史
+
+逐轮 assistant reasoning、tool-call ID 与结果独立于 UI 汇总正文保存，下一请求恢复完整配对。
+消息与 wire 独立事务同时提交；详见 [协议持久化](wire-transcripts.md)。这不替代每轮运行检查点。
+
 ## 模块拆分
 
 `core/agent.py` 长期承担了循环控制 + 回复质量判定 + 错误分类三件事。按职责把与 `Agent` 实例状态无关的纯函数拆到独立模块，`agent.py` 保留 re-export 以兼容旧引用路径（`agent._is_degenerate_reply` 等）：

@@ -19,6 +19,9 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 路由同时记录 `fast/full` 档位和 `strong/medium/weak` 信号强度：明确技能命中提前装载正文与引用工具，
 不确定时保守 full，不改变迭代预算，也不放宽非主人权限。详见 [路由决策](docs/routing.md)。
 
+原生多工具轮的 reasoning 与 tool-call ID 单独持久化，最终 UI 汇总消息与 wire 历史同事务提交；
+下一请求只展开完整配对轮次。见 [协议历史](docs/wire-transcripts.md)。
+
 ## 特性
 
 **多内核**

@@ -36,12 +36,19 @@ class ChatTransport:
             response = await provider.chat(state.working, tools=tools, system=system)
         agent.usage.add(response.usage)
         state.response = response
+        state.generated_wire = response
         state.final_chunk = None
         if False:
             yield None
 
     async def ensure_nonempty(self, agent, state, reason):
-        state.response = await agent._ensure_non_empty(state.response, state.working, state.monitor, reason)
+        previous = state.response
+        recorded = len(state.wire_transcript)
+        state.response = await agent._ensure_non_empty(previous, state.working, state.monitor, reason)
+        if state.response is not previous:
+            retry_rounds = state.wire_transcript[recorded:]
+            if not any((message.content or "").strip() for message in retry_rounds):
+                state.wire_transcript.append(state.response)
         if False:
             yield None
 
@@ -137,22 +144,31 @@ class StreamTransport:
             calls = agent._parse_stream_text_tool_calls(content)
             if calls:
                 content = strip_text_calls(content)
-        # Auxiliary stream paths retain the legacy reasoning prompt policy.
+        # Existing nudge/finalize paths discarded reasoning in working. Keep that
+        # legacy prompt policy, but recorder receives the full generated wire.
         prompt_reasoning = reasoning if purpose == "main" else ""
         state.response = Message("assistant", content, tool_calls=calls, reasoning=prompt_reasoning or None)
+        state.generated_wire = Message("assistant", content, tool_calls=calls, reasoning=reasoning or None,
+                                       usage=final.usage if final else None)
         state.final_chunk = final
 
     async def ensure_nonempty(self, agent, state, reason):
         if state.response.content:
             return
         text = None
+        recorded = len(state.wire_transcript)
         if not state.empty_retried:
             state.empty_retried = True
             text = await agent._minimal_retry(state.working)
+        retry_succeeded = bool(text)
         if not text:
             calls = [m for m in state.working if m.role == "assistant" and m.tool_calls]
             text = compat._empty_reply_fallback_text(reason, len(calls))
         state.response = Message("assistant", text)
+        # _minimal_retry records the real provider Message. Only synthesize a
+        # wire round for fallback text or compatibility helpers that return text.
+        if not retry_succeeded or len(state.wire_transcript) == recorded:
+            state.wire_transcript.append(state.response)
         yield text
 
 
