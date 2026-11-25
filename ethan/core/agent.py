@@ -1199,12 +1199,14 @@ class Agent:
         _same_model_retried = False
 
         async def _pump(stream):
-            # 消费一轮流式响应：reasoning → ThinkingEvent、content → 累积并透传、
-            # final → 记 final_chunk + 计 usage。主路径与各异常兜底重试（图片剥离 /
-            # 400 裁剪 / lite 回退 / 备选模型 / 同模型）共用，消费逻辑改这里一处即可。
-            nonlocal full_content, final_chunk
+            # 消费一轮流式响应：reasoning → ThinkingEvent + 累积（回填消息用）、
+            # content → 累积并透传、final → 记 final_chunk + 计 usage。主路径与各
+            # 异常兜底重试（图片剥离 / 400 裁剪 / lite 回退 / 备选模型 / 同模型）共用，
+            # 消费逻辑改这里一处即可。
+            nonlocal full_content, final_chunk, round_reasoning
             async for chunk in stream:
                 if chunk.reasoning:
+                    round_reasoning += chunk.reasoning
                     yield ThinkingEvent(delta=chunk.reasoning)
                 if chunk.content:
                     full_content += chunk.content
@@ -1274,6 +1276,7 @@ class Agent:
                 sys = system + pending_suffix if pending_suffix else system
             pending_suffix = ""
             full_content = ""
+            round_reasoning = ""
             final_chunk = None
 
             # 本轮模型生成计时（含流式传输与异常兜底重试），随 start ToolEvent 下发，
@@ -1396,11 +1399,14 @@ class Agent:
                         full_content = strip_invoke_tool_blocks(full_content).strip()
                     if not full_content.strip():
                         full_content = ""
-                    response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
+                    response = Message(role="assistant", content=full_content, tool_calls=tool_calls,
+                                       reasoning=round_reasoning or None)
                 else:
-                    response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
+                    response = Message(role="assistant", content=full_content, tool_calls=tool_calls,
+                                       reasoning=round_reasoning or None)
             else:
-                response = Message(role="assistant", content=full_content, tool_calls=tool_calls)
+                response = Message(role="assistant", content=full_content, tool_calls=tool_calls,
+                                   reasoning=round_reasoning or None)
             working.append(response)
 
             # SSL 断连自动续接：检测到 truncated 且为纯文本回复时，注入续接提示重新调模型
