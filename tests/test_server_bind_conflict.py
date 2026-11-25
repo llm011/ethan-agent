@@ -284,6 +284,8 @@ def test_run_server_proceeds_when_no_db_conflict(monkeypatch):
     monkeypatch.delenv("ETHAN_NO_WATCHDOG", raising=False)
     monkeypatch.setattr(api, "_port_is_served", lambda *_a, **_k: False)
     monkeypatch.setattr(api, "_find_db_conflicts", lambda: [])
+    # This case tests the DB gate, not the separately covered process lock.
+    monkeypatch.setattr(serve_lock, "acquire", lambda _port: (True, None))
 
     ran = {"uvicorn": False}
 

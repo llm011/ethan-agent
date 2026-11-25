@@ -203,7 +203,8 @@ class TestFindConflictingServers:
 class TestServeMainForceFlag:
     """--force 应能绕过检测；不带 --force 且有冲突应拒绝启动（exit 1）。"""
 
-    def test_refuses_without_force(self, tmp_path: Path):
+    def test_refuses_without_force(self, tmp_path: Path, monkeypatch):
+        monkeypatch.delenv("ETHAN_NO_WATCHDOG", raising=False)
         from typer.testing import CliRunner
 
         from ethan.interface import cli as cli_mod
@@ -211,9 +212,10 @@ class TestServeMainForceFlag:
         runner = CliRunner()
         with patch.object(cli_mod, "_find_conflicting_servers",
                           return_value=[(12345, str(tmp_path / "sessions.db"))]), \
-             patch.object(cli_mod, "app", cli_mod.app):
+             patch("ethan.interface.api.run_server") as mock_run:
             result = runner.invoke(cli_mod.app, ["serve", "--port", "9999"])
 
+        mock_run.assert_not_called()
         assert result.exit_code == 1
         assert "拒绝启动" in result.output
 
