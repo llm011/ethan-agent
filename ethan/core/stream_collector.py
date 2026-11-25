@@ -60,6 +60,11 @@ class StreamCollector:
         self._first_visible_at: float | None = None
         # 用户「运行中补充信息」：InjectEvent 来了存这里，下一个 tool start 时挂到 step 上并清空。
         self._pending_injected: list[str] = []
+        # 已输出去重（条目 5）：工具失败后模型常把同一句过渡语重说一遍，用户会看到两次。
+        # 维护最近输出的短文本块窗口，与窗口内某块完全相同的短块（≤ 去重阈值）不再累积/展示。
+        self._recent_texts: list[str] = []
+        self._dedup_window = 5
+        self._dedup_max_chars = 200
 
     def bind(self, agent) -> "StreamCollector":
         """绑定 agent，结束时从 agent.usage 取 token。"""
@@ -90,6 +95,16 @@ class StreamCollector:
         text = item if isinstance(item, str) else getattr(item, "content", "")
         if not text:
             return None
+        # 已输出去重：与最近窗口内某块完全相同的短过渡语不再累积/展示（工具失败后
+        # 模型常重说一遍「好的，我来…」之类的过渡语）。长文本不碰，避免误去重
+        # 合法内容；只去重完全相同（strip 后相等）的短块。
+        stripped = text.strip()
+        if stripped and len(stripped) <= self._dedup_max_chars:
+            if stripped in self._recent_texts:
+                return None
+            self._recent_texts.append(stripped)
+            if len(self._recent_texts) > self._dedup_window:
+                self._recent_texts.pop(0)
         if self._first_text_at is None:
             self._first_text_at = time.time()
         if self._first_visible_at is None:

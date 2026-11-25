@@ -378,7 +378,18 @@ GROUP BY 1 ORDER BY 2 DESC;
   - 协议判定新增证据驱动 `_history_carries_reasoning()`：最近一条 assistant 带 reasoning 即回传历史，不再只靠模型名匹配 `_wants_reasoning()`——覆盖 `deepseek-v4.1-flash` 等模型名表之外的 reasoning 模型。切到普通模型后最近一条无 reasoning → 不回传，避免污染新端点。
   验收：`tests/test_reasoning_backprop.py` 覆盖 parse_choice 挂 reasoning、证据驱动判定、序列化回传、以及「缺回传即抛 DeepSeek 400」的假客户端回归（禁用修复后该测试红，证明能抓 bug）。`ruff` 通过。
   - ⏳ 经网关对 `deepseek-v4.1-flash` 跑一次两步工具调用不报 400 的线上验证待部署后补。
-- [ ] 条目 5 状态补偿 + 去重 — 未开始
+- [x] 条目 5 状态补偿 + 去重 — 已实现（2026-11-25，工作区 `ethan-ai-loop-robust`，分支 `feature/loop-robust`）。
+  - **按状态补偿（单次失败即提醒）**：新增 `loop_control.tool_error_hint()`；agent 主循环
+    （`chat` / `stream_chat` 两处）在 `had_error` 且未触发 `is_stuck` 时，把轻量针对性提醒
+    附到下一轮 system 的 `pending_suffix`，引导模型先判失败原因、换路而非原样重试。
+    连续失败由 `is_stuck` 的 `reflection_message` 接管（覆盖 pending_suffix），两者不冲突。
+  - **已输出去重**：`StreamCollector` 维护最近 5 个短文本块（≤200 字）窗口，与窗口内某块
+    完全相同（strip 后相等）的过渡语不再累积到 `full`、也不返回展示——修掉工具失败后模型
+    重说一遍过渡语、用户看到两次的问题。长文本 / 不同短文本不受影响；窗口外旧块重现放行。
+  - 顺手修了条目 1 的遗漏：`stream_chat` 循环内 `enforce_context_budget(working)` 漏传
+    `self.session_id`，导致流式主路径不落盘（已补传）。
+  验收：`tests/test_loop_robust.py` 覆盖 tool_error_hint 文案、collector 去重（5 种情况）、
+  以及 agent 级端到端「单次失败→下一轮 system 带提醒」。`ruff` 通过，69 项相关测试无回归。
 - [ ] 条目 6 运行检查点 — 未开始
 - [ ] 条目 7 循环拆分 — 未开始
 - [ ] 条目 8 会话级记忆提醒 — 未开始

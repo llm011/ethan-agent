@@ -681,6 +681,7 @@ class Agent:
             reflection_followup_message,
             reflection_message,
             should_trigger_decision,
+            tool_error_hint,
         )
 
         monitor = LoopMonitor()
@@ -985,6 +986,12 @@ class Agent:
                 enforce_context_budget(working, self.session_id)  # 新 tool result 进上下文前管控体积，防撑爆
                 compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
                 monitor.record(response.tool_calls, had_error)
+                # 单次工具失败 → 下一轮 system 附针对性提醒（不等连续失败才补偿，条目 5）。
+                # is_stuck 触发时 reflection_message 会覆盖 pending_suffix，两者不冲突。
+                if had_error:
+                    _err_result = results[-1].content if results else ""
+                    _err_tool = response.tool_calls[0].name if response.tool_calls else ""
+                    pending_suffix = "\n\n[System: " + tool_error_hint(_err_result, _err_tool) + "]"
 
             # plan 工具调用感知：如果本轮调了 plan_write，标记已规划
             if any(tc.name == "plan_write" for tc in response.tool_calls):
@@ -1182,6 +1189,7 @@ class Agent:
             reflection_followup_message,
             reflection_message,
             should_trigger_decision,
+            tool_error_hint,
         )
 
         monitor = LoopMonitor()
@@ -2039,9 +2047,14 @@ class Agent:
                     )
                 )
 
-            enforce_context_budget(working)  # 新 tool result 进上下文前管控体积，防撑爆
+            enforce_context_budget(working, self.session_id)  # 新 tool result 进上下文前管控体积，防撑爆
             compress_previous_round_tools(working, self.session_id)  # 压缩上一轮 search/fetch 结果
             monitor.record(tool_calls, had_error)
+            # 单次工具失败 → 下一轮 system 附针对性提醒（不等连续失败才补偿，条目 5）。
+            if had_error:
+                _err_result = results[-1].content if results else ""
+                _err_tool = tool_calls[0].name if tool_calls else ""
+                pending_suffix = "\n\n[System: " + tool_error_hint(_err_result, _err_tool) + "]"
             # [DIAG] 签名诊断：iter / 工具名 / 签名 hash / 是否 stuck（info 级别，便于观察）
             if tool_calls:
                 _sig = monitor._signatures[-1] if monitor._signatures else ""
