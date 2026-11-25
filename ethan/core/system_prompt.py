@@ -331,17 +331,10 @@ def build_system_prompt(
             parts.append(mode_identity)
         if agent_content:
             parts.append(f"<agent_protocols>\n{agent_content}\n</agent_protocols>")
-        parts.append(f"Current time: {now}")
-        parts.append(f"Your workspace directory is {workspace}.")
-        parts.append(
-            f"Current model: {provider_model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）"
-        )
-        parts.append(
-            "[工具] 你当前只挂载了少量常用工具。如果要做的事现有工具做不到"
-            "（写文件除外——file_write 已可用），先调 `find_tools` 激活进阶工具"
-            "（知识库/定时任务/密钥/记忆写入/代码委派等），激活后直接调用。"
-            "绝不要用 shell/terminal 跑 python 去硬凑这些能力。"
-        )
+        # ── 稳定层（分割点 Current time: 之前）：跨请求不变，可命中 prompt cache ──
+        # documents_protocol / intent 说明 / memory_recall_hint / user_profile /
+        # behavioral_guidelines 都是准静态（仅在用户或模型更新配置时才变），
+        # 移入稳定层扩大缓存命中区；原在分割点之后导致每轮重新计费（P2）。
         parts.append(_documents_protocol())
         if _ocr_available():
             parts.append(_image_priority_protocol())
@@ -366,6 +359,18 @@ def build_system_prompt(
                 f"{proc_ctx}\n"
                 "</behavioral_guidelines>"
             )
+        # ── 动态层（分割点之后）：每轮/每次变化，不缓存 ──
+        parts.append(f"Current time: {now}")
+        parts.append(f"Your workspace directory is {workspace}.")
+        parts.append(
+            f"Current model: {provider_model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）"
+        )
+        parts.append(
+            "[工具] 你当前只挂载了少量常用工具。如果要做的事现有工具做不到"
+            "（写文件除外——file_write 已可用），先调 `find_tools` 激活进阶工具"
+            "（知识库/定时任务/密钥/记忆写入/代码委派等），激活后直接调用。"
+            "绝不要用 shell/terminal 跑 python 去硬凑这些能力。"
+        )
         last_user = last_user_text_for_recall
         if skills and last_user:
             from ethan.core.modes import resolve_mode
@@ -477,12 +482,10 @@ def build_system_prompt(
                     )
             parts.append("<available_skills>\n" + "\n".join(lines) + "\n</available_skills>")
 
-    parts.append(f"Current time: {now}")
-    parts.append(
-        f"Current model: {provider_model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）"
-    )
-    parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
-
+    # ── 稳定层（分割点 Current time: 之前）：跨请求不变，可命中 prompt cache ──
+    # memory_recall_hint / user_profile / behavioral_guidelines 都是准静态
+    # （仅在用户或模型更新配置时才变），移入稳定层扩大缓存命中区；
+    # 原在分割点之后导致每轮重新计费（P2）。
     if is_owner:
         parts.append(
             "<memory_recall_hint>\n"
@@ -510,6 +513,13 @@ def build_system_prompt(
             f"{proc_ctx}\n"
             "</behavioral_guidelines>"
         )
+
+    # ── 动态层（分割点之后）：每轮/每次变化，不缓存 ──
+    parts.append(f"Current time: {now}")
+    parts.append(
+        f"Current model: {provider_model}（用户问起你用的什么模型/是谁驱动时，如实回答这个 model id）"
+    )
+    parts.append(f"Your workspace directory is {workspace}. System configurations and memories reside here.")
 
     last_user = last_user_text_for_recall
     if skills and last_user:

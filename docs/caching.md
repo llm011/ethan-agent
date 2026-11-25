@@ -24,25 +24,30 @@ system prompt 中有大量内容在多轮对话间几乎不变（identity、soul
 <identity>...</identity>
 <persona_override> / <mode_identity>（按 mode 可选）
 <agent_protocols>...</agent_protocols>
-<tools_reference>...</tools_reference>       ← 当前 34.3K 字符，最大单一来源
+<tools_reference>...</tools_reference>       ← full 档最大单一来源
+intent 调用说明（_INTENT_SYSTEM_INSTRUCTION）
 <documents_protocol> / <image_protocol>（按条件）
-<available_skills>...</available_skills>     ← 技能简表，合并为单个块
+<available_skills>...</available_skills>     ← 技能简表，合并为单个块（仅 full 档）
+<memory_recall_hint>（仅 owner，准静态）
+<user_profile>（准静态：仅用户/模型更新时才变）
+<behavioral_guidelines>（procedures 累积，准静态）
 
 ─── Current time: 2026-06-12 10:30:00 ───  ← 分割点
 
 [动态层]                         ← 不缓存，每次新鲜传输
 workspace 路径 / Current model
-<memory_recall_hint>（仅 owner）
-<user_profile>
-<behavioral_guidelines>（procedures）
-<relevant_skills>（关键词匹配结果，按 query 变化）
+<relevant_skills> / <matched_skills_brief>（关键词匹配，按 query 变化）
+<mode_hint>（按 mode 与安装状态变化）
+<memory_signal>（按当前 query 检测）
 <runtime_context> / <previous_run_summary>（按条件）
 ```
 -->
 
 稳定层内容由 `system/soul.md`、`system/identity.md`、`system/agent.md`、`system/tools.md` 和技能简表组成，这些文件在服务运行期间几乎不变，缓存命中率极高。技能简表（`<available_skills>`）是**一个**块：曾同时在稳定层和动态层各拼一个同名块，已合并；现在整体位于稳定层。
 
-动态层包含当前时间、用户画像、纠正准则和 Skill 匹配结果，每轮都会变化，不适合缓存。
+`memory_recall_hint`、`<user_profile>`、`<behavioral_guidelines>` 是**准静态**块：`caching.md` 旧版把它们归为动态层并称「每轮都会变化」，但它们只在用户或模型更新配置时才变（`user_profile` 来自 `system/user_profile.md`，`behavioral_guidelines` 是 procedures 的累积纠正规则）。2026-11-25 的提示词重排（计划条目 2）把它们移入稳定层，扩大缓存命中区。intent 调用说明和 `<documents_protocol>` 同理移入稳定层。
+
+动态层只保留真正每轮/每次变化的内容：当前时间、关键词匹配的 Skill 结果、mode 提示、记忆信号、运行时上下文和上一轮摘要。
 
 **注意**：缓存降低的是**费用**（命中时按 0.1× input 计费），并不减少每次请求实际传输的 token 数、不释放上下文窗口、也不缩短首 token 延迟。当前 full 档单次调用的固定开销约 29.7K tokens（system 17.3K + 41 个广播工具的 schema 12.4K，均不含历史消息），且在工具循环的每次迭代里重复发送。真正的体积优化只能靠减少注入内容（见 `ETHAN_V2_RESTRUCTURE_PLAN.md` P1）。
 

@@ -116,6 +116,11 @@ GROUP BY 1 ORDER BY 2 DESC;
   `_INTENT_SYSTEM_INSTRUCTION`、`memory_recall_hint`、`<user_profile>`、
   `<behavioral_guidelines>` 这些稳定内容；`full` 档分割点之后有后三个。
 - `config.py` 默认 `base_tools` 里有 4 个 `agenda_*`，对应工具没有注册，被静默过滤。
+  **核实修正（2026-11-25）**：此描述只在 `tools.agenda.enabled` 默认 False 时成立。agenda 工具
+  在 enabled=True 时**确实注册**（`agent_factory.py:208`），且 `base_tools` 是广播白名单
+  （`agent.py:369-370`，`t.name in wanted`）——删掉后启用日程的用户将看不到这些工具，
+  与 `config.py:214-215` 注释「日程页开关打开后工具注册即广播」的设计意图冲突。
+  **结论：保留 `agenda_*`，不删除**；本条目不做，已向用户确认。
 
 ### P3 `reasoning_content` 没有回传
 
@@ -311,12 +316,27 @@ GROUP BY 1 ORDER BY 2 DESC;
 
 ## 8. 条目 1 的待核实项（动手前先确认）
 
-- [ ] 现有的 context budget 测试文件名与覆盖范围（`tests/` 下搜 `context_budget`）。
-- [ ] `effective_input_budget()` 的口径（字符还是 token，按路由怎么取值）。
-- [ ] `compress_previous_round_tools()` 与淘汰的交互：它只压「最后一个 assistant 消息之前」的
+- [x] 现有的 context budget 测试文件名与覆盖范围（`tests/` 下搜 `context_budget`）。
+  → `tests/test_context_budget_images.py`（images 透传）、`tests/test_context_limit.py`（全量输入预检）。
+  无直接覆盖 `enforce_context_budget` 前缀稳定性的测试，本次新增 `test_context_budget_stability.py`。
+- [x] `effective_input_budget()` 的口径（字符还是 token，按路由怎么取值）。
+  → 字符，= `upstream_limit()`(默认 997952) × (1 - margin_pct()/100)（默认 5% → 948054）。
+  可被 `ETHAN_MAX_INPUT_CHARS` / `ETHAN_INPUT_LIMIT_MARGIN_PCT` 覆盖；==0 关闭预检。
+  工具预算 = 它 × 10%，夹在 [30000, 200000]；env `ETHAN_TOOL_BUDGET_CHARS` 可显式覆盖。
+- [x] `compress_previous_round_tools()` 与淘汰的交互：它只压「最后一个 assistant 消息之前」的
   search / fetch 结果，实时循环里是否也会改写已发内容。
-- [ ] `web.py` 落盘的目录约定和标记文案，入口定稿沿用同一套（`/tmp/ethan/<session_id>/`）。
-- [ ] 小窗口模型（lite / fast 档）下预算缩放后的安全上限。
+  → 确认：它也在每轮循环内调用（agent.py 循环内 + 入口两处），改写已发出的 web_search/web_fetch
+  结果。web_fetch 结果它自己落盘成文件指针（已带 marker，幂等），不会反复改写；web_search 压成
+  title+url 列表（带 marker，幂等）。**已落盘（入口定稿 marker）的消息也需被它跳过**——
+  本次入口定稿 marker `_OFFLOADED_MARKER` 独立于它的 marker，不冲突；且它只处理
+  web_search/web_fetch，入口定稿处理 shell/file_read，工具名不同，互不覆盖。
+- [x] `web.py` 落盘的目录约定和标记文案，入口定稿沿用同一套（`/tmp/ethan/<session_id>/`）。
+  → web.py 自身落盘到 `/tmp/web_fetch_*.md`（非会话目录），但 `compress_previous_round_tools`
+  的 `_offload_fetch_content` 用 `/tmp/ethan/<session_id>/<tool_call_id>.md`。入口定稿沿用后者
+  （会话目录，便于按会话清理），文件名 `<tool_call_id>.md`，幂等（同名覆盖）。
+- [x] 小窗口模型（lite / fast 档）下预算缩放后的安全上限。
+  → 经 `ETHAN_MAX_INPUT_CHARS` 收窄上游后，工具预算同步缩小，但 `TOOL_BUDGET_MIN_CHARS=30000`
+  兜底，不会小到一上来就把所有结果压成 stub。lite 档通常不跑长工具循环，影响有限。
 
 ---
 
@@ -324,9 +344,33 @@ GROUP BY 1 ORDER BY 2 DESC;
 
 每项写清日期和状态：`未开始` / `进行中` / `已实现` / `已验收（附数据）`。
 
-- [ ] 条目 1 入口定稿与预算淘汰 — 未开始（工作区 `ethan-ai-context-cache`，分支 `feature/context-cache`）
-- [ ] 条目 2 提示词重排 + 清 `agenda_*` — 未开始（同一 PR）
-- [ ] 条目 3 定时任务成本报表 — 未开始（可选）
+- [x] 条目 1 入口定稿与预算淘汰 — 已实现（2026-11-25，工作区 `ethan-ai-context-cache`，分支 `feature/context-cache`）。
+  实测（`tests/bench_context_budget_stability.py`，40 轮模拟）：
+
+  | 每条结果 | 基线（改写前缀轮数 / 稳定占比） | 实现后（改写前缀轮数 / 稳定占比） |
+  |---|---|---|
+  | 1.5K 字 | 0 / 100% | 0 / 100% |
+  | 6K 字 | 24 / 40% | 3 / 92.5%（低水位兜底，<8K 不落盘） |
+  | 12K 字 | 32 / 20% | **0 / 100%**（入口定稿落盘） |
+
+  验收项：
+  - ✅ 单测 `tests/test_context_budget_stability.py::test_40_rounds_12k_zero_prefix_mutation`：40 轮 × 12K 字，前缀改写 0 次。
+  - ✅ 现有 `test_context_budget_images.py` / `test_context_limit.py` 通过；`ruff` 通过。
+  - ⏳ 上线 3 天后复测命中率（条目 1 的线上验收，需部署后补数据）。
+  - 说明：第 4 步（入口定稿）已做，因为前三步 12K 仍有 8 轮改写、达不到 0 次；落盘后归零。
+- [x] 条目 2 提示词重排 — 已实现（2026-11-25，同一 PR）。
+  - ✅ 准静态块（`documents_protocol` / `_INTENT_SYSTEM_INSTRUCTION` / `memory_recall_hint` /
+    `<user_profile>` / `<behavioral_guidelines>`）移入 `Current time:` 分割点之前（稳定层），
+    fast/full 两档均已重排。
+  - ✅ `agenda_*` 保留不删（核实后发现计划描述有误，见 P2 核实修正，已向用户确认）。
+  - ✅ 单测 `tests/test_prompt_cache_layering.py` 断言分割点两侧块归属 + 无块跨两侧重复。
+  - ✅ `tests/bench_prompt_size` 体积未涨（TOTAL 40864 ≤ 55000），`ruff` 通过。
+  - ✅ `docs/caching.md` 分层图同步更新。
+  - ⏳ Anthropic provider 路径的线上命中率收益需部署后观察（当前生产模型是 deepseek-v4.1-flash，
+    走 OpenAI 兼容协议不做 prompt cache 分割；本重排对 deepseek 的「自动缓存」同样利好——
+    前缀更稳定，见条目 1）。
+- [ ] 条目 3 定时任务成本报表 — 未开始（可选）。本次先做条目 1+2；报表涉及双端前端（Web + Desktop），
+  工作量较大，待条目 1 线上复测数据出来后再排期。
 - [ ] 条目 4 `reasoning_content` 回传 — 未开始
 - [ ] 条目 5 状态补偿 + 去重 — 未开始
 - [ ] 条目 6 运行检查点 — 未开始

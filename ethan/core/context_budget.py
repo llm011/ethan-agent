@@ -24,17 +24,37 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 
 from ethan.providers.base import Message
 
+logger = logging.getLogger(__name__)
+
 # 单条 tool result 在上下文里的上限（≈5K tokens）。超出即截断 + 标注。
 MAX_TOOL_RESULT_CHARS = 20000
 # working 里所有 tool result 合计的上限（≈25K tokens，给 200K 窗口的模型留足余量）。
+# 仅在上游输入预算关闭（effective_input_budget()==0）时作为回退默认；正常情况下
+# 由 context_tool_budget_chars() 按模型窗口缩放推导。
 CONTEXT_BUDGET_CHARS = 100000
 # 被预算淘汰的旧结果压成多长（够提醒模型「这步做过什么」即可，≈150 tokens）。
 EVICTED_STUB_CHARS = 600
+
+# ── 预算按模型窗口缩放 ──────────────────────────────────────────────────
+# tool result 占上游输入预算（effective_input_budget，≈ 上限 × 95%）的比例。
+# 留足余量给 system / user / assistant 正文与每轮增长。
+TOOL_BUDGET_RATIO = 0.10
+# 缩放后的安全上下界：小窗口模型（lite/fast 档经 ETHAN_MAX_INPUT_CHARS 收窄）
+# 也至少保留 3 万字，避免一上来就把所有结果压成 stub；大窗口不超过 20 万字，
+# 防止单条结果的尾部被反复改写（低水位淘汰能覆盖，但硬上限兜底）。
+TOOL_BUDGET_MIN_CHARS = 30000
+TOOL_BUDGET_MAX_CHARS = 200000
+# 低水位：触发淘汰后一次降到预算的该比例（而非刚好降到线上），让后续若干轮
+# 不再触发，把「逐条改写」变成「偶发成批改写」，降低前缀被改的频率。
+LOW_WATER_RATIO = 0.50
+# 环境变量可显式覆盖工具预算（字符），用于临时调参；0 表示不覆盖。
+_ENV_TOOL_BUDGET = "ETHAN_TOOL_BUDGET_CHARS"
 
 _TRUNCATION_NOTE = (
     "\n\n[…内容过长已截断，省略 {omitted} 字。"
@@ -44,6 +64,17 @@ _EVICTED_NOTE = (
     "[…旧工具结果已折叠（省略 {omitted} 字），以节省上下文空间。"
     "若需回顾该工具的完整输出，可重新调用相同工具，或用 rg_search/file_read 检索相关内容。]\n"
 )
+
+# 入口定稿：超过该字符数的 tool 结果，全文落盘到会话临时目录，上下文里只保留
+# 逐字开头 + 文件路径 + 总字数（对齐 web.py 超过 8000 字落盘的做法，
+# /tmp/ethan/<session_id>/ 目录约定一致）。阈值对齐 web.py 的 8000。
+OFFLOAD_THRESHOLD = 8000
+# 落盘后在上下文里保留的逐字前缀长度：够模型判断这段输出是否需要细读，
+# 又让长运行里所有 tool 结果之和压在预算内、不再被淘汰改写。
+OFFLOAD_KEEP_PREFIX = 2000
+# 落盘 stub 的幂等 marker：含此标记的消息不再被截断 / 驱逐 / 重复落盘
+# ——这是「已发出的前缀逐字节稳定」的契约关键。
+_OFFLOADED_MARKER = "[大结果已落盘"
 
 
 def _truncated_copy(msg: Message, keep: int, *, evicted: bool = False) -> Message:
@@ -79,32 +110,128 @@ def _truncated_copy(msg: Message, keep: int, *, evicted: bool = False) -> Messag
     )
 
 
-def enforce_context_budget(working: list[Message]) -> None:
+def _offload_large_result(msg: Message, session_id: str) -> Message:
+    """把超长 tool 结果全文落盘到 /tmp/ethan/<session_id>/，上下文里保留
+    逐字开头 + 文件路径 + 总字数（「入口定稿」，对应计划条目 1 第 4 步）。
+
+    不写摘要：shell / file_read 的注释都写明摘要会丢 entity_id、导致模型
+    反复重读；前缀逐字保留 + 可 file_read 取回全文，模型需要时能精准定位。
+    images 透传（截图说明文案与图不能分离，见 _truncated_copy）。
+    写盘失败则原样返回 msg（降级为走旧的淘汰路径，不破坏结果）。
+    """
+    content = msg.content or ""
+    sid = session_id or "no_session"
+    tc_id = msg.tool_call_id or f"tool_{id(msg):x}"
+    dir_path = f"/tmp/ethan/{sid}"
+    try:
+        os.makedirs(dir_path, exist_ok=True)
+        file_path = f"{dir_path}/{tc_id}.md"
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+    except OSError as e:
+        logger.warning("context_budget: offload write failed (%s), keep original", e)
+        return msg
+    omitted = max(0, len(content) - OFFLOAD_KEEP_PREFIX)
+    stub = (
+        f"{_OFFLOADED_MARKER}：{file_path}（全文 {len(content)} 字，已省略后 {omitted} 字）]\n"
+        f"{content[:OFFLOAD_KEEP_PREFIX]}"
+        f"\n\n[…后续 {omitted} 字已存盘，需要时用 file_read 读取 {file_path} 取回完整内容…]"
+    )
+    return _replace_content(msg, stub)
+
+
+def context_tool_budget_chars() -> int:
+    """工具结果在上下文里的合计预算（字符），按模型窗口缩放。
+
+    优先级：
+      1. 环境变量 ETHAN_TOOL_BUDGET_CHARS（>0）显式覆盖，供临时调参。
+      2. effective_input_budget()（上游输入上限 × 95%）× TOOL_BUDGET_RATIO，
+         夹在 [TOOL_BUDGET_MIN_CHARS, TOOL_BUDGET_MAX_CHARS] 之间。
+      3. 上游预算关闭（==0）时回退常量 CONTEXT_BUDGET_CHARS。
+
+    不再写死 10 万：小窗口模型经 ETHAN_MAX_INPUT_CHARS 收窄后预算同步缩小，
+    大窗口模型放宽，避免一刀切导致的「刚好降到线上、下一条又触发」抖动。
+    """
+    raw = (os.environ.get(_ENV_TOOL_BUDGET) or "").strip()
+    if raw:
+        try:
+            val = int(raw)
+            if val > 0:
+                return val
+        except ValueError:
+            pass
+    from ethan.core.context_limit import effective_input_budget
+
+    upstream = effective_input_budget()
+    if upstream <= 0:
+        return CONTEXT_BUDGET_CHARS
+    budget = int(upstream * TOOL_BUDGET_RATIO)
+    return max(TOOL_BUDGET_MIN_CHARS, min(TOOL_BUDGET_MAX_CHARS, budget))
+
+
+def enforce_context_budget(working: list[Message], session_id: str = "") -> None:
     """就地（按引用替换）管控 working 里的 tool result 体积。
 
-    1. 每条 tool 消息封顶 MAX_TOOL_RESULT_CHARS。
-    2. 合计超 CONTEXT_BUDGET_CHARS 时，保留最近 3 条 tool 消息不动，
-       对其余可驱逐消息优先淘汰大块结果（按内容长度降序），压成 EVICTED_STUB_CHARS 摘要。
+    1. **入口定稿**：超过 OFFLOAD_THRESHOLD 的 tool 结果全文落盘到
+       /tmp/ethan/<session_id>/，上下文只保留逐字开头 + 路径 + 总字数。
+       已落盘（含 marker）的消息幂等跳过——这是「已发出前缀逐字节稳定」
+       的契约关键，落盘后永不被后续阶段改写。
+    2. 单条封顶 MAX_TOOL_RESULT_CHARS（兜底，仅未落盘的极端大消息）。
+    3. 合计超 context_tool_budget_chars() 时，保留最近 3 条 tool 消息不动，
+       对其余**未入稿**消息优先淘汰大块结果（按长度降序），压成
+       EVICTED_STUB_CHARS 摘要；**一次降到预算的 LOW_WATER_RATIO（低水位）**，
+       把「逐条改写」变成「偶发成批改写」。已落盘的消息不参与驱逐。
 
-    幂等：已是摘要的旧消息不会再被重复截断（长度已 ≤ 阈值）。
+    幂等：已是摘要 / 已落盘的旧消息不会再被改写。
+    可观测：落盘 / 淘汰 / 截断发生时打 warning 日志（此前路径无任何日志）。
     """
     if not working:
         return
-    # (1) 单条封顶
+    # (0) 入口定稿：大结果落盘，上下文保留逐字前缀 + 路径。幂等跳过已落盘。
+    #     仅在有 session_id 时启用（测试 / 无会话调用保持旧的截断+驱逐行为，
+    #     也避免测试污染 /tmp）。这一步在截断 / 淘汰之前，确保大结果先定稿、
+    #     后续阶段不再碰它——已发出的前缀逐字节稳定是缓存命中的契约。
+    if session_id:
+        for i, m in enumerate(working):
+            if m.role != "tool" or not m.content:
+                continue
+            if _OFFLOADED_MARKER in m.content:
+                continue
+            if len(m.content) <= OFFLOAD_THRESHOLD:
+                continue
+            working[i] = _offload_large_result(m, session_id)
+            logger.info(
+                "context_budget: offload tool msg idx=%d len=%d -> prefix %d (session=%s)",
+                i, len(m.content), OFFLOAD_KEEP_PREFIX, session_id or "-",
+            )
+    # (1) 单条封顶（仅未落盘的极端大消息，正常情况下第 0 步已覆盖）
     for i, m in enumerate(working):
         if m.role == "tool" and m.content and len(m.content) > MAX_TOOL_RESULT_CHARS:
+            logger.warning(
+                "context_budget: truncate tool msg idx=%d len=%d -> %d (cap=%d)",
+                i, len(m.content), MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_CHARS,
+            )
             working[i] = _truncated_copy(m, MAX_TOOL_RESULT_CHARS, evicted=False)
-    # (2) 全量预算：优先淘汰大块旧结果，保留最近 3 条不被驱逐
+    # (2) 全量预算：优先淘汰大块旧结果，保留最近 3 条不被驱逐；已落盘消息不参与
+    budget = context_tool_budget_chars()
     tool_idx = [i for i, m in enumerate(working) if m.role == "tool"]
     total = sum(len(working[i].content or "") for i in tool_idx)
-    if total <= CONTEXT_BUDGET_CHARS:
+    if total <= budget:
         return
+    total_before = total
+    # 低水位：一次降到预算的 50%，后续若干轮不再触发
+    target = int(budget * LOW_WATER_RATIO)
     # 保留最近 3 条 tool 消息不被驱逐（最新上下文最重要）
     evictable = tool_idx[:-3] if len(tool_idx) > 3 else []
-    # 优先淘汰大块结果（> 2000 字的先淘汰），同长度再按时间顺序（索引小的先淘汰）
-    evictable_sorted = sorted(evictable, key=lambda i: (-len(working[i].content or ""), i))
+    # 优先淘汰大块结果（> 2000 字的先淘汰），同长度再按时间顺序（索引小的先淘汰）；
+    # 已落盘（入口定稿）的消息永不驱逐——已发出的内容必须稳定。
+    evictable_sorted = sorted(
+        (i for i in evictable if _OFFLOADED_MARKER not in (working[i].content or "")),
+        key=lambda i: (-len(working[i].content or ""), i),
+    )
+    evicted_count = 0
     for i in evictable_sorted:
-        if total <= CONTEXT_BUDGET_CHARS:
+        if total <= target:
             break
         m = working[i]
         cur = len(m.content or "")
@@ -112,7 +239,15 @@ def enforce_context_budget(working: list[Message]) -> None:
             continue
         working[i] = _truncated_copy(m, EVICTED_STUB_CHARS, evicted=True)
         # 用截断后的真实长度算 delta（含标注 overhead），避免累计偏差导致提前停手
-        total -= cur - len(working[i].content)
+        new_len = len(working[i].content)
+        total -= cur - new_len
+        evicted_count += 1
+    if evicted_count:
+        logger.warning(
+            "context_budget: evicted %d tool msgs (total %d > budget %d, "
+            "target low-water %d, tool_msg_count=%d)",
+            evicted_count, total_before, budget, target, len(tool_idx),
+        )
 
 
 # ── 上一轮工具结果分级压缩 ──────────────────────────────────────────────
