@@ -344,6 +344,27 @@ GROUP BY 1 ORDER BY 2 DESC;
 
 每项写清日期和状态：`未开始` / `进行中` / `已实现` / `已验收（附数据）`。
 
+### 阶段二总结（2026-11-26）
+
+条目 4/5/6 已实现并合并上线（服务 v1.0.0b41），条目 7 部分完成。四个 PR：
+
+| 条目 | PR | 核心改动 |
+|---|---|---|
+| 4 `reasoning_content` 回传 | #483 | 流式累积 reasoning、非流式读取、证据驱动回传判定 |
+| 5 状态补偿 + 去重 | #484 | 单次工具失败即提醒、StreamCollector 短文本去重 |
+| 6 运行检查点 | #485 | 后台任务落库跨重启可见、`run_checkpoint` 精确续跑 |
+| 7 循环拆分（部分） | #486 | 拆出 `reply_quality`（agent.py 2239→2092）、补关键路径测试 |
+
+顺手修掉的既有缺陷：
+- 条目 1 遗漏：`stream_chat` 循环内 `enforce_context_budget` 漏传 `session_id`，流式主路径不落盘（#484 修）。
+- 条目 4 自审：同轮重试未重置 `round_reasoning` 导致 reasoning 重复累积（#483 内修）。
+- 条目 6 自审：`list_tasks` 对已结束任务用 `now - started_at` 算时长会持续增长（#485 内修）。
+
+⏳ 待线上验证（部署后观察）：
+- 条目 4：经网关对 `deepseek-v4.1-flash` 跑两步工具调用不报 400；
+- 条目 1+2：定时抓取类任务缓存命中率是否达 ≥80%；
+- 条目 6：后台任务跨重启列表与「继续」按钮的实际体验。
+
 - [x] 条目 1 入口定稿与预算淘汰 — 已实现（2026-11-25，工作区 `ethan-ai-context-cache`，分支 `feature/context-cache`）。
   实测（`tests/bench_context_budget_stability.py`，40 轮模拟）：
 
