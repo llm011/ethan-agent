@@ -1294,6 +1294,7 @@ class Agent:
                     if _strip_images_from_messages(working, self.session_id):
                         logger.warning("图片相关错误，写文件后重试: %s", e)
                         full_content = ""
+                        round_reasoning = ""
                         final_chunk = None
                         async for ev in _pump(provider.stream_chat(working, tools=tools, system=sys)):
                             yield ev
@@ -1316,6 +1317,7 @@ class Agent:
                     logger.warning("stream_chat() iter=%d 上游 400 输入超限，裁剪 %d 字历史后重试: %s", i + 1, omitted, e)
                     yield InjectEvent(messages=[f"会话过长，已自动截断较早的历史消息（约省略 {omitted} 字），正在继续处理…"])
                     full_content = ""
+                    round_reasoning = ""
                     final_chunk = None
                     async for ev in _pump(provider.stream_chat(working, tools=tools, system=sys)):
                         yield ev
@@ -1330,6 +1332,7 @@ class Agent:
                     provider = self._provider
                     self._lite_provider = self._provider  # 禁用 lite，后续 fast 档不再重试
                     full_content = ""
+                    round_reasoning = ""
                     final_chunk = None
                     async for ev in _pump(provider.stream_chat(working, tools=tools, system=sys)):
                         yield ev
@@ -1341,6 +1344,7 @@ class Agent:
                             i + 1, provider.model, _timeout_fb.model, e,
                         )
                         full_content = ""
+                        round_reasoning = ""
                         final_chunk = None
                         async for ev in _pump(_timeout_fb.stream_chat(working, tools=tools, system=sys)):
                             yield ev
@@ -1358,6 +1362,7 @@ class Agent:
                             i + 1, provider.model, e,
                         )
                         full_content = ""
+                        round_reasoning = ""
                         final_chunk = None
                         async for ev in _pump(provider.stream_chat(working, tools=tools, system=sys)):
                             yield ev
