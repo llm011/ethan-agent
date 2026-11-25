@@ -390,7 +390,20 @@ GROUP BY 1 ORDER BY 2 DESC;
     `self.session_id`，导致流式主路径不落盘（已补传）。
   验收：`tests/test_loop_robust.py` 覆盖 tool_error_hint 文案、collector 去重（5 种情况）、
   以及 agent 级端到端「单次失败→下一轮 system 带提醒」。`ruff` 通过，69 项相关测试无回归。
-- [ ] 条目 6 运行检查点 — 未开始
+- [x] 条目 6 运行检查点 — 已实现（2026-11-26，工作区 `ethan-ai-checkpoint`，分支 `feature/run-checkpoint`）。
+  两部分：
+  - **后台任务跨重启可见**：新增 `background_tasks` 表（sessions.db）+ SessionStore CRUD；
+    `background_task` 创建即落库、终态（done/error/stopped）更新结果。daemon 线程不能复用
+    aiosqlite 连接（跨线程），用短生命周期 sqlite3 同步连接写（`_persist`，失败只记日志不中断任务）。
+    启动扫描把残留 `running` 标 `interrupted`（daemon 线程已死），session 里已生成的部分结果保留。
+    `list_tasks()` 合并内存 `_REGISTRY` 与持久化历史（内存状态覆盖同 id）。
+  - **运行检查点/断点续跑**：新增 `messages.run_checkpoint` 列 + `save/load_run_checkpoint`。
+    agent 每轮工具执行后更新 `_run_checkpoint`（当前轮次、最后工具、是否失败、最近签名）；
+    中断落库时（producers.py）写入该行；`/chat/resume` 读回并注入 `runtime_context`，
+    告诉模型「中断于第 N 轮 / 最后调了什么 / 是否失败」，避免从零重新推理。
+  验收：`tests/test_background_task_persistence.py`（5 项：建表、upsert 往返、重启标 interrupted、
+  同步落库、列表合并）+ `tests/test_run_checkpoint.py`（5 项：列存在、往返、缺失返回空、跨重启、
+  agent 字段）。60 项相关测试无回归，`ruff` 通过。
 - [ ] 条目 7 循环拆分 — 未开始
 - [ ] 条目 8 会话级记忆提醒 — 未开始
 - [ ] 条目 9 分级路由 — 未开始

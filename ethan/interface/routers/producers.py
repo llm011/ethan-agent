@@ -631,6 +631,11 @@ async def _run_generation(
                     await store.update_message(progress_msg_id, session_id, err_msg)
                 else:
                     await store.save_message(session_id, err_msg)
+                # 运行检查点（条目 6）：中断瞬间的快照落库，续跑时读回让模型知道
+                # 跑到第几轮、最后在做什么，而不是从零重新推理。
+                _ckpt = getattr(agent, "_run_checkpoint", None)
+                if progress_msg_id and _ckpt:
+                    await store.save_run_checkpoint(progress_msg_id, _ckpt)
                 await store.touch(session_id, mark_read=bool(run.subscribers))
             except Exception:
                 logger.exception("保存错误消息失败 session=%s", session_id)

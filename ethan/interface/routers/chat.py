@@ -685,6 +685,19 @@ async def resume_from_message(session_id: str, message_id: int, request: Request
         "那是系统提示，不用再重复；\n"
         "2. 基于对话历史里的步骤判断接下来该做什么，必要时复查上一步结果。"
     )
+    # 运行检查点（条目 6）：中断时落库的结构化快照，告诉模型精确断点在哪，
+    # 避免从零重新推理整条链路。
+    ckpt = await store.load_run_checkpoint(message_id)
+    if ckpt:
+        ckpt_bits = []
+        if ckpt.get("iter"):
+            ckpt_bits.append(f"中断于第 {ckpt['iter']} 轮（上限 {ckpt.get('max_iters', '?')}）")
+        if ckpt.get("last_tools"):
+            ckpt_bits.append("最后调用的工具：" + ", ".join(str(t) for t in ckpt["last_tools"][:5]))
+        if ckpt.get("last_had_error"):
+            ckpt_bits.append("最后一次工具调用失败了，先判断失败原因再决定是否重试")
+        if ckpt_bits:
+            resume_context += "\n\n运行检查点（据此判断断点位置，不要从头重做已完成的部分）：\n- " + "\n- ".join(ckpt_bits)
 
     req = ChatRequest(
         messages=[{"role": "user", "content": "继续执行"}],

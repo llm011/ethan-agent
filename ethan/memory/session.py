@@ -522,6 +522,21 @@ class SessionStore:
             )
         """)
         await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS background_tasks (
+                session_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                channel TEXT NOT NULL DEFAULT 'web',
+                channel_context TEXT NOT NULL DEFAULT '{}',
+                user_id TEXT NOT NULL DEFAULT '',
+                prompt TEXT NOT NULL DEFAULT '',
+                result TEXT NOT NULL DEFAULT '',
+                started_at REAL NOT NULL,
+                ended_at REAL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+        """)
+        await self._db.execute("""
             CREATE TABLE IF NOT EXISTS message_intermediate_blobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 message_id INTEGER NOT NULL,
@@ -558,6 +573,9 @@ class SessionStore:
             ("model", "TEXT"),
             ("error", "TEXT NOT NULL DEFAULT ''"),
             ("files", "TEXT"),  # 非图片附件元数据，见 ethan/core/uploads.py
+            # 运行检查点（条目 6）：中断/超时时保存的结构化运行快照（当前轮次、
+            # 已完成/待办步骤、最后一次工具调用等），供「继续」精确接续而非重头再来。
+            ("run_checkpoint", "TEXT NOT NULL DEFAULT ''"),
         ]:
             try:
                 await self._db.execute(f"ALTER TABLE messages ADD COLUMN {col} {definition}")
@@ -645,6 +663,18 @@ class SessionStore:
             if cursor.rowcount > 0:
                 await self._db.commit()
                 logger.info("[SessionStore] Marked %d interrupted messages on startup", cursor.rowcount)
+        except Exception:
+            pass
+        # 后台任务：进程重启时 daemon 线程已死，仍处于 running 的任务无法继续执行，
+        # 标为 interrupted（保留 session 里已生成的部分结果，用户可手动「继续」）。
+        try:
+            cursor = await self._db.execute(
+                "UPDATE background_tasks SET status='interrupted', ended_at=? WHERE status='running'",
+                (time.time(),),
+            )
+            if cursor.rowcount > 0:
+                await self._db.commit()
+                logger.info("[SessionStore] Marked %d interrupted background tasks on startup", cursor.rowcount)
         except Exception:
             pass
 
@@ -1122,6 +1152,43 @@ class SessionStore:
         await self._db.commit()
         return cursor.rowcount > 0
 
+    async def save_run_checkpoint(self, row_id: int, checkpoint: dict) -> None:
+        """保存运行检查点（条目 6）：中断/超时时记录当前轮次与步骤进度。
+
+        存 messages.run_checkpoint（JSON 字符串）。续跑时由 /chat/resume 读回，
+        让模型知道「跑到哪一步、哪些已完成」，而不是从零重新推理。
+        不 touch updated_at，避免续跑检查点把会话顶到列表顶部。
+        """
+        import json
+
+        try:
+            await self._db.execute(
+                "UPDATE messages SET run_checkpoint=? WHERE id=?",
+                (json.dumps(checkpoint or {}, ensure_ascii=False), row_id),
+            )
+            await self._db.commit()
+        except Exception:
+            logger.debug("保存运行检查点失败 row=%s", row_id, exc_info=True)
+
+    async def load_run_checkpoint(self, row_id: int) -> dict:
+        """读取运行检查点；无则返回空 dict。"""
+        import json
+
+        try:
+            async with self._db.execute(
+                "SELECT COALESCE(run_checkpoint, '') FROM messages WHERE id=?", (row_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+        except Exception:
+            return {}
+        if not row or not row[0]:
+            return {}
+        try:
+            data = json.loads(row[0])
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     async def interrupt_running_messages(self, session_id: str, reason: str = "") -> int:
         """把会话内所有 running 态的 assistant 消息标记为 interrupted。
 
@@ -1264,6 +1331,80 @@ class SessionStore:
             (json.dumps(items or [], ensure_ascii=False), session_id),
         )
         await self._db.commit()
+
+    # ── 后台任务持久化（条目 6）──────────────────────────────────────────
+    # 后台任务原先是模块级 _REGISTRY 纯内存字典，进程重启即丢失——重启后侧边栏
+    # 看不到历史任务、也无法续跑。落库后：任务列表跨重启可见，running 状态在启动
+    # 扫描里被标 interrupted（daemon 线程已死），session 里已生成的部分结果保留，
+    # 用户可手动「继续」。
+
+    async def upsert_background_task(
+        self,
+        session_id: str,
+        *,
+        title: str,
+        status: str,
+        channel: str,
+        channel_context: str = "{}",
+        user_id: str = "",
+        prompt: str = "",
+        result: str = "",
+        started_at: float | None = None,
+        ended_at: float | None = None,
+    ) -> None:
+        """插入或更新后台任务记录（按 session_id 唯一）。"""
+        await self._db.execute(
+            "INSERT INTO background_tasks "
+            "(session_id, title, status, channel, channel_context, user_id, prompt, result, started_at, ended_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET "
+            "title=excluded.title, status=excluded.status, channel=excluded.channel, "
+            "channel_context=excluded.channel_context, user_id=excluded.user_id, "
+            "prompt=excluded.prompt, result=excluded.result, ended_at=excluded.ended_at",
+            (
+                session_id,
+                title,
+                status,
+                channel,
+                channel_context,
+                user_id,
+                prompt,
+                result,
+                started_at if started_at is not None else time.time(),
+                ended_at,
+            ),
+        )
+        await self._db.commit()
+
+    async def list_background_tasks(self) -> list[dict]:
+        """列出全部后台任务（按发起时间倒序），供 API / 启动恢复。"""
+        async with self._db.execute(
+            "SELECT session_id, title, status, channel, channel_context, user_id, "
+            "prompt, result, started_at, ended_at FROM background_tasks "
+            "ORDER BY started_at DESC"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        keys = (
+            "session_id", "title", "status", "channel", "channel_context", "user_id",
+            "prompt", "result", "started_at", "ended_at",
+        )
+        return [dict(zip(keys, row, strict=False)) for row in rows]
+
+    async def get_background_task(self, session_id: str) -> dict | None:
+        """按 session_id 读单条后台任务。"""
+        async with self._db.execute(
+            "SELECT session_id, title, status, channel, channel_context, user_id, "
+            "prompt, result, started_at, ended_at FROM background_tasks WHERE session_id = ?",
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        keys = (
+            "session_id", "title", "status", "channel", "channel_context", "user_id",
+            "prompt", "result", "started_at", "ended_at",
+        )
+        return dict(zip(keys, row, strict=False))
 
     async def list_pinned(self) -> list[Session]:
         sessions: list[Session] = []

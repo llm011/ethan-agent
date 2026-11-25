@@ -11,13 +11,17 @@ RunManager 持有一个可停止的 run——终止功能（background_task_stop
 线程顺带 drain SSE：自动批准 consent（后台无 UI，发起即视为已授权）、累计正文、
 结束后按渠道回灌并更新任务状态。
 
-任务状态登记在模块级 _REGISTRY（本进程内）。后台任务是一次性的，进程重启即失效——
-重启本就会杀掉 daemon 线程，无需持久化。
+任务状态既登记在模块级 _REGISTRY（本进程内，供实时查询/终止），也持久化到
+sessions.db 的 background_tasks 表（条目 6）：
+  - daemon 线程无法安全复用 aiosqlite 连接，故用短生命周期 sqlite3 同步连接写；
+  - 进程重启后 daemon 线程已死，启动扫描把 running 标 interrupted，任务列表仍可见，
+    session 里已生成的部分结果保留，用户可手动「继续」。
 """
 from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import threading
 import time
 from contextvars import ContextVar
@@ -41,30 +45,116 @@ class _BgTask:
     session_id: str
     title: str
     started_at: float
-    status: str = "running"   # running | done | error | stopped
+    status: str = "running"   # running | done | error | stopped | interrupted
     channel: str = "web"
     thread: threading.Thread | None = field(default=None, repr=False)
+    prompt: str = ""
+    channel_context: str = "{}"
+    user_id: str = ""
+    result: str = ""
 
 
 # session_id → _BgTask（本进程内的活跃/历史后台任务）
 _REGISTRY: dict[str, _BgTask] = {}
 
 
+def _persist(task: _BgTask, *, ended: bool = False) -> None:
+    """把任务状态同步写进 sessions.db（daemon 线程专用，独立短连接）。
+
+    不能复用 aiosqlite 单例连接：它在事件循环线程里，跨线程用会撞 check_same_thread。
+    写入失败只记日志——持久化是「锦上添花」，绝不能让后台任务因落库失败而中断。
+    """
+    try:
+        from ethan.core.paths import user_sessions_db_path
+
+        db_path = user_sessions_db_path()
+        if not db_path.exists():
+            return
+        conn = sqlite3.connect(str(db_path), timeout=10)
+        try:
+            conn.execute("PRAGMA busy_timeout=10000")
+            conn.execute(
+                "INSERT INTO background_tasks "
+                "(session_id, title, status, channel, channel_context, user_id, prompt, result, started_at, ended_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(session_id) DO UPDATE SET "
+                "status=excluded.status, result=excluded.result, ended_at=excluded.ended_at",
+                (
+                    task.session_id, task.title, task.status, task.channel,
+                    task.channel_context, task.user_id, task.prompt, task.result,
+                    task.started_at, time.time() if ended else None,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).debug("后台任务落库失败 session=%s", task.session_id, exc_info=True)
+
+
+def load_persisted_tasks() -> list[dict]:
+    """从 sessions.db 读取历史后台任务（供启动恢复/API 回退）。
+
+    running 状态在 SessionStore.init 的启动扫描里已被标 interrupted，这里只负责读。
+    """
+    try:
+        from ethan.core.paths import user_sessions_db_path
+
+        db_path = user_sessions_db_path()
+        if not db_path.exists():
+            return []
+        conn = sqlite3.connect(str(db_path), timeout=10)
+        try:
+            conn.execute("PRAGMA busy_timeout=10000")
+            rows = conn.execute(
+                "SELECT session_id, title, status, channel, started_at, ended_at FROM background_tasks "
+                "ORDER BY started_at DESC"
+            ).fetchall()
+        finally:
+            conn.close()
+        now = time.time()
+        return [
+            {
+                "id": r[0],
+                "title": r[1],
+                "status": r[2],
+                "channel": r[3],
+                "started_at": r[4],
+                # 已结束任务用 ended_at 算时长，否则「已运行 N 分钟」会随刷新持续增长
+                "elapsed_seconds": int((r[5] or now) - (r[4] or now)),
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
+
+
 def list_tasks() -> list[dict]:
-    """序列化当前进程内的后台任务，供 API/任务中心轮询。按发起时间倒序。"""
+    """序列化后台任务，供 API/任务中心轮询。按发起时间倒序。
+
+    合并「本进程内存」与「sessions.db 历史」：内存记录状态最新（覆盖同 id 的历史行），
+    历史行补齐进程重启前的任务——重启后 daemon 线程已死，这些任务状态为
+    interrupted/done/error，仍应在列表里可见（可点进 session 看已生成的部分结果）。
+    """
     now = time.time()
-    items = []
+    items: dict[str, dict] = {}
+    # 先放持久化历史（旧），再用内存记录覆盖（新）
+    for rec in load_persisted_tasks():
+        items[rec["id"]] = rec
     for sid, t in _REGISTRY.items():
-        items.append({
+        items[sid] = {
             "id": sid,
             "title": t.title,
             "status": t.status,
             "channel": t.channel,
             "started_at": t.started_at,
             "elapsed_seconds": int(now - t.started_at),
-        })
-    items.sort(key=lambda x: x["started_at"], reverse=True)
-    return items
+        }
+    result = list(items.values())
+    result.sort(key=lambda x: x["started_at"] or 0, reverse=True)
+    return result
 
 
 def stop_task(session_id: str, user_id: str = "") -> tuple[bool, str]:
@@ -77,6 +167,7 @@ def stop_task(session_id: str, user_id: str = "") -> tuple[bool, str]:
     from ethan.core.run_manager import RunManager
     RunManager.instance().stop(session_id, user_id=user_id or None)
     task.status = "stopped"
+    _persist(task, ended=True)
     return True, "已终止"
 
 
@@ -165,6 +256,10 @@ def _run_background(task: _BgTask, prompt: str, channel: str, channel_context: s
                "\n".join(f"- {d}" for d in pending_high_risk)
         result_text += note
 
+    # 终态落库：状态 + 最终正文（重启后列表能看到 done/error/stopped 与结果）
+    task.result = result_text
+    _persist(task, ended=True)
+
     # lark 渠道：把最终结果推回发起任务的 chat
     if channel == "lark" and result_text.strip():
         try:
@@ -224,7 +319,10 @@ class BackgroundTaskTool(BaseTool):
             get_config().defaults.model, title=f"[后台] {title}"
         )
 
-        task = _BgTask(session_id=session.id, title=title, started_at=time.time(), channel=channel)
+        task = _BgTask(
+            session_id=session.id, title=title, started_at=time.time(), channel=channel,
+            prompt=prompt, channel_context=channel_context, user_id=self._user_id,
+        )
         t = threading.Thread(
             target=_run_background,
             args=(task, prompt, channel, channel_context, self._user_id),
@@ -232,6 +330,7 @@ class BackgroundTaskTool(BaseTool):
         )
         task.thread = t
         _REGISTRY[session.id] = task
+        _persist(task)  # 创建即落库：重启后任务列表仍可见（条目 6）
         t.start()
 
         return (
@@ -247,13 +346,14 @@ class BackgroundTaskListTool(BaseTool):
     parameters = {"type": "object", "properties": {}}
 
     async def run(self) -> str:
-        if not _REGISTRY:
+        tasks = list_tasks()
+        if not tasks:
             return "当前没有后台任务。"
         lines = []
         now = time.time()
-        for sid, t in _REGISTRY.items():
-            mins = int((now - t.started_at) // 60)
-            lines.append(f"- {t.title} [{t.status}] 已运行 {mins} 分钟（ID: {sid}）")
+        for t in tasks:
+            mins = int((now - (t["started_at"] or now)) // 60)
+            lines.append(f"- {t['title']} [{t['status']}] 已运行 {mins} 分钟（ID: {t['id']}）")
         return "后台任务：\n" + "\n".join(lines)
 
 
