@@ -21,6 +21,7 @@ def test_web_and_desktop_image_grid_in_sync():
             assert "aspect-square" in src
             assert "not-prose" in src
 
+        assert "paths.slice(i * 100, (i + 1) * 100)" in file_card
         assert "export function ImageFileGrid" in file_card
         assert "export function isImageFileCard" in file_card
         assert "ImageFileGrid" in bubble and "isImageFileCard" in bubble
@@ -41,4 +42,7 @@ def test_android_image_file_grid_contract():
     assert "Arrangement.spacedBy(6.dp)" in file_card_kt
     assert "ContentScale.Crop" in file_card_kt
     assert "aspectRatio(1f)" in file_card_kt
+    assert "suspend fun refreshPath" in file_card_kt
+    assert "加载失败，点击重试" in file_card_kt
+    assert "scope.launch { refreshPath(card.path) }" in file_card_kt
     assert "ImageFileGrid" in chat_kt and "isImageFileCard" in chat_kt

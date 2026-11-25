@@ -83,8 +83,13 @@ export function ImageFileGrid({ cards, sessionId }: { cards: FileCard[]; session
     const paths = Array.from(new Set(cards.map((c) => c.path).filter(Boolean)));
     if (paths.length === 0) return;
     const sid = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
-    void signFileUrl(API_URL, getAuthToken(), paths)
-      .then((sigs) => {
+    // /files/sign 最多接收 100 条；按批签名，避免大量交付图片整组 422。
+    const batches = Array.from({ length: Math.ceil(paths.length / 100) }, (_, i) =>
+      paths.slice(i * 100, (i + 1) * 100),
+    );
+    void Promise.all(batches.map((batch) => signFileUrl(API_URL, getAuthToken(), batch)))
+      .then((results) => {
+        const sigs = Object.assign({}, ...results);
         if (!alive) return;
         const next: Record<string, string> = {};
         for (const p of paths) {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor } from "@testing-library/react";
+import { signFileUrl } from "@ethan/shared/ppt/preview";
 import { ImageGallery, type ImageCard } from "@/components/chat/image-gallery";
 import { ImageFileGrid, isImageFileCard, type FileCard } from "@/components/chat/file-card";
 
@@ -86,6 +87,18 @@ describe("ImageFileGrid delivered image layout", () => {
     expect(isImageFileCard(makeImageFileCard(1, "PNG"))).toBe(true);
     expect(isImageFileCard(makeImageFileCard(2, "webp"))).toBe(true);
     expect(isImageFileCard(makeImageFileCard(3, "pdf"))).toBe(false);
+  });
+
+  it("signs 101 image paths in batches below the backend limit", async () => {
+    const signer = vi.mocked(signFileUrl);
+    signer.mockImplementation(async (_api, _token, paths) => {
+      if (paths.length > 100) return {};
+      return Object.fromEntries(paths.map((p) => [p, { user: "u1", sig: "sig123" }]));
+    });
+    const cards = Array.from({ length: 101 }, (_, i) => makeImageFileCard(i));
+    const { container } = render(<ImageFileGrid cards={cards} sessionId="s1" />);
+    await waitFor(() => expect(container.querySelectorAll("img")).toHaveLength(101));
+    expect(signer.mock.calls.map((call) => call[2].length)).toEqual([100, 1]);
   });
 
   it("renders 4 delivered images in a 3-column filled square grid", async () => {

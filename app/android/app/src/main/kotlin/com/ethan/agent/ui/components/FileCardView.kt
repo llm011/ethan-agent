@@ -244,10 +244,12 @@ fun ImageFileGrid(
 ) {
     if (cards.isEmpty()) return
 
-    val urls = remember { mutableStateMapOf<String, String>() }
-    val pendingPaths = remember { mutableStateMapOf<String, Boolean>() }
-    val failedPaths = remember { mutableStateMapOf<String, Boolean>() }
-    var lightboxIndex by remember { mutableStateOf<Int?>(null) }
+    // 切换服务/会话/身份时不能沿用旧签名 URL。
+    val urls = remember(serverUrl, sessionId, signFile) { mutableStateMapOf<String, String>() }
+    val pendingPaths = remember(serverUrl, sessionId, signFile) { mutableStateMapOf<String, Boolean>() }
+    val failedPaths = remember(serverUrl, sessionId, signFile) { mutableStateMapOf<String, Boolean>() }
+    var lightboxIndex by remember(serverUrl, sessionId) { mutableStateOf<Int?>(null) }
+    val scope = rememberCoroutineScope()
 
     fun signedViewUrl(path: String, sig: FileSignature): String {
         val base = "${serverUrl.trimEnd('/')}/api/files/view?path=${Uri.encode(path)}"
@@ -255,28 +257,32 @@ fun ImageFileGrid(
         return "$base$sid&user=${Uri.encode(sig.user)}&sig=${Uri.encode(sig.sig)}"
     }
 
-    val pathsKey = remember(cards) { cards.map { it.path }.distinct() }
-    LaunchedEffect(pathsKey, sessionId, signFile) {
-        val signer = signFile
-        if (signer == null) {
-            pathsKey.forEach { failedPaths[it] = true }
-            return@LaunchedEffect
-        }
-        pathsKey.forEach { path ->
-            if (urls.containsKey(path)) return@forEach
-            pendingPaths[path] = true
-            val sig = try {
-                signer(path)
-            } catch (_: Exception) {
-                null
-            }
-            pendingPaths[path] = false
+    suspend fun refreshPath(path: String) {
+        if (pendingPaths[path] == true) return
+        pendingPaths[path] = true
+        failedPaths[path] = false
+        try {
+            val sig = signFile?.invoke(path)
             if (sig != null) {
                 urls[path] = signedViewUrl(path, sig)
-                failedPaths[path] = false
             } else {
+                urls.remove(path)
                 failedPaths[path] = true
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            urls.remove(path)
+            failedPaths[path] = true
+        } finally {
+            pendingPaths[path] = false
+        }
+    }
+
+    val pathsKey = remember(cards) { cards.map { it.path }.distinct() }
+    LaunchedEffect(pathsKey, serverUrl, sessionId, signFile) {
+        pathsKey.forEach { path ->
+            if (!urls.containsKey(path)) refreshPath(path)
         }
     }
 
@@ -285,6 +291,14 @@ fun ImageFileGrid(
         val target = urls[card.path] ?: return
         val idx = loadedUrls.indexOf(target)
         if (idx >= 0) lightboxIndex = idx
+    }
+
+    fun onTileClick(card: FileCard) {
+        if (failedPaths[card.path] == true) {
+            scope.launch { refreshPath(card.path) }
+        } else {
+            openLightboxFor(card)
+        }
     }
 
     val isSingle = cards.size == 1
@@ -297,10 +311,14 @@ fun ImageFileGrid(
                 .widthIn(min = 120.dp, max = 260.dp)
                 .heightIn(min = 120.dp, max = 240.dp)
                 .clip(MaterialTheme.shapes.small)
-                .clickable(enabled = viewUrl != null) { openLightboxFor(card) },
+                .clickable(enabled = pendingPaths[card.path] != true) { onTileClick(card) },
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
         ) {
-            ImageGridTileContent(card = card, viewUrl = viewUrl, pending = pending)
+            ImageGridTileContent(
+                card = card, viewUrl = viewUrl, pending = pending,
+                failed = failedPaths[card.path] == true,
+                onError = { urls.remove(card.path); failedPaths[card.path] = true },
+            )
         }
     } else {
         val columns = if (cards.size == 2) 2 else 3
@@ -324,10 +342,14 @@ fun ImageFileGrid(
                                     .weight(1f)
                                     .aspectRatio(1f)
                                     .clip(MaterialTheme.shapes.small)
-                                    .clickable(enabled = viewUrl != null) { openLightboxFor(card) },
+                                    .clickable(enabled = pendingPaths[card.path] != true) { onTileClick(card) },
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
                             ) {
-                                ImageGridTileContent(card = card, viewUrl = viewUrl, pending = pending)
+                                ImageGridTileContent(
+                card = card, viewUrl = viewUrl, pending = pending,
+                failed = failedPaths[card.path] == true,
+                onError = { urls.remove(card.path); failedPaths[card.path] = true },
+            )
                             }
                         } else {
                             Spacer(Modifier.weight(1f))
@@ -349,12 +371,19 @@ fun ImageFileGrid(
 }
 
 @Composable
-private fun ImageGridTileContent(card: FileCard, viewUrl: String?, pending: Boolean) {
+private fun ImageGridTileContent(
+    card: FileCard,
+    viewUrl: String?,
+    pending: Boolean,
+    failed: Boolean,
+    onError: () -> Unit,
+) {
     if (viewUrl != null) {
         AsyncImage(
             model = viewUrl,
             contentDescription = card.title ?: card.filename,
             contentScale = ContentScale.Crop,
+            onError = { onError() },
             modifier = Modifier.fillMaxSize(),
         )
     } else {
@@ -365,11 +394,16 @@ private fun ImageGridTileContent(card: FileCard, viewUrl: String?, pending: Bool
             if (pending) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             } else {
-                Icon(
-                    Icons.Default.BrokenImage,
-                    contentDescription = "图片加载失败",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.BrokenImage,
+                        contentDescription = "图片加载失败",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (failed) {
+                        Text("加载失败，点击重试", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
     }
