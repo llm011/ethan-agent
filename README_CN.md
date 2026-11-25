@@ -14,6 +14,8 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 新 owner 会话首轮准备一次本地记忆快照，独立于 System Prompt 并跨重启重用；
 非主人/minimal/instant 不准备，后续仍可按需 recall。见 [首轮记忆](docs/session-memory.md)。
 
+默认 `ethan/defaults/system/agent.md` 正文由 7,051 精简至 5,948 字符，低于 6,000 字符预算；保留危险操作分级、密钥访问限制与知识写入分流，仅调整发布模板，不覆盖用户运行时定制文件。详见 [系统提示词构建](docs/agent-loop.md#系统提示词构建_build_system)。
+
 ## RouteDecision
 
 路由同时记录 `fast/full` 档位和 `strong/medium/weak` 信号强度：明确技能命中提前装载正文与引用工具，

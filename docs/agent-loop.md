@@ -72,6 +72,8 @@ for i in range(max_iters):
 
 ## 系统提示词构建（`_build_system`）
 
+发布模板 `ethan/defaults/system/agent.md` 正文从 7,051 精简至 5,948 字符（低于 6,000 字符预算），合并重复路由与工具说明，完整保留危险操作分级、密钥访问限制和知识写入分流（含判断口诀与 lark-cli 示例）。此变更不覆盖 `~/.ethan/system/agent.md` 的用户定制；实际 `<agent_protocols>` 体积取决于运行时文件，以本地测量为准，不代表全量 prompt 降至 6,000 字符。
+
 Full / Medium Path 按以下顺序拼接，`Current time:` 是稳定层与动态层的分界点（用于 Prompt Caching）。以 `ethan/core/system_prompt.py` 的 `build_system_prompt()` 为准：
 
 ```
