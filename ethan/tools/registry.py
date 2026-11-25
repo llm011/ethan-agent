@@ -122,6 +122,14 @@ class ToolExecutor:
                 run.tool_tasks[tc.id] = t
         try:
             results = await asyncio.gather(*tasks.values())
+        except BaseException:
+            # A persistence failure is fatal: do not let sibling tools outlive
+            # this run after their cancellation handles have been removed.
+            for task in tasks.values():
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+            raise
         finally:
             # 无论正常完成还是整轮取消，都清理 task 引用
             if run is not None:

@@ -332,6 +332,44 @@ def test_message_wire_transaction_cannot_be_committed_by_touch(tmp_path, monkeyp
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("failure_phase", ["started", "finished"])
+def test_checkpoint_failure_cancels_and_drains_sibling_tools(failure_phase):
+    from ethan.tools.base import BaseTool
+    from ethan.tools.registry import ToolExecutor
+    async def run():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        effects = []
+        class Tool(BaseTool):
+            name = "fixture_read"
+            description = "fixture"
+            parameters = {"type": "object", "properties": {"which": {"type": "string"}}}
+            no_compress = True
+            async def run(self, which):
+                if which == "live":
+                    entered.set()
+                    await release.wait()
+                    effects.append("live")
+                return "ok"
+        registry = ToolRegistry()
+        registry.register(Tool())
+        executor = ToolExecutor(registry)
+        tracked = SimpleNamespace(tool_tasks={}, cancelled_tool_ids=set())
+        executor.current_run = tracked
+        async def hook(kind, call, result):
+            if call.id == "fail" and kind == failure_phase:
+                await entered.wait()
+                raise OSError("checkpoint unavailable")
+        executor.checkpoint_hook = hook
+        with pytest.raises(OSError):
+            await executor.execute([ToolCall("fail", "fixture_read", {"which": "fail"}),
+                                    ToolCall("live", "fixture_read", {"which": "live"})])
+        release.set()
+        assert effects == []
+        assert tracked.tool_tasks == {}
+    asyncio.run(run())
+
+
 def test_checkpoint_failure_prevents_tool_dispatch():
     async def run():
         executor = ToolExecutor(ToolRegistry())
