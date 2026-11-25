@@ -215,3 +215,40 @@ def _get_route(text: str, skill_triggers: list[str] | None = None) -> str:
         return "fast"
 
     return "full"
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    """Deterministic evidence strength; never a probability or budget override."""
+    route: str
+    strength: str
+    reason: str
+    skill_names: tuple[str, ...] = ()
+
+
+def evaluate_route(text: str, skills=None, *, channel: str = "", mode: str = "") -> RouteDecision:
+    """Classify explicit signals without promoting semantic recall or changing budgets."""
+    from ethan.core.modes import resolve_mode
+
+    lower = text.lower()
+    mode_key = resolve_mode(mode).key
+    matched = []
+    for skill in skills.all() if skills else []:
+        if skill.channels and channel and channel not in skill.channels:
+            continue
+        if skill.modes:
+            allowed = {resolve_mode(m).key or m for m in skill.modes}
+            if mode_key not in allowed:
+                continue
+        if any(trigger and _match_keyword(trigger.lower(), lower) for trigger in skill.trigger):
+            matched.append(skill)
+    names = tuple(dict.fromkeys(s.name for s in matched))
+    if any(signal in lower for signal in _FORCE_FULL_SIGNALS):
+        return RouteDecision("full", "strong", "force_full", names)
+    if matched:
+        route = "fast" if any(s.fast_path for s in matched) else "full"
+        return RouteDecision(route, "strong", "skill_trigger", names)
+    rule = _match_fast_rule(text)
+    if rule is not None:
+        return RouteDecision("fast", "medium", "fast_rule", tuple(rule.skills))
+    return RouteDecision("full", "weak", "default")

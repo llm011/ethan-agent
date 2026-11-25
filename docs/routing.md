@@ -18,7 +18,7 @@
 
 ## 路由决策
 
-每轮对话开始时先做 instant 预判（`classify_instant`），未命中再由 `_get_route()` 分 fast/full。
+每轮对话开始时先做 instant 预判（`classify_instant`），未命中再由 `evaluate_route()` 分 fast/full。
 
 ```
 输入文本
@@ -48,7 +48,16 @@
 [4] 默认 → full（兜底档）
 ```
 
-`_get_route()` 的值域只有 `'fast' | 'full'`。
+`_get_route()` 的值域只有 `'fast' | 'full'`；Agent 入口使用 `evaluate_route()` 返回
+`RouteDecision(route, strength, reason, skill_names)`，保留旧函数供兼容引用。
+
+- **strong**：明确复杂任务信号优先 full；符合当前渠道/模式的技能触发词提前装载技能和其引用工具。
+  `fast_path` 技能才选 fast，非 fast 技能仍 full；强命中的 discoverable 技能也直接加载限长正文。
+- **medium**：仅命中配置 fast_rule，使用其指定工具/技能。这里是信号强度，不是旧的 medium 路由档。
+- **weak**：未命中明确规则，保守 full；语义补召回不冒充强信号。不按字数减少迭代预算。
+
+强技能不会取得额外授权，也不会向非主人激活 `recall_memory` / `deliver_file`。
+现有会话首轮记忆准备逻辑保持不变，见 [会话首轮记忆](session-memory.md)。
 
 **为什么不按字数判定**：早期版本用「命中关键词且长度 ≤ 阈值」判档，字数误杀严重——稍完整一点的指令（如"客厅的灯帮我关一下"）就掉档。现在 fast 完全由关键字/trigger 驱动，命中即视为意图明确；没有任何信号时保守走 full。
 

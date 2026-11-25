@@ -385,11 +385,21 @@ def build_system_prompt(
                         if sk:
                             matched.append(sk)
                             have.add(sname)
+            from ethan.core.routing import evaluate_route
+
+            decision = evaluate_route(last_user, skills, channel=channel, mode=mode)
+            strong_names = set(decision.skill_names) if decision.strength == "strong" else set()
+            have = {s.name for s in matched}
+            for name in decision.skill_names if strong_names else ():
+                sk = skills.get(name)
+                if sk and name not in have:
+                    matched.append(sk)
+                    have.add(name)
             last_matched_skills_out.extend(s.name for s in matched)
             full_parts = []
             brief_parts = []
             for s in matched:
-                if getattr(s, "category", "default") == "discoverable":
+                if getattr(s, "category", "default") == "discoverable" and s.name not in strong_names:
                     brief_parts.append(f"- {s.name}: {' | '.join(s.trigger[:5])} — {s.description[:80]}")
                 else:
                     full_parts.append(f"[Skill: {s.name}]\n{s.content[:3000]}")
@@ -398,7 +408,8 @@ def build_system_prompt(
                 parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
                 from ethan.core.context import activate_tools
 
-                referenced = [t.name for t in registry.all() if not t.fast_path and t.name in skill_ctx]
+                referenced = [t.name for t in registry.all() if not t.fast_path and t.name in skill_ctx
+                              and (is_owner or t.name not in {"recall_memory", "deliver_file"})]
                 if referenced:
                     activate_tools(referenced)
             if brief_parts:
@@ -527,8 +538,22 @@ def build_system_prompt(
 
         mode_key = resolve_mode(mode).key
         matched = skills.match(last_user, channel=channel, mode=mode_key)
-        last_matched_skills_out.extend(s.name for s in matched)
+        from ethan.core.routing import evaluate_route
+
+        decision = evaluate_route(last_user, skills, channel=channel, mode=mode)
         skill_ctx = skills.build_context(last_user, channel=channel, mode=mode_key)
+        if decision.strength == "strong":
+            have = {s.name for s in matched}
+            for name in decision.skill_names:
+                sk = skills.get(name)
+                if not sk:
+                    continue
+                if name not in have:
+                    matched.append(sk)
+                    have.add(name)
+                if f"[Skill: {name}]" not in skill_ctx:
+                    skill_ctx += f"\n\n[Skill: {name}]\n{sk.content[:3000]}"
+        last_matched_skills_out.extend(s.name for s in matched)
         if skill_ctx:
             parts.append(f"<relevant_skills>\n{skill_ctx}\n</relevant_skills>")
 

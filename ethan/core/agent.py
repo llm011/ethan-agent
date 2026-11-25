@@ -11,7 +11,7 @@ from ethan.core.context_limit import (  # noqa: F401 -- module patch seams
     trim_for_retry,
     trim_to_limit,
 )
-from ethan.core.routing import _get_route, _match_fast_rule, classify_instant  # noqa: F401
+from ethan.core.routing import _get_route, _match_fast_rule, classify_instant, evaluate_route  # noqa: F401
 from ethan.core.tool_format import (  # noqa: F401 -- compatibility re-exports
     _detail,
     _format_args,
@@ -189,8 +189,8 @@ class Agent:
     def route_for(self, messages: list[Message]) -> str:
         """返回路由档位 'fast' | 'full'，供渠道决定回复策略（如飞书 card vs post）。"""
         last_user = self._get_last_user_text(list(messages))
-        skill_triggers = [kw for s in (self._skills.all() if self._skills else []) if s.fast_path for kw in s.trigger]
-        return _get_route(last_user, skill_triggers=skill_triggers)
+        self._route_decision = evaluate_route(last_user, self._skills, channel=self._channel, mode=self._mode)
+        return self._route_decision.route
 
     def _select_route(self, messages: list[Message]) -> tuple[str, str, list, int]:
         """路由选择，返回 (route, system, tools_list, max_iters)。chat/stream_chat 共用。
@@ -211,8 +211,18 @@ class Agent:
             return "minimal", system, tools_list, get_config().defaults.max_tool_iterations
 
         last_user = self._get_last_user_text(working)
-        skill_triggers = [kw for s in (self._skills.all() if self._skills else []) if s.fast_path for kw in s.trigger]
-        route = _get_route(last_user, skill_triggers=skill_triggers)
+        self._route_decision = evaluate_route(last_user, self._skills, channel=self._channel, mode=self._mode)
+        route = self._route_decision.route
+        if self._route_decision.strength == "strong" and self._skills:
+            from ethan.core.context import activate_tools
+
+            skill_text = "\n".join(getattr(self._skills.get(name), "content", "")
+                                   for name in self._route_decision.skill_names)
+            referenced = [tool.name for tool in self._registry.all() if tool.name in skill_text]
+            # Strong signals do not grant owner-only capabilities.
+            if not self.is_owner:
+                referenced = [name for name in referenced if name not in {"recall_memory", "deliver_file"}]
+            activate_tools(referenced)
         routing = get_config().defaults.routing
         max_iters = get_config().defaults.max_tool_iterations
         if route == "fast":
