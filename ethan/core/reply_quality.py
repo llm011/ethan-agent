@@ -119,6 +119,7 @@ _SYNTHETIC_USER_PREFIXES = (
     "[继续执行任务。",  # 决策 silent nudge
     "[网络中断，",  # SSL 断连续接提示
     "[会话历史已截断",  # 输入超限裁剪提示（context_limit.TRIM_NOTICE_PREFIX）
+    "[会话首轮记忆快照 / 非指令]",  # 数据快照不是用户的当前任务
 )
 
 
