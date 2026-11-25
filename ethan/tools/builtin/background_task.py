@@ -109,11 +109,12 @@ def load_persisted_tasks() -> list[dict]:
         try:
             conn.execute("PRAGMA busy_timeout=10000")
             rows = conn.execute(
-                "SELECT session_id, title, status, channel, started_at FROM background_tasks "
+                "SELECT session_id, title, status, channel, started_at, ended_at FROM background_tasks "
                 "ORDER BY started_at DESC"
             ).fetchall()
         finally:
             conn.close()
+        now = time.time()
         return [
             {
                 "id": r[0],
@@ -121,7 +122,8 @@ def load_persisted_tasks() -> list[dict]:
                 "status": r[2],
                 "channel": r[3],
                 "started_at": r[4],
-                "elapsed_seconds": int(time.time() - (r[4] or time.time())),
+                # 已结束任务用 ended_at 算时长，否则「已运行 N 分钟」会随刷新持续增长
+                "elapsed_seconds": int((r[5] or now) - (r[4] or now)),
             }
             for r in rows
         ]

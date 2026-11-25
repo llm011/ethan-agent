@@ -66,6 +66,7 @@ def test_upsert_and_list_roundtrip(tmp_path):
         tasks = await store.list_background_tasks()
         assert len(tasks) == 1
         assert tasks[0]["session_id"] == s.id
+        await store.close()
 
     asyncio.run(_run())
 
@@ -85,6 +86,8 @@ def test_startup_marks_running_as_interrupted(tmp_path):
         rec = await store2.get_background_task(s.id)
         assert rec["status"] == "interrupted", "重启后 running 任务应标 interrupted"
         assert rec["ended_at"] is not None
+        await store.close()
+        await store2.close()
 
     asyncio.run(_run())
 
@@ -93,8 +96,11 @@ def test_persist_helper_writes_row(tmp_path, monkeypatch):
     """daemon 线程用的同步 _persist 能写入并更新状态。"""
     async def _setup():
         store = await _mk_store(tmp_path)
-        s = await store.create("m")
-        return s.id
+        try:
+            s = await store.create("m")
+            return s.id
+        finally:
+            await store.close()
 
     sid = asyncio.run(_setup())
     monkeypatch.setattr(bt, "user_sessions_db_path", lambda: tmp_path / "s.db", raising=False)
