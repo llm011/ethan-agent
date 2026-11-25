@@ -440,7 +440,7 @@ fun ShareModeScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
                                             Text(
-                                                text = card.name ?: card.path ?: "附件",
+                                                text = card.title?.takeIf { it.isNotBlank() } ?: card.filename.ifBlank { card.path.ifBlank { "附件" } },
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Medium,
                                                 color = Color(0xFF1F2328),
@@ -451,8 +451,8 @@ fun ShareModeScreen(
 
                                 if (includeStats && msg.role == "assistant" && !cardsOnly) {
                                     val statChips = buildList {
-                                        msg.usage?.model?.takeIf { it.isNotBlank() }?.let { add(it) }
-                                        val totalTokens = (msg.usage?.inputTokens ?: 0) + (msg.usage?.outputTokens ?: 0)
+                                        // UiMessage 没有模型字段；不要从仅含 token 计数的 Usage 推断模型。
+                                        val totalTokens = (msg.usage?.input ?: 0) + (msg.usage?.output ?: 0)
                                         if (totalTokens > 0) add("$totalTokens tokens")
                                         msg.ttfbMs?.let { add("首字 ${formatShareDuration(it)}") }
                                         msg.totalDurationMs?.let { add("总计 ${formatShareDuration(it)}") }
@@ -667,8 +667,8 @@ private fun renderShareBitmap(
 
         val stats = if (includeStats && msg.role == "assistant" && !cardsOnly) {
             buildList {
-                msg.usage?.model?.takeIf { it.isNotBlank() }?.let { add(it) }
-                val totalTokens = (msg.usage?.inputTokens ?: 0) + (msg.usage?.outputTokens ?: 0)
+                // UiMessage 没有模型字段；不要从仅含 token 计数的 Usage 推断模型。
+                val totalTokens = (msg.usage?.input ?: 0) + (msg.usage?.output ?: 0)
                 if (totalTokens > 0) add("$totalTokens tokens")
                 msg.ttfbMs?.let { add("首字 ${formatShareDuration(it)}") }
                 msg.totalDurationMs?.let { add("总计 ${formatShareDuration(it)}") }
@@ -727,7 +727,7 @@ private fun renderShareBitmap(
             msg.cards.forEach { card ->
                 val rect = RectF(paddingH.toFloat(), y, (widthPx - paddingH).toFloat(), y + 44f)
                 canvas.drawRoundRect(rect, 10f, 10f, badgeBgPaint)
-                canvas.drawText(card.name ?: card.path ?: "附件", paddingH + 16f, y + 29f, statPaint)
+                canvas.drawText(card.title?.takeIf { it.isNotBlank() } ?: card.filename.ifBlank { card.path.ifBlank { "附件" } }, paddingH + 16f, y + 29f, statPaint)
                 y += 52f
             }
             y += 12f

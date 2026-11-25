@@ -53,6 +53,12 @@ Ethan 会根据消息内容的意图信号自动选择推理路径（不看字�
 
 详见 [interface.md 的「聊天附件的存储与访问契约」](interface.md#聊天附件的存储与访问契约)。
 
+### 助手交付的多张图片
+
+Web、Desktop 和 Android 会把同一条回复交付的图片文件合并成网格：两张两列，三张及以上每行最多三张，缩略图裁切填满格子。点击图片可在全屏查看原图，并左右切换；其他文件仍显示为文件卡片。Web/Desktop 的搜索图片和同一 Markdown 段落内的多图也采用网格。Android 图片加载失败时可点击重新签名重试。
+
+维护说明：Android 原有 2273 行 `ChatScreen.kt` 已做行为保持拆分，公共 `ChatScreen` 签名不变。主屏仅保留滚动、分页与页面编排（456 行）；输入/全屏编辑、气泡、弹窗、页头、头像、空态、附件读取分别位于同包 `ChatInputPanel`、`ChatMessageBubble`、`ChatDialogs`、`ChatHeader`、`ChatUserAvatar`、`ChatEmptyState`、`ChatAttachments`，各文件不超过 700 行。跨文件入口使用 `internal`，局部实现仍为 `private`。
+
 ---
 
 ## 定时任务

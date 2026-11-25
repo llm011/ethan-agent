@@ -5,7 +5,7 @@ import "katex/dist/katex.min.css";
 import { CodeBlock } from "@ethan/shared/components/code-block";
 import { PlainCodeBlock } from "@ethan/shared/components/plain-code-block";
 import { MermaidBlock } from "@ethan/shared/components/mermaid-block";
-import { forwardRef, useMemo, useState, useEffect } from "react";
+import { Children, forwardRef, isValidElement, useMemo, useState, useEffect } from "react";
 import { Lightbox, type LightboxImage } from "./lightbox";
 import { splitSpeakSentences } from "@ethan/shared/lib/speak";
 import { openUrl } from "@/lib/external-link";
@@ -247,6 +247,28 @@ export const MarkdownContent = forwardRef<
   // 合并默认 components 与 img 处理；img 点击打开 Lightbox 显示大图
   const components = useMemo<Components>(() => ({
     ...markdownComponents,
+    p: ({ node, children }) => {
+      const hastChildren = (node?.children ?? []) as Array<{ type?: string; tagName?: string; value?: string }>;
+      const imgCount = hastChildren.filter((c) => c.type === "element" && c.tagName === "img").length;
+      const onlyImages =
+        imgCount >= 2 &&
+        hastChildren.every(
+          (c) =>
+            (c.type === "element" && (c.tagName === "img" || c.tagName === "br")) ||
+            (c.type === "text" && !c.value?.trim()),
+        );
+      if (onlyImages) {
+        const items = Children.toArray(children).filter((child) => isValidElement(child) && child.type !== "br");
+        return (
+          <div
+            className={`not-prose my-2 grid gap-2 ${imgCount === 2 ? "grid-cols-2" : "grid-cols-3"} [&>img]:my-0 [&>img]:aspect-square [&>img]:h-full [&>img]:w-full [&>img]:rounded-lg [&>img]:object-cover`}
+          >
+            {items}
+          </div>
+        );
+      }
+      return <p>{children}</p>;
+    },
     img: ({ src, alt }) => {
       const url = String(src || "");
       return (

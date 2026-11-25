@@ -111,7 +111,7 @@ def test_stream_event_carries_fields():
     [
         "web/components/chat/chat-header.tsx",
         "desktop/src/components/chat/chat-header.tsx",
-        "app/android/app/src/main/kotlin/com/ethan/agent/ui/chat/ChatScreen.kt",
+        "app/android/app/src/main/kotlin/com/ethan/agent/ui/chat/ChatHeader.kt",
     ],
 )
 def test_ui_shows_session_id_with_copy(path):
@@ -134,7 +134,7 @@ def test_ui_shows_only_for_external_kernel():
 
 
 def test_android_has_badge_component():
-    src = (ROOT / "app/android/app/src/main/kotlin/com/ethan/agent/ui/chat/ChatScreen.kt").read_text(
+    src = (ROOT / "app/android/app/src/main/kotlin/com/ethan/agent/ui/chat/ChatHeader.kt").read_text(
         encoding="utf-8"
     )
     assert "KernelSessionBadge" in src

@@ -15,7 +15,7 @@ import { MarkdownContent } from "./markdown";
 import { Lightbox, type LightboxImage } from "./lightbox";
 import { ImageGallery, type ImageCard } from "./image-gallery";
 import { type SearchResultCard } from "./search-card-carousel";
-import { FileCardView, type FileCard } from "./file-card";
+import { FileCardView, ImageFileGrid, isImageFileCard, type FileCard } from "./file-card";
 import { ChatFiles } from "@ethan/shared/chat/attachment-list";
 import { usePreview } from "@/components/preview-panel/preview-context";
 import { applyHighlights } from "@/lib/highlight";
@@ -79,12 +79,15 @@ function LinkifiedText({ text }: { text: string }) {
 // 搜索结果卡片已移入工具时间线详情展示，这里只渲染图片 / 文件卡片
 function CardRenderer({ cards, sessionId }: { cards: CardData[]; sessionId?: string | null }) {
   const images = cards.filter((c): c is ImageCard => c.type === "image");
-  const files = cards.filter((c): c is FileCard => c.type === "file");
-  if (images.length === 0 && files.length === 0) return null;
+  const allFiles = cards.filter((c): c is FileCard => c.type === "file");
+  const imageFiles = allFiles.filter(isImageFileCard);
+  const otherFiles = allFiles.filter((f) => !isImageFileCard(f));
+  if (images.length === 0 && allFiles.length === 0) return null;
   return (
-    <div className="mt-2 mb-2 space-y-2">
+    <div className="not-prose mt-2 mb-2 space-y-2">
       {images.length > 0 && <ImageGallery cards={images} />}
-      {files.map((f, i) => (
+      {imageFiles.length > 0 && <ImageFileGrid cards={imageFiles} sessionId={sessionId} />}
+      {otherFiles.map((f, i) => (
         <FileCardView key={`${f.path}-${i}`} card={f} sessionId={sessionId} />
       ))}
     </div>

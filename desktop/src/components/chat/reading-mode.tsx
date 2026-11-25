@@ -22,7 +22,7 @@ import { MarkdownContent } from "./markdown";
 import { A2uiCard } from "./a2ui-card";
 import { McpAppView } from "./mcp-app-view";
 import { ImageGallery, type ImageCard } from "./image-gallery";
-import { FileCardView, type FileCard } from "./file-card";
+import { FileCardView, ImageFileGrid, isImageFileCard, type FileCard } from "./file-card";
 import { applyHighlights, getSelectionOffsets, getSelectionRawText, getSelectionText, type HighlightSpan } from "@/lib/highlight";
 import { useSpeaking } from "@/hooks/use-speaking";
 import { copyToClipboard } from "@ethan/shared/lib/clipboard";
@@ -62,16 +62,19 @@ function formatTime(ts?: number): string {
 function ReadingCards({ message, sessionId }: { message: Message; sessionId?: string }) {
   const cards = (message.cards ?? []) as CardData[];
   const images = cards.filter((c): c is ImageCard => c.type === "image");
-  const files = cards.filter((c): c is FileCard => c.type === "file");
+  const allFiles = cards.filter((c): c is FileCard => c.type === "file");
+  const imageFiles = allFiles.filter(isImageFileCard);
+  const otherFiles = allFiles.filter((f) => !isImageFileCard(f));
   const a2ui = message.a2ui ?? [];
   const mcpApps = message.mcpApps ?? [];
-  if (images.length === 0 && files.length === 0 && a2ui.length === 0 && mcpApps.length === 0) {
+  if (images.length === 0 && allFiles.length === 0 && a2ui.length === 0 && mcpApps.length === 0) {
     return null;
   }
   return (
-    <div className="mt-6 space-y-3 select-text">
+    <div className="not-prose mt-6 space-y-3 select-text">
       {images.length > 0 && <ImageGallery cards={images} />}
-      {files.map((f, i) => (
+      {imageFiles.length > 0 && <ImageFileGrid cards={imageFiles} sessionId={sessionId} />}
+      {otherFiles.map((f, i) => (
         <FileCardView key={`${f.path}-${i}`} card={f} sessionId={sessionId} />
       ))}
       {a2ui.length > 0 && <A2uiCard surfaces={a2ui} />}
