@@ -404,7 +404,19 @@ GROUP BY 1 ORDER BY 2 DESC;
   验收：`tests/test_background_task_persistence.py`（5 项：建表、upsert 往返、重启标 interrupted、
   同步落库、列表合并）+ `tests/test_run_checkpoint.py`（5 项：列存在、往返、缺失返回空、跨重启、
   agent 字段）。60 项相关测试无回归，`ruff` 通过。
-- [ ] 条目 7 循环拆分 — 未开始
+- [x] 条目 7 循环拆分 — **部分完成**（2026-11-26，工作区 `ethan-ai-loop-split`，分支 `feature/loop-split`）。
+  已完成：
+  - 先补关键路径测试 `tests/test_agent_loop_paths.py`（空响应 nudge / max_iters 收尾 / 决策触发 /
+    运行中补充），作为重构安全网——计划要求的「先补测试再动代码」。
+  - 把与 `Agent` 实例状态无关的纯函数拆到 `ethan/core/reply_quality.py`（171 行）：错误归类
+    （图片 400 / 可重试连接）、空回复兜底文案、退化回复判定、合成 user 消息前缀、图片剥离重试。
+    `agent.py` 保留 re-export，旧引用路径（`agent_mod._is_degenerate_reply` 等）继续可用。
+  - `agent.py` 2239 → 2092 行；62 项相关测试通过，`ruff` 通过。`docs/agent-loop.md` 补「模块拆分」节。
+  - ⚠️ **未完成**：计划目标是「单文件 ≤700 行」。剩余大头是 `stream_chat()`（约 1140 行）与
+    `chat()`（约 440 行）——后者是前者的非流式重复实现。消除这份重复需要把循环体抽成带
+    20+ 局部状态的独立函数，或让 `chat()` 委托 `stream_chat()` 并聚合文本/usage/tool_steps，
+    属于高风险重构，需独立排期与更细的等价性测试（尤其 tool_steps 与 usage 语义对齐）。
+    本次只做了零风险的部分，未强行改写核心循环。
 - [ ] 条目 8 会话级记忆提醒 — 未开始
 - [ ] 条目 9 分级路由 — 未开始
 - [ ] 条目 10 事件触发 — 候选，待确认场景

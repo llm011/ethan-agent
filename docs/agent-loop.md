@@ -185,3 +185,19 @@ result_compressor.maybe_compress(tool_name, result)
 **卡死检测优于纯靠迭代上限**：迭代上限只是兜底——它要等跑满所有轮次才止损，期间用户干等、token 照烧。`LoopMonitor` 在连续 3 轮（或 2 轮同错误）原地打转时就主动介入注入反思，让模型显式诊断换路，比被动等上限更省也更可控。签名按「工具名 + 全量参数」比对——递增分页（offset 变化）会产生不同签名，天然不被误判为卡住。
 
 **UsageStats**：`cache_tokens` 同时统计 `cache_read` 和 `cache_creation`，确保状态栏显示的缓存命中数准确。
+
+---
+
+## 模块拆分
+
+`core/agent.py` 长期承担了循环控制 + 回复质量判定 + 错误分类三件事。按职责把与 `Agent` 实例状态无关的纯函数拆到独立模块，`agent.py` 保留 re-export 以兼容旧引用路径（`agent._is_degenerate_reply` 等）：
+
+| 模块 | 职责 |
+|------|------|
+| `core/agent.py` | `Agent` 类：路由、循环控制、provider 兜底重试、工具执行编排 |
+| `core/reply_quality.py` | 错误归类（图片 400 / 可重试连接错误）、空回复兜底文案、退化回复判定、合成 user 消息前缀识别、图片剥离重试 |
+| `core/loop_control.py` | `LoopMonitor`（卡住检测）、反思/决策/失败提醒文案、收尾指令 |
+| `core/stream_collector.py` | 统一流消费器：tool_steps 计时、正文/reasoning 累积、已输出去重 |
+
+拆分的边界是「不依赖 `self` 状态」：`reply_quality` 的函数都是纯函数，可以直接单测；循环控制流仍留在 `Agent` 内，因为它的状态（`monitor` / `pending_suffix` / 各类 `_xxx_retried` 标志）在单次调用内紧密耦合。
+
