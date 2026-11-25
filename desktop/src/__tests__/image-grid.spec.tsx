@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { signFileUrl } from "@ethan/shared/ppt/preview";
+import { MarkdownContent } from "@/components/chat/markdown";
 import { ImageGallery, type ImageCard } from "@/components/chat/image-gallery";
 import { ImageFileGrid, isImageFileCard, type FileCard } from "@/components/chat/file-card";
 
@@ -71,6 +72,22 @@ describe("ImageGallery multi-image grid", () => {
       expect(img.className).toContain("w-full");
       expect(img.className).toContain("h-full");
     });
+  });
+});
+
+describe("Markdown image grouping", () => {
+  it("groups an image-only paragraph without swallowing adjacent text", () => {
+    const { container } = render(<MarkdownContent content={"正文\n\n![a](https://example.com/a.png) ![b](https://example.com/b.png)\n\n尾文"} />);
+    expect(container.querySelector(".grid-cols-2")?.querySelectorAll("img")).toHaveLength(2);
+    expect(container.textContent).toContain("正文");
+    expect(container.textContent).toContain("尾文");
+  });
+
+  it("keeps mixed text and linked images in a paragraph", () => {
+    const { container } = render(<MarkdownContent content={"说明 ![a](https://example.com/a.png) [![b](https://example.com/b.png)](https://example.com)"} />);
+    expect(container.querySelector(".grid-cols-2")).toBeNull();
+    expect(container.querySelector("p a img")).not.toBeNull();
+    expect(container.textContent).toContain("说明");
   });
 });
 
