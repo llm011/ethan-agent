@@ -7,6 +7,7 @@ Web / Desktop 的定时任务列表卡片和时间轴均展示近 7 天（滚动
 - **一条最终落库 assistant 消息代表一次运行**，包括最终记录的失败；`running` / `pending` 进度占位行不计。无最终落库行的尝试不计，网络重试不额外计。轮转阈值使用 user 消息数，与这里的成本运行数不是同一指标。
 - 时间按该最终行 `created_at`：`> now - 7*86400 AND <= now`，非自然日、无时区歧义。复用进度行时沿用原行创建时间。
 - 输入 / 缓存取 `messages.usage` 的 `input` / `cache`。input 是含缓存的 prompt 总量；只有有效 JSON、数值 input > 0 的行参加 token 汇总，缺失/坏 JSON 不估算。cache 缺失按 0（与 SQL SUM 忽略 NULL 等效）。不根据模型价格推算金额。
+- Token 展示保留 API `number` 的实际精度：整数使用 en-US 千位分组，小数使用 `String(number)` 最短 round-trip 表示，不受 locale 默认三位小数舍入影响。`1.2345 / 0.0001` 原样展示，极小值可显示为 `1e-20`，不变成虚假 0；不声称恢复 JSON number 本身已损失的精度。
 - 命中率 = `100 * SUM(cache) / SUM(input)`，保留 1 位小数；无输入分母显示 `—`，不冒充 0%。
 - 平均步数 = 所有最终运行的 `tool_steps` JSON 数组长度平均，保留 1 位小数。缺失、坏 JSON 或非数组记 0；一个数组项是一条工具步骤，不是 LLM 请求轮数。
 - `usage_run_count` 单独标出有效 input 的运行数量，明确运行分母与 token 统计分母不同。
@@ -55,7 +56,7 @@ WHERE a.job_id=? AND a.user_id=? AND s.source='schedule'
 
 双端组件展示契约：`NODE_ENV=test pnpm --dir desktop exec vitest run src/__tests__/schedule-cost.test.tsx`，同一测试渲染 Web / Desktop 组件并核对 SQL fixture 数字、空分母和未归因提示。双端分别运行 `tsc --noEmit`。
 
-独立验收基线：`19fd224d`（PR494 检查点已合并），工作区 `ethan-ai-schedule-cost`。成本测试覆盖消息 INSERT/UPDATE 后归因前强制子进程退出、SQLite 重启回滚后重试精确一次、归因异常回滚、归因冲突不可变 / 同 tuple 幂等、自动 Recorder pending 归因失败后仍认领同一行。本 worktree 实际验收：成本及 schedule/checkpoint/wire/resume 回归 57 项通过；Desktop 全量 26 个测试文件、256 项通过，其中双端成本展示契约 4 项。Web `pnpm --dir web exec next build --webpack` 通过（含 TypeScript 与 64 个静态页面生成），Desktop `NODE_ENV=test pnpm --dir desktop build` 通过。首次在两端生产构建并行时 Desktop 性能墙钟用例测得 111.39ms > 100ms，隔离复测及完整全量复测均通过，未放宽阈值。使用主仓解释器与 `PYTHONPATH` 指向本 worktree，无真实用户数据 fixture。
+独立验收基线：`19fd224d`（PR494 检查点已合并），工作区 `ethan-ai-schedule-cost`。成本测试覆盖消息 INSERT/UPDATE 后归因前强制子进程退出、SQLite 重启回滚后重试精确一次、归因异常回滚、归因冲突不可变 / 同 tuple 幂等、自动 Recorder pending 归因失败后仍认领同一行。本 worktree 实际验收：成本及 schedule/checkpoint/wire/resume 回归 57 项通过；Desktop 全量 26 个测试文件、256 项通过，其中首版双端成本展示契约 4 项；PR review 精度修复后成本契约增至 6 项并通过，含 `1.2345 / 0.0001` 和 `1.2345678901234567 / 1e-20`，两端生产构建及串行独立类型检查再次通过。Web `pnpm --dir web exec next build --webpack` 通过（含 TypeScript 与 64 个静态页面生成），Desktop `NODE_ENV=test pnpm --dir desktop build` 通过。首次在两端生产构建并行时 Desktop 性能墙钟用例测得 111.39ms > 100ms，隔离复测及完整全量复测均通过，未放宽阈值。使用主仓解释器与 `PYTHONPATH` 指向本 worktree，无真实用户数据 fixture。
 
 默认提示模板已由 PR495 精简到 5948 字符，旧 7052 超预算问题不再出现。带其他测试联跑时运行时技能热点用例出现 `hot=[]`，与成本无关；单独提示预算在主仓与本 worktree 均通过 11 项；两端 `tsc --noEmit` 独立检查通过，scoped ruff 与 diff whitespace 检查通过。已有测试仍可产生 React act 和 aiosqlite 线程关闭告警，不作为新成本报表成功指标。
 

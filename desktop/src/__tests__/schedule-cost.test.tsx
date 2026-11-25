@@ -21,6 +21,14 @@ for (const [name, Component] of [["Desktop", Desktop], ["Web", Web]] as const) {
       expect(screen.getByText("本用户另有 1 次历史运行未归因，不计入此任务")).toBeTruthy();
       cleanup();
     });
+    it("preserves fractional token totals without locale rounding", () => {
+      render(<Component cost={{ ...fixture, input_tokens: 1.2345, cache_tokens: 0.0001 }} />);
+      expect(screen.getByText("输入 1.2345 token · 缓存 0.0001")).toBeTruthy();
+      cleanup();
+      render(<Component cost={{ ...fixture, input_tokens: 1.2345678901234567, cache_tokens: 1e-20 }} />);
+      expect(screen.getByText("输入 1.2345678901234567 token · 缓存 1e-20")).toBeTruthy();
+      cleanup();
+    });
     it("does not pretend missing denominators or failed API are zero percent", () => {
       render(<Component cost={{ ...fixture, run_count: 0, average_steps: null, cache_hit_rate: null }} />);
       expect(screen.getByText("命中率 —")).toBeTruthy();
