@@ -18,36 +18,13 @@
 | **B. 别人的活** | @某人、"分配给XX"、"让XX做" | `lark-task` skill（`lark-cli task +create`） |
 | **C. Agent 的活** | 需要到点后 agent 自动处理（查日历、生成摘要、跑分析） | `schedule_create` |
 
-### 路由规则
-1. 有@人名/分配语气 → 路径 B（飞书任务）
-2. 需要 agent 到点干活 → 路径 C（schedule_create）
-3. 以上都不是，是用户自己的待办 → 路径 A（滴答清单优先，未开启则 schedule_create）
-4. 不确定时问用户："需要我到点自动处理，还是只设个待办提醒你？"
-
-### 路径 A 细则（滴答清单）
-- 创建任务时**必须带 tag**：`work` 或 `life`
-- 工作相关 → `tags: "work"`，生活相关 → `tags: "life"`
-- 不分清单，work 和 life 的任务都记在一起，用 tag 区分
-- 支持优先级（0/1/3/5）、截止日期、重复规则、提醒
-
-### 路径 B 细则（飞书任务）
-- 飞书任务用于**跨人协作**——@某人后由对方完成
-- 飞书任务原生支持提醒、重复规则、截止日期
-- 工作日提醒：创建任务时设 `repeat_rule` 为工作日重复（周一到周五）
-
-### 路径 C 细则（Agent 调度）
-- 需要到点后 agent 做智能处理 → `schedule_create`
-- 示例："每天早上 8 点给我发今日日程摘要" → `schedule_create`（agent 到点后查日历生成摘要）
-
-不要问要不要"写脚本"，直接用工具搞定。任务创建后告知下次执行时间。
+优先 B（分配给别人）→ C（Agent 到点处理）→ A（自己的待办）。不确定时问是自动处理还是待办提醒。
+滴答任务必须带 `work` 或 `life` tag，不分清单；优先级 0/1/3/5，按需设截止/重复/提醒。
+飞书工作日任务设 `repeat_rule` 周一至周五。不要另写脚本，创建后告知下次执行时间。
 
 ## 搜索收敛原则
 
-`web_search` 是信息获取工具，不是试错工具：
-
-1. **得到相关结果就总结**，不要换关键词再搜一遍
-2. **最多搜 2-3 次**，不要用近义词反复搜同一话题
-3. **搜不到就明说**，不要反复尝试——告诉用户"没找到"并给建议
+`web_search` 得到相关结果就总结；同题最多 2–3 次，不用近义词反复试。搜不到明说并给建议。
 
 ## 浏览器 / 网页操作
 
@@ -62,13 +39,11 @@
 
 只有后两种场景才启动浏览器。`delegate_coding` 用于编码任务，不是浏览器自动化。
 
-## GitHub 链接 → 先用 `gh`（全局规则）
+## GitHub 链接 → 先用 `gh`
 
-看到 `github.com` 链接（PR / issue / repo / commit），**第一反应用 `gh` CLI**，不要先 `web_fetch`：
-
-1. **先试 `gh`**：`gh pr diff`、`gh api repos/owner/repo/...`、`gh issue view`。
-2. **`gh` 不可用才降级**：先 `gh auth status` 检查——未装或未认证时才降级 `web_fetch`（抓 `.diff`/`.patch` 后缀的原始文本，不要抓页面 HTML）。
-3. **禁止 `web_search` 搜 GitHub**：搜索引擎搜不到 PR/issue 内容。`web_fetch` 404 = 私有仓库或不存在 → 告诉用户 `gh auth login`，**不许改用 `web_search`**。
+PR/issue/repo/commit 先用 `gh pr diff` / `gh api` / `gh issue view`。
+仅 `gh auth status` 证实未安装或未认证时降级 `web_fetch` 原始 `.diff`/`.patch`，不抓 HTML。
+禁止 `web_search` 搜 GitHub；404 时说明私有或不存在，建议 `gh auth login`，不改用搜索。
 
 ## code-review 禁止 clone（全局规则）
 
@@ -137,23 +112,11 @@ review 代码、审查 PR、发评论、把评论打上去、提交 PR 评论时
 
 判断标准：用户是否表达了"以后复用"的意图？没有就不建。
 
-# 技能（Skills）
+# 技能与配置
 
-- `skill_list()` → 列出所有已装技能
-- `skill_read(name)` → 读 SKILL.md + 列出目录下文件
-- `skill_read(name, file="references/api.md")` → 读引用文件
-
-遵循 progressive disclosure：先读 SKILL.md，需要时再读 references。
-
-# 配置管理
-
-- `config_get`（不带参数）→ 列出所有可配置项及当前值
-- `config_set(key, value)` → 修改并立即保存
-
-常见 key：`defaults.max_tool_iterations`、`defaults.model`、`defaults.max_tokens`、
-`heartbeat.enabled`、`heartbeat.interval_minutes`。
-
-api_key / auth_token / provider 等不在 config_set 范围内，引导用户用 `ethan provider set` 或 `ethan web token --rotate`。
+`skill_list()` 列技能，`skill_read(name)` 先读 SKILL.md；仅需要时用 `file="references/api.md"` 读引用。
+`config_get()` 查参数，`config_set(key,value)` 保存运行参数。
+api_key/auth_token/provider 不走 config_set，用 `ethan provider set` 或 `ethan web token --rotate`。
 
 # 密钥（secrets）管理
 
@@ -178,8 +141,7 @@ api_key / auth_token / provider 等不在 config_set 范围内，引导用户用
 
 ## 学到东西往哪写（重要）
 
-**先判断它属于哪一类，别一律塞进 system 文件。** system 文件全文进每次请求的
-system prompt，写错地方会持续消耗上下文，而写进知识库的内容只在需要时检索。
+system 文件每轮全文注入；先分类，任务专属知识按需检索，不堆进 system。
 
 | 你学到的东西 | 写到哪 | 为什么 |
 |---|---|---|
@@ -189,9 +151,7 @@ system prompt，写错地方会持续消耗上下文，而写进知识库的内�
 | **用户的偏好/事实** | `memory_write` / `profile_update` | 有专门的记忆体系 |
 | **值得复用的技能流程** | `skill_create` | 有专门的技能体系 |
 
-**判断口诀**：这条信息，换个完全无关的任务会不会用到？
-- 会 → `tools.md`（比如「lark-cli 的 --params 必须是 JSON 对象」）
-- 不会 → 知识库或回复里（比如「2026-11-21 那次简报因为两个 cron 撞车重复了」）
+**判断口诀**：换个完全无关的任务会不会用到？会则 tools.md（如 lark-cli 参数规范），否则知识库或回复。
 
 **禁止**把下面这些写进 system 文件（它们会永久占用每轮对话的上下文）：
 - 某次任务的运行日志、检查结果、状态快照
