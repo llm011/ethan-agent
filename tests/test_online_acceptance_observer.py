@@ -132,6 +132,52 @@ def test_reject_future_and_unqualified_datetime(db_path):
     assert observer.timestamp("2026-11-26T05:23:00+08:00") > 0
 
 
+@pytest.mark.parametrize("cache,passes", [(79999, False), (80000, True)])
+def test_cache_threshold_uses_raw_counts_not_display_rounding(db_path, cache, passes):
+    for row_id in range(1, 4):
+        insert(db_path, row_id, usage=json.dumps({"input": 100000, "cache": cache}))
+    result = observe(db_path)
+    assert result["sources"][0]["hit_pct"] == 80.0
+    assert result["gate"]["quantitative_schedule_checks_pass"] is passes
+    assert ("schedule_cache_below_80pct_or_unmeasured" in result["gate"]["reasons"]) is (not passes)
+
+
+@pytest.mark.parametrize("step_count,passes", [(199, False), (200, True)])
+def test_error_threshold_uses_raw_counts_not_display_rounding(db_path, step_count, passes):
+    # Check just above the threshold and exact 1%; empty siblings preserve
+    # the denominator while satisfying the minimum measured-run floor.
+    steps = [{"state": "error"}] * 2 + [{"state": "done"}] * (step_count - 2)
+    insert(db_path, 1, steps=json.dumps(steps))
+    insert(db_path, 2, steps="[]")
+    insert(db_path, 3, steps="[]")
+    result = observe(db_path)
+    assert result["gate"]["quantitative_schedule_checks_pass"] is passes
+    assert ("tool_errors_above_1pct_or_unmeasured" in result["gate"]["reasons"]) is (not passes)
+
+
+def test_rounded_one_percent_above_threshold_fails(db_path):
+    # 2/199.0 is just outside round-to-1.00; 202/20100=1.004975... is the
+    # exact independently reviewed reproducer and displays 1.00%.
+    steps = [{"state": "error"}] * 202 + [{"state": "done"}] * (20100 - 202)
+    insert(db_path, 1, steps=json.dumps(steps))
+    insert(db_path, 2, steps="[]")
+    insert(db_path, 3, steps="[]")
+    result = observe(db_path)
+    assert result["sources"][0]["tool_error_pct"] == 1.0
+    assert "tool_errors_above_1pct_or_unmeasured" in result["gate"]["reasons"]
+    assert result["gate"]["quantitative_schedule_checks_pass"] is False
+
+
+def test_zero_denominators_are_unmeasured_not_passed(db_path):
+    for row_id in range(1, 4):
+        insert(db_path, row_id, usage='{"input":0,"cache":0}', steps="[]")
+    result = observe(db_path)
+    assert result["sources"][0]["hit_pct"] is None
+    assert result["sources"][0]["tool_error_pct"] is None
+    assert "schedule_cache_below_80pct_or_unmeasured" in result["gate"]["reasons"]
+    assert "tool_errors_above_1pct_or_unmeasured" in result["gate"]["reasons"]
+
+
 def test_cache_out_of_range_is_not_accepted(db_path):
     for row_id in range(1, 4):
         insert(db_path, row_id, usage='{"input":10,"cache":20}')

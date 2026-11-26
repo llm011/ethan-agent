@@ -203,9 +203,13 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
             reasons.append("deployment_window_under_72h")
         if schedule is None or schedule["usage_runs"] < min_runs:
             reasons.append("insufficient_schedule_usage_samples")
-        if schedule is None or schedule["hit_pct"] is None or schedule["hit_pct"] < 80:
+        # Display percentages are rounded; gates compare raw counts so values
+        # just below 80% or just above 1% cannot round into a false pass.
+        if (schedule is None or schedule["input"] <= 0
+                or schedule["cache"] * 100 < schedule["input"] * 80):
             reasons.append("schedule_cache_below_80pct_or_unmeasured")
-        if schedule is None or schedule["tool_error_pct"] is None or schedule["tool_error_pct"] > 1:
+        if (schedule is None or schedule["steps"] <= 0
+                or schedule["tool_errors"] * 100 > schedule["steps"]):
             reasons.append("tool_errors_above_1pct_or_unmeasured")
         if schedule and (schedule["usage_runs"] != schedule["runs"]
                          or schedule["cache_field_missing_or_nonnumeric"]
