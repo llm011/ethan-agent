@@ -45,8 +45,8 @@ uv run python scripts/probe_session_memory_ab.py --baseline-mode natural
 # 可选 --transport chat 或 --transport stream；离线默认两种均验证。
 ```
 
-假 provider 在缺少偏好时确定性选择召回，dry/stub 通过仅证明接线、模式与门禁；新增 natural
-能力没有新增真实模型验收结论。只有另行授权显式 `--live --baseline-mode natural` 才请求当前
+假 provider 在缺少偏好时确定性选择召回，dry/stub 通过仅证明接线、模式与门禁；natural
+真实测量的失败见下方，不宣称质量验收通过。只有另行授权显式 `--live --baseline-mode natural` 才请求当前
 实际配置的默认 OpenAI-compatible gateway/model（仅 chat），不切 route/账号、不改配置、
 不使用 fallback 或 SDK/应用层隐藏重试。每 case/arm 最多3次模型调用，每次最多768输出 token，
 `--timeout` 每 case/arm 必须在 `(0, 180]` 秒内；三个 fixture 两个 arm 总计最多18次请求。
@@ -57,3 +57,20 @@ uv run python scripts/probe_session_memory_ab.py --baseline-mode natural
 即便 B 完美、费用相等，也不会掩盖 A 的失败。B 零额外 recall 门禁只针对这三题的首轮完整偏好
 快照，不限制后续换话题按需召回。只报告匿名格式/计数/usage/耗时，不保存输出或推理。
 这些门禁只衡量本 probe 的调用计数与固定题输出，不证明真实账单降低、生产安全性或持续质量。
+
+### 自然模式真实测量（2026-11-26 13:10，未通过）
+
+PR #504 squash `d67fc2e7`；root 在固定代码 `d2675903651ca999b89dbbb6c31fa4a4912ca054`
+上用当前配置 `buddy-proxy/deepseek-v4.1-flash` 执行唯一一轮 live/chat 六臂，120秒/臂、最多3 calls/臂、
+768 tokens/call，共10次真实请求，exit1。匿名报告 `session-memory-ab-natural-live-20261126.json`
+SHA256 `366b2a3baf39f154879b49c8b676a6408e8d5ecf05a14f6678f546f4f0a45dd9`。
+按早餐/出行/学习顺序，A score=[2,2,0]、7 calls/4 tool recall/0 local recall，
+B score=[2,2,2]、3 calls/0 tool recall/3 local recall，每题快照持久一次；整体 `passed=false`。
+学习A为3 calls/2 recall、facts_exact=false/plan_safe=false；其余五臂通过。
+六臂均JSON可解析、无think/code fence、无调用错误；未保存答案，学习失败具体原因未知，不推测因果。
+A input/output=3,570/819，B=1,667/930；输入下降53.3%但输出增加13.6%，不证明所有token节省、
+真实账单降低、生产自然质量或三天收益；原controlled输入3,119/1,667与本次分开记录。
+不重跑、不放宽rubric或隐藏自然A失败；工具功能通过不等于自然质量通过。
+新增功能focused 74项通过（3.29s），含两项chat/stream非空首轮快照的后续换题回归：真实owner路由、
+自动checkpoint、公共SessionStore final-save/历史重载（非完整渠道producer），local1/tool0→local仍1/tool1，
+旧快照内容/时间戳不变，新偏好仅来自显式工具结果；确定性stub只证明可用性，不证明模型会正确选择。
