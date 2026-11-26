@@ -3,7 +3,8 @@
 Default: offline fake-provider wiring checks (both transports).
 Explicit paid opt-in: uv run python scripts/probe_session_memory_ab.py --live
 Live uses configured default credentials/model, chat only; no config is changed.
-A forces the first readonly recall tool call, B uses real prepare_session_memory.
+Default controlled A forces first readonly recall; --baseline-mode natural does not.
+B uses real prepare_session_memory; both arms share tools, system and sampling.
 Reports are bounded synthetic-case evidence, NOT general production quality claims.
 """
 from __future__ import annotations
@@ -155,7 +156,9 @@ class FakeProvider:
         assert SYSTEM in system
         available = any(m.role == 'tool' or m.content.startswith(MARKER) for m in messages)
         if not available:
-            assert self.force_recall and tools and len(tools) == 1
+            # The natural wiring double chooses recall when context is missing;
+            # this deterministic choice is not evidence of real model behavior.
+            assert tools and len(tools) == 1
             return Message('assistant', '', tool_calls=[ToolCall('synthetic-recall-1', 'recall_memory', {'query': '偏好'})],
                            usage={'input': 10, 'output': 5})
         assert any(self.case.profile in m.content for m in messages)
@@ -285,7 +288,9 @@ async def synthetic_environment(case, arm, inner):
             await store.close()
 
 
-async def run_case(case, arm, inner, transport='chat', timeout=MAX_TIMEOUT):
+async def run_case(case, arm, inner, transport='chat', timeout=MAX_TIMEOUT, baseline_mode='controlled'):
+    if baseline_mode not in ('controlled', 'natural'):
+        raise ValueError('unsupported baseline mode')
     if not 0 < timeout <= MAX_TIMEOUT:
         raise ValueError('timeout must be in (0, 180]')
     async with synthetic_environment(case, arm, inner) as (agent, provider, tool, recall, store):
@@ -312,11 +317,16 @@ async def run_case(case, arm, inner, transport='chat', timeout=MAX_TIMEOUT):
         if exists:
             async with store._db.execute('SELECT count(*) FROM session_memory_snapshots') as cursor:
                 snapshots = (await cursor.fetchone())[0]
-        contract = ((snapshots == 0 and recall.call_count == 0 and tool.calls >= 1 and provider.calls >= 2)
-                    if arm == 'A' else (snapshots == 1 and recall.call_count == 1))
+        # Natural A may decline recall: keep its genuine output/rubric failure,
+        # never inject facts, force another request, or label it a wiring error.
+        a_contract = snapshots == 0 and recall.call_count == 0
+        if baseline_mode == 'controlled':
+            a_contract = a_contract and tool.calls >= 1 and provider.calls >= 2
+        contract = a_contract if arm == 'A' else (snapshots == 1 and recall.call_count == 1)
         if not contract:
             result.update(score=0, passed=False, reason='arm_contract_error')
         return {'case': case.name, 'arm': arm, 'transport': transport, 'model': inner.model,
+                'baseline_mode': baseline_mode,
                 'calls': provider.calls, 'recalls': tool.calls, 'snapshot_recalls': recall.call_count,
                 'snapshots_persisted': snapshots, 'latency_ms': round((time.monotonic() - start) * 1000, 2),
                 'call_metrics': provider.records, 'error_type': failure or provider.failure,
@@ -350,7 +360,11 @@ def configured_live_provider():
                                   vision=getattr(entry, 'vision', None))
 
 
-async def run_probe(live=False, transport=None, timeout=MAX_TIMEOUT):
+async def run_probe(live=False, transport=None, timeout=MAX_TIMEOUT, baseline_mode='controlled'):
+    if baseline_mode not in ('controlled', 'natural'):
+        raise ValueError('unsupported baseline mode')
+    if not 0 < timeout <= MAX_TIMEOUT:
+        raise ValueError('timeout must be in (0, 180]')
     if live and transport not in (None, 'chat'):
         raise ValueError('live stream is unavailable: max_tokens is not bounded by its API')
     transports = [transport] if transport else (['chat'] if live else ['chat', 'stream'])
@@ -362,7 +376,8 @@ async def run_probe(live=False, transport=None, timeout=MAX_TIMEOUT):
         for wire in transports:
             for case in CASES:
                 for arm in ('A', 'B'):
-                    inner = configured_live_provider() if live else FakeProvider(case, force_recall=arm == 'A')
+                    inner = configured_live_provider() if live else FakeProvider(
+                        case, force_recall=arm == 'A' and baseline_mode == 'controlled')
                     try:
                         with ExitStack() as patches:
                             if live:
@@ -370,12 +385,12 @@ async def run_probe(live=False, transport=None, timeout=MAX_TIMEOUT):
                                 async def request(kwargs, **unused):
                                     nonlocal first
                                     # Genuine model tool generation in A; never synthesize its answer.
-                                    if first and arm == 'A':
+                                    if first and arm == 'A' and baseline_mode == 'controlled':
                                         kwargs['tool_choice'] = {'type': 'function', 'function': {'name': 'recall_memory'}}
                                     first = False
                                     return await inner._client.chat.completions.create(**kwargs)
                                 patches.enter_context(patch.object(inner, '_create_with_retry', request))
-                            rows.append(await run_case(case, arm, inner, wire, timeout))
+                            rows.append(await run_case(case, arm, inner, wire, timeout, baseline_mode))
                     finally:
                         if live:
                             # OpenAICompat inherits the no-op BaseProvider.close.
@@ -390,23 +405,33 @@ async def run_probe(live=False, transport=None, timeout=MAX_TIMEOUT):
             a, b = [row for row in rows if row['case'] == case.name and row['transport'] == wire]
             no_extra_recall = b['recalls'] == 0
             calls_not_increased = b['calls'] <= a['calls']
-            pairs.append({'case': case.name, 'transport': wire,
+            pairs.append({'case': case.name, 'transport': wire, 'baseline_mode': baseline_mode,
                           'no_extra_recall': no_extra_recall, 'calls_not_increased': calls_not_increased,
                           'non_regression': (a['passed'] and b['passed'] and b['score'] >= a['score']
                                              and no_extra_recall and calls_not_increased),
                           'call_delta_B_minus_A': b['calls'] - a['calls']})
-    return {'mode': 'live' if live else 'dry_fake', 'max_calls_per_case_arm': MAX_CALLS,
+    baseline_scope = (
+        'A forces first tool choice as a controlled on-demand baseline, not natural tool-selection quality. '
+        if baseline_mode == 'controlled' else
+        'Natural A disables snapshots without forcing recall; B uses its normal snapshot. '
+        'Both arms share visible tools, synthetic system policy and provider-default sampling; '
+        'this is unforced selection under that policy, not production natural dialogue. '
+        'Missing preferences or invalid output fail the unchanged rubric; no hidden fact injection. '
+    )
+    return {'mode': 'live' if live else 'dry_fake', 'baseline_mode': baseline_mode,
+            'max_calls_per_case_arm': MAX_CALLS,
             'max_tokens_per_call': MAX_TOKENS, 'timeout_seconds_per_case_arm': timeout,
             'sampling': 'provider default; no unsupported temperature parameter sent; identical A/B',
             'scope': 'Three synthetic fixtures only; fake results verify wiring, not model quality. '
-                     'A forces first tool choice as a controlled on-demand baseline, not natural tool-selection quality. '
-                     'Strict finite-vocabulary rubric; no production-user quality claim.',
+                     + baseline_scope + 'Strict finite-vocabulary rubric; no production-user quality claim.',
             'rows': rows, 'pairs': pairs, 'passed': all(pair['non_regression'] for pair in pairs)}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live', action='store_true', help='Explicit opt-in to paid configured-model calls (chat only)')
+    parser.add_argument('--baseline-mode', choices=['controlled', 'natural'], default='controlled',
+                        help='controlled forces A first recall (default); natural leaves tool selection unforced')
     parser.add_argument('--transport', choices=['chat', 'stream'])
     parser.add_argument('--timeout', type=float, default=MAX_TIMEOUT)
     args = parser.parse_args()
@@ -415,9 +440,10 @@ def main():
     if args.live and args.transport == 'stream':
         parser.error('--live currently supports chat only')
     try:
-        report = asyncio.run(run_probe(args.live, args.transport, args.timeout))
+        report = asyncio.run(run_probe(args.live, args.transport, args.timeout, args.baseline_mode))
     except Exception as error:
-        report = {'mode': 'live' if args.live else 'dry_fake', 'passed': False, 'error_type': type(error).__name__}
+        report = {'mode': 'live' if args.live else 'dry_fake', 'baseline_mode': args.baseline_mode,
+                  'passed': False, 'error_type': type(error).__name__}
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report['passed'] else 1
 

@@ -18,4 +18,42 @@
 
 验证：`tests/test_session_memory.py` 覆盖首次/重用/空召回/权限/模式/占位及真实
 Agent chat/stream 集成；个人早餐 fixture 中假模型第一轮即读到偏好回答，无 recall 工具往返。
-这证明机制与固定案例，不代表已完成真实个人问答质量 A/B 或线上成本测量。
+`tests/test_session_memory_followup.py` 另覆盖 chat/stream 同 session 的真实 owner 路由注入、
+自动 checkpoint 与临时 SQLite 完成消息/历史重载：早餐首轮 local recall 一次、工具零次；
+换到快照不含的出行偏好后，显式只读 recall 成功一次，首轮快照字节/时间戳不变、local 不重召回。
+该确定性 provider stub 证明后续工具没有被禁用，不证明真实模型会正确选择工具。
+这证明机制与固定案例，不代表已完成生产个人问答质量 A/B 或线上成本测量。
+
+## 有限合成 A/B probe
+
+`scripts/probe_session_memory_ab.py` 默认离线，使用真实 Agent chat/stream、临时 SessionStore
+与假 provider，只覆盖早餐、出行、学习三个合成 fixture；不读取生产记忆或写生产 DB/config。
+报告保留 `mode=dry_fake/live`，另在顶层、每个 row 和 pair 标注 `baseline_mode`：
+
+- `controlled`（默认）：A 关闭快照并强制首次只读 `recall_memory`；B 正常准备快照。
+  已记录的三题合计9次真实调用（A6/B3、均score2）仅证明该受控对照，不证明自然工具选择质量。
+- `natural`（显式选择）：A 只关闭快照，不强制首次召回；B 正常准备快照。
+  A/B 使用相同可见只读工具、合成 System 策略及 provider 默认采样，不隐藏 B 工具。
+  该共同策略仍要求缺偏好时召回，因此只是此合成策略下的非强制工具选择，不等于生产自然对话。
+  A 不召回且不知道偏好时，按原样输出接受严格 rubric 的失败，不注入偏好、不补答或隐式重跑。
+
+离线命令（不产生真实模型请求）：
+
+```bash
+uv run python scripts/probe_session_memory_ab.py
+uv run python scripts/probe_session_memory_ab.py --baseline-mode natural
+# 可选 --transport chat 或 --transport stream；离线默认两种均验证。
+```
+
+假 provider 在缺少偏好时确定性选择召回，dry/stub 通过仅证明接线、模式与门禁；新增 natural
+能力没有新增真实模型验收结论。只有另行授权显式 `--live --baseline-mode natural` 才请求当前
+实际配置的默认 OpenAI-compatible gateway/model（仅 chat），不切 route/账号、不改配置、
+不使用 fallback 或 SDK/应用层隐藏重试。每 case/arm 最多3次模型调用，每次最多768输出 token，
+`--timeout` 每 case/arm 必须在 `(0, 180]` 秒内；三个 fixture 两个 arm 总计最多18次请求。
+流式 live 被拒绝，因为当前 provider API 无法保证同一输出 token 上限。
+
+严格有限候选 rubric 不使用 LLM judge，不剥离 think/code fence 来伪造通过；自然 A 的失败必须
+保留。总体 `passed` 仍要求 A/B 均通过、B score 不退步、B 无额外 recall 且模型调用数不增加；
+即便 B 完美、费用相等，也不会掩盖 A 的失败。B 零额外 recall 门禁只针对这三题的首轮完整偏好
+快照，不限制后续换话题按需召回。只报告匿名格式/计数/usage/耗时，不保存输出或推理。
+这些门禁只衡量本 probe 的调用计数与固定题输出，不证明真实账单降低、生产安全性或持续质量。
