@@ -36,6 +36,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const token = getAuthToken();
     retryVerify(token ?? "").then((ok) => {
+      // A newer login/logout must not be overwritten by this restore.
+      if (getAuthToken() !== (token ?? "")) {
+        setLoading(false);
+        return;
+      }
+      // Repair missing/stale asset cookies only after the token is verified.
+      if (ok && token) setAuthToken(token);
       setAuthenticated(ok);
       setLoading(false);
     });
