@@ -212,6 +212,8 @@ ethan
 
 桌面端把 Web UI 包成原生窗口——启动后填上你的 `ethan serve` 地址（本地或远程都行），再用 token 登录即可。
 
+Web / Desktop 恢复登录时，仅在已保存的非空 token 验证成功后修复图片认证 Cookie；验证失败或空 token 不写 Cookie，恢复期间的注销/新登录不会被旧结果覆盖。见 [图片认证恢复](docs/image-auth-recovery.md)。
+
 ---
 
 ## 快速开始（Docker，适合服务器部署）

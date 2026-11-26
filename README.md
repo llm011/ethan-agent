@@ -35,6 +35,8 @@ ethan server uninstall   # 卸载开机自启
 
 服务默认监听 `8900`。启动后浏览器打开 `http://localhost:8900` 即可使用 Web 界面。
 
+Web / Desktop 恢复登录时，仅在已保存的非空 token 验证成功后修复图片认证 Cookie；验证失败或空 token 不写 Cookie，恢复期间的注销/新登录不会被旧结果覆盖。见 [图片认证恢复](docs/image-auth-recovery.md)。
+
 ### Docker 部署（服务器 / NAS）
 
 ```bash
