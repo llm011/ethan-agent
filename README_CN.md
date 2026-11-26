@@ -29,6 +29,7 @@ Web 成本报表已部署；Backend 已部署含 #501/#502 的 main `4d56ccb0`�
 
 原生多工具轮的 reasoning 与 tool-call ID 单独持久化，最终 UI 汇总消息与 wire 历史同事务提交；
 下一请求只展开完整配对轮次。见 [协议历史](docs/wire-transcripts.md)。
+官方 DeepSeek 已知端点/型号的带工具请求不会因最近一轮空 reasoning 丢弃较早思考；真实 SDK→本地 HTTP→临时 SQLite 回归覆盖原文配对与篡改400，仅是离线契约，不证明官方线上或 Trae 透传验收。见 [协议边界](docs/agent-loop.md#deepseek-历史回传与离线-http-契约)。
 
 持久原生会话按 iteration、授权前与单个工具完成保存检查点；续跑保留完成事实，未知副作用禁止自动重放。
 外部内核不自动重连原进程。见 [运行检查点](docs/run-checkpoints.md)。
