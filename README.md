@@ -67,6 +67,7 @@ Web 成本报表已部署；Backend 已部署含 #501/#502 的 main `4d56ccb0`�
 新 owner 会话首轮准备一次本地记忆快照，独立于 System Prompt 并跨重启重用；
 非主人/minimal/instant 不准备，后续仍可按需 recall。见 [首轮记忆](docs/session-memory.md)。
 离线 A/B probe 支持 `--baseline-mode natural`：A 关闭快照但不强制召回，B 正常准备快照，双方工具/系统策略/采样相同；默认仍为 `controlled`。报告显式标注模式，仅覆盖三题合成 fixture；新增能力与 dry/stub 测试不代表自然模式真实模型或生产质量已验收。
+新报告顶层 `rubric_version=v2`：拒绝任何层级重复 JSON 键，学习三题分钟须为正整数且非 bool；保持精确 facts、候选与总额门槛，出行费用仍可为小数。匿名 rubric 原因及每调用工具可用/返回数量仅用于未来诊断；历史未标版本报告为 legacy v1，不改写或重评分，也不能解释过去未保存答案的失败。
 
 默认 `ethan/defaults/system/agent.md` 正文由 7,051 精简至 5,948 字符，低于 6,000 字符预算；保留危险操作分级、密钥访问限制与知识写入分流，仅调整发布模板，不覆盖用户运行时定制文件。详见 [系统提示词构建](docs/agent-loop.md#系统提示词构建_build_system)。
 
