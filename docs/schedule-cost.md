@@ -25,6 +25,18 @@ Web / Desktop 的定时任务列表卡片和时间轴均展示近 7 天（滚动
 
 因此 `cache=0` 只有在完整覆盖时才证明返回的缓存计数确为零；字段缺失或未知时不能据此验收缓存收益。现有成本 SQL、命中率与 Web/Desktop UI 保持不变，覆盖信息用于后续真实样本的独立验收，不补估算值。不增加请求、不改提示词、不比较用户间前缀；不保存 prompt、hash、user ID、URL、key 或返回 model。计数每个 Agent 独立，消息仍走原 `BEGIN IMMEDIATE` 事务，无新表或迁移。
 
+## 只读验收采样
+
+```bash
+python scripts/observe_agent_loop_acceptance.py --since 2026-11-26T05:23:00+08:00
+```
+
+部署时间必须带 UTC offset；实际重新部署后应使用新的起点，不以旧窗口冒充新版本收益。脚本仅用 stdlib 与现有 SQLite JSON，`mode=ro` / `query_only` / 单事务一致快照，默认一次输出聚合 JSON；可选 `--samples` / `--interval` 有界采样，不安装 cron、不改配置、不请求模型，不输出用户身份或消息内容。匿名 J 标签只在本次采样有效。
+
+`source` 与匿名 `job` 的 `cache_coverage` 分开列出 `measured_runs`、`partial_runs`、`legacy_unknown_runs`、`invalid_runs` 及五项样本计数。计数必须为非负整数（非布尔，浮点整数也不接受）；`usage_samples > 0`，reported + missing + unknown 必须等于总样本，usage_missing 不得超过 unknown，`cache_reported` 必须为布尔且与 reported == samples 一致。仅全 reported 的运行计 measured。旧三字段 usage、元数据缺失不能因为 cache 是数值就通过；`usage_absent_runs` / `usage_invalid_runs` 单独计整个 usage 缺失或坏 JSON，不补造这些行的每请求样本数。部分覆盖区分明确缺缓存字段、未知与整个 usage 缺失。`genuine_zero_cache_runs` 只计完整覆盖且有正 input、数值 cache=0 的运行，仍不能证明缓存为何失效。
+
+量化门禁要求窗口至少 72 小时、最低样本数、全部最终 schedule 行 usage 与缓存覆盖完整、归因完整、缓存率至少 80%、工具错误率至多 1%；阈值使用原始计数交叉乘法而非展示舍入值，零分母保持未测。成本 SQL 交叉验证使用同一显式采样窗口，不冒充 UI 滚动七天。`full_acceptance` 始终 false：仍需确认抓取任务 cohort、基线步数与质量对照；原始 route 不落库，不能由此排除中途 fallback。纯历史旧库未通过不代表新代码无效，更不能补造历史覆盖数据。
+
 ## 精确归因与历史限制
 
 独立模块 `ethan/scheduler/cost.py` 在现有 profile `db/sessions.db` 内维护 `schedule_message_attribution`，以最终 **message_id** 为唯一主键，保存 `session_id / job_id / user_id`。每次回调通过 SessionStore 原子接口将最终消息和精确映射同事务提交；原进度行被 UPDATE，不会重复记录一次运行。错误终态也归因。任务改标题、轮转到新 session、服务重启不覆盖旧映射。同一 session 被多个 job 使用，各消息仍只归属一个 job，不将整个 session 重复算给每个任务。

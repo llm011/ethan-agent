@@ -86,6 +86,8 @@ Web/Desktop 定时任务支持近 7 天成本报表，展示真实输入与缓�
 
 原生 OpenAI 兼容响应默认附带仅数字/布尔的缓存字段覆盖观测；既有 token 与 UI 不变，缺字段不再视为真实零缓存。无需额外请求，不记录提示词、哈希或身份信息。见 [缓存字段覆盖](docs/schedule-cost.md#缓存字段覆盖观测)。
 
+只读验收脚本 `scripts/observe_agent_loop_acceptance.py` 校验缓存样本计数与完整覆盖，旧三字段 usage 明确为 unknown；默认单次、不发模型请求、不装 cron，未满 72 小时不会通过。见 [只读验收采样](docs/schedule-cost.md#只读验收采样)。
+
 ## 安全事件与心跳检查
 
 外部事件默认关闭；显式启用并配置专用 HMAC 后支持 GitHub push/CI 与受限告警，仅生成无工具人工复核摘要。

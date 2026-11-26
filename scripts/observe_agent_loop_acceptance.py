@@ -45,6 +45,40 @@ def rate(cache: float, inputs: float) -> float | None:
     return round(100 * cache / inputs, 2) if inputs else None
 
 
+def cache_coverage(raw: str | None, kind: str | None) -> str:
+    """Validate only the allowed cache_usage aggregate, never message bodies."""
+    fields = ("usage_samples", "cache_reported_samples", "cache_missing_samples",
+              "unknown_samples", "usage_missing_samples")
+    result = {"state": "legacy_unknown" if kind is None else "invalid",
+              **dict.fromkeys(fields, 0)}
+    try:
+        metadata = json.loads(raw) if kind == "object" else None
+        if not isinstance(metadata, dict):
+            return json.dumps(result)
+        values = [metadata.get(field) for field in fields]
+        if any(type(value) is not int or value < 0 for value in values):
+            return json.dumps(result)
+        samples, reported, missing, unknown, usage_missing = values
+        flag = metadata.get("cache_reported")
+        if (samples <= 0 or reported + missing + unknown != samples
+                or usage_missing > unknown or type(flag) is not bool
+                or flag != (reported == samples)):
+            return json.dumps(result)
+        result.update(zip(fields, values))
+        result["state"] = "measured" if reported == samples else "partial"
+    except (ValueError, TypeError):
+        pass
+    return json.dumps(result)
+
+
+def coverage_metrics(values: list) -> dict:
+    names = ("measured_runs", "partial_runs", "legacy_unknown_runs", "invalid_runs",
+             "usage_samples", "cache_reported_samples", "cache_missing_samples",
+             "unknown_samples", "usage_missing_samples", "genuine_zero_cache_runs",
+             "usage_absent_runs", "usage_invalid_runs")
+    return dict(zip(names, (value or 0 for value in values)))
+
+
 def cost_sql_literal(path: Path) -> str:
     """Read the actual COST_SQL literal without importing any application code."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -80,6 +114,7 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
     # application path helpers (some migrate/create production assets).
     with closing(sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True,
                                  timeout=2)) as db:
+        db.create_function("cache_coverage", 2, cache_coverage, deterministic=True)
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")  # A consistent snapshot for every metric/parity query.
         mc = columns(db, "messages")
@@ -109,7 +144,9 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
             CASE WHEN json_type(steps)='array' THEN
               (SELECT count(*) FROM json_each(steps) t
                WHERE CASE WHEN json_valid(t.value) THEN json_extract(t.value,'$.state') END='error')
-              ELSE 0 END errors
+              ELSE 0 END errors,
+            cache_coverage(json_extract(u,'$.cache_usage'),
+                           json_type(u,'$.cache_usage')) coverage
           FROM selected
         )
         """
@@ -118,7 +155,20 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
           sum(input>0 AND json_type(u,'$.cache') NOT IN ('integer','real')),
           sum(input>0 AND json_type(u,'$.cache') IS NULL),
           sum(cache<0 OR cache>input)"""
-        raw_sources = db.execute(common + f"SELECT source,{metrics} FROM measured GROUP BY source",
+        coverage_sql = """sum(json_extract(coverage,'$.state')='measured'),
+          sum(json_extract(coverage,'$.state')='partial'),
+          sum(json_extract(coverage,'$.state')='legacy_unknown' AND NOT usage_missing AND NOT usage_invalid),
+          sum(json_extract(coverage,'$.state')='invalid'),
+          sum(json_extract(coverage,'$.usage_samples')),
+          sum(json_extract(coverage,'$.cache_reported_samples')),
+          sum(json_extract(coverage,'$.cache_missing_samples')),
+          sum(json_extract(coverage,'$.unknown_samples')),
+          sum(json_extract(coverage,'$.usage_missing_samples')),
+          sum(input>0 AND cache=0 AND json_extract(coverage,'$.state')='measured'
+              AND json_type(u,'$.cache') IN ('integer','real')),
+          sum(usage_missing),sum(usage_invalid)"""
+        combined_metrics = metrics + "," + coverage_sql
+        raw_sources = db.execute(common + f"SELECT source,{combined_metrics} FROM measured GROUP BY source",
                                  (since, now)).fetchall()
         merged: dict[str, list] = {}
         for name, *values in raw_sources:
@@ -126,7 +176,7 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
             for index, value in enumerate(values):
                 dest[index] += value or 0
         for name, v in sorted(merged.items()):
-            runs, usage_runs, inputs, cache, steps, errors, missing, invalid, zero, bad_cache, absent_cache, bad_values = v
+            runs, usage_runs, inputs, cache, steps, errors, missing, invalid, zero, bad_cache, absent_cache, bad_values = v[:12]
             report["sources"].append({
                 "source": name, "runs": runs, "usage_runs": usage_runs,
                 "input": inputs, "cache": cache, "hit_pct": rate(cache, inputs),
@@ -136,6 +186,7 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
                 "zero_cache_runs": zero,
                 "cache_field_missing_or_nonnumeric": bad_cache + absent_cache,
                 "cache_out_of_range": bad_values,
+                "cache_coverage": coverage_metrics(v[12:]),
             })
         total = sum(v[2] for v in merged.values())
         hb = merged.get("heartbeat", [0, 0, 0])[2]
@@ -144,7 +195,7 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
         if has_mapping:
             # Internal owner/job IDs never leave the process. Group by owner too,
             # so duplicate job IDs across profiles cannot merge their costs.
-            sql = common + f"""SELECT a.user_id,a.job_id,{metrics}
+            sql = common + f"""SELECT a.user_id,a.job_id,{combined_metrics}
               FROM measured JOIN schedule_message_attribution a
               ON a.message_id=measured.id AND a.session_id=measured.session_id
               WHERE source='schedule' GROUP BY a.user_id,a.job_id ORDER BY a.user_id,a.job_id"""
@@ -157,6 +208,7 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
                     "input": inputs, "cache": cache, "hit_pct": rate(cache, inputs),
                     "average_steps": round(steps / runs, 2), "steps": steps,
                     "tool_errors": errors, "usage_missing": v[6], "usage_invalid": v[7],
+                    "cache_coverage": coverage_metrics(v[12:]),
                 })
                 expected[(owner, job)] = (runs, inputs, cache, steps / runs, usage_runs)
             gaps = db.execute(common + """SELECT count(*) FROM measured WHERE source='schedule'
@@ -215,6 +267,8 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
                          or schedule["cache_field_missing_or_nonnumeric"]
                          or schedule["cache_out_of_range"]):
             reasons.append("incomplete_or_invalid_usage_coverage")
+        if schedule is None or schedule["cache_coverage"]["measured_runs"] != schedule["runs"]:
+            reasons.append("upstream_cache_coverage_incomplete_or_unknown")
         if report["schedule_unattributed_runs"]:
             reasons.append("incomplete_schedule_attribution")
         report["gate"] = {
@@ -222,7 +276,8 @@ def observe(db_path: Path, since: float, now: float, min_runs: int = 3,
             "minimum_usage_runs": min_runs,
             "full_acceptance": False,
             "remaining": "identify approved scraping-job cohort; compare baseline steps and quality; "
-                         "raw provider cache presence/route not persisted, cannot explain zero cache",
+                         "legacy cache presence unknown; raw route not persisted; "
+                         "reported zero does not explain upstream cache eviction",
         }
     return report
 
