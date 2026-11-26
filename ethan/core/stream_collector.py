@@ -226,6 +226,8 @@ class StreamCollector:
     def usage_dict(self) -> dict:
         if self._agent is not None:
             u = self._agent.usage
+            if callable(getattr(u, "to_dict", None)):
+                return u.to_dict()
             return {"input": u.input_tokens, "output": u.output_tokens, "cache": u.cache_tokens}
         return {"input": 0, "output": 0, "cache": 0}
 

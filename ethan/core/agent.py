@@ -51,8 +51,45 @@ class UsageStats:
     output_tokens: int = 0
     cache_tokens: int = 0
 
+    def __init__(self) -> None:
+        # Observation is per agent, never shared across providers/users/sessions.
+        self._cache_observed = False
+        self._usage_samples = 0
+        self._cache_reported_samples = 0
+        self._cache_missing_samples = 0
+        self._unknown_samples = 0
+        self._usage_missing_samples = 0
+
+    def to_dict(self) -> dict:
+        result = {"input": self.input_tokens, "output": self.output_tokens, "cache": self.cache_tokens}
+        # Old providers/fakes retain their exact three-key contract.
+        if self._cache_observed:
+            result["cache_usage"] = {
+                "usage_samples": self._usage_samples,
+                "cache_reported_samples": self._cache_reported_samples,
+                "cache_missing_samples": self._cache_missing_samples,
+                "unknown_samples": self._unknown_samples,
+                "usage_missing_samples": self._usage_missing_samples,
+                "cache_reported": self._cache_reported_samples == self._usage_samples,
+            }
+        return result
+
     def add(self, usage: dict | None) -> None:
+        self._usage_samples += 1
+        metadata = usage.get("cache_usage") if usage else None
+        reported = metadata.get("cache_reported") if isinstance(metadata, dict) else None
+        known = metadata.get("cache_presence_known", True) if isinstance(metadata, dict) else False
+        if isinstance(reported, bool):
+            self._cache_observed = True
+        if isinstance(reported, bool) and known is True:
+            if reported:
+                self._cache_reported_samples += 1
+            else:
+                self._cache_missing_samples += 1
+        else:
+            self._unknown_samples += 1
         if not usage:
+            self._usage_missing_samples += 1
             return
         self.input_tokens += usage.get("input", 0)
         self.output_tokens += usage.get("output", 0)
