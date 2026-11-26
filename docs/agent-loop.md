@@ -195,6 +195,14 @@ result_compressor.maybe_compress(tool_name, result)
 逐轮 assistant reasoning、tool-call ID 与结果独立于 UI 汇总正文保存，下一请求恢复完整配对。
 消息与 wire 独立事务同时提交；详见 [协议持久化](wire-transcripts.md)。这不替代每轮运行检查点。
 
+### DeepSeek 历史回传与离线 HTTP 契约
+
+[官方 Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/) 要求携带 `tools` 时完整回传所有历史轮的真实 `reasoning_content`，包括没有调用工具的 assistant 轮；没有要求每轮返回非空 reasoning。
+精确主机 `api.deepseek.com` 与当前官方型号 `deepseek-flash` / `deepseek-v4-pro` 的带工具请求因此保留任何历史轮已返回的 reasoning，不因最近一轮为空而丢弃较早历史。不生成空轮的假 reasoning；其他主机或型号仍使用旧的最近 assistant 判定，不默认给未知网关新增透传，也不改变 thinking 开关。
+
+`tests/test_reasoning_http_contract.py` 使用真实 OpenAI SDK、仅本次 `127.0.0.1:0` 随机端口允许的 HTTP transport、合成 JSON/SSE 与临时 SQLite：实际 producer 保存后关闭重开，新的 Agent/provider 通过 chat 和 stream 发出下一请求，服务端检查两工具轮及无工具最终轮的 Unicode/空白原文与 call-id 配对；另覆盖空第二工具轮/空最终轮。丢弃、交换、截断 reasoning 的对照必须收到真实 HTTP 400，不允许 SDK/连接重试或模型 fallback，每个 fixture 最多八请求。
+这是 Ethan→SQLite→SDK→本地 HTTP 的离线协议证据，不经过 Buddy/Trae，不产生模型账单，**不证明 DeepSeek 官方线上通过或当前网关上游原文透传**。现有网关真实探针 236→0→0 的结果与未通过的严格非空覆盖要求仍保留，不能以此本地测试替代线上验收。
+
 ## 模块拆分
 
 `core/agent.py` 长期承担了循环控制 + 回复质量判定 + 错误分类三件事。按职责把与 `Agent` 实例状态无关的纯函数拆到独立模块，`agent.py` 保留 re-export 以兼容旧引用路径（`agent._is_degenerate_reply` 等）：

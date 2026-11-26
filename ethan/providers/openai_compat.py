@@ -335,6 +335,20 @@ class OpenAICompatProvider(BaseProvider):
                 return bool(getattr(m, "reasoning", None))
         return False
 
+    def _include_reasoning(self, messages: list[Message], tools: list | None) -> bool:
+        """Official DeepSeek tools replay all real history, even after an empty round.
+
+        Endpoint AND model identify the contract; unknown gateways retain their
+        legacy last-assistant policy. Never invent reasoning for empty rounds.
+        """
+        try:
+            official = urlparse(self._base_url).hostname == "api.deepseek.com"
+        except ValueError:
+            official = False
+        if official and (self._model or "").lower() in {"deepseek-flash", "deepseek-v4-pro"} and tools:
+            return any(m.role == "assistant" and bool(m.reasoning) for m in messages)
+        return self._wants_reasoning() or self._history_carries_reasoning(messages)
+
     def _supports_vision(self) -> bool:
         """当前模型是否支持图像输入（content 中可含 image_url blocks）。
 
@@ -364,10 +378,10 @@ class OpenAICompatProvider(BaseProvider):
         return _transform.strip_images_from_content(content)
 
     def _skip_thinking_field(self) -> bool:
-        """直连 DeepSeek 官方 API 时不传顶层 thinking 字段：
-        官方对 deepseek-reasoner 默认强制开启推理，额外字段会报 400
-        (Extra inputs are not permitted)。该字段仅面向需要显式声明的
-        Anthropic 风格中转网关。
+        """保留旧 reasoning 型号直连时的 thinking 字段抑制兼容政策。
+
+        当前官方 API 已支持 thinking；这里不是最新官方协议声明。
+        本次仅修历史 reasoning 回传，不改变开启/关闭 thinking 的旧行为。
         """
         try:
             host = urlparse(self._base_url).hostname or ""
@@ -384,9 +398,8 @@ class OpenAICompatProvider(BaseProvider):
         disable_thinking: bool = False,
     ) -> Message:
         reasoning = self._wants_reasoning()
-        # 历史 reasoning_content 回传：模型名匹配 OR 最近一条 assistant 带 reasoning
-        # （证据驱动，覆盖 deepseek-v4.1-flash 等模型名表之外的 reasoning 模型）。
-        include_reasoning = reasoning or self._history_carries_reasoning(messages)
+        # 官方 tools 请求保留全部历史；未知网关继续使用旧证据驱动门禁。
+        include_reasoning = self._include_reasoning(messages, tools)
         oai_messages = self._to_openai_messages(messages, include_reasoning=include_reasoning)
         if system:
             oai_messages.insert(0, {"role": "system", "content": system})
@@ -418,8 +431,8 @@ class OpenAICompatProvider(BaseProvider):
         system: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         reasoning = self._wants_reasoning()
-        # 历史 reasoning_content 回传：模型名匹配 OR 最近一条 assistant 带 reasoning。
-        include_reasoning = reasoning or self._history_carries_reasoning(messages)
+        # 与 chat 共用官方/未知网关的历史回传门禁。
+        include_reasoning = self._include_reasoning(messages, tools)
         oai_messages = self._to_openai_messages(messages, include_reasoning=include_reasoning)
         if system:
             oai_messages.insert(0, {"role": "system", "content": system})
