@@ -80,10 +80,14 @@ async def test_actual_snapshot_persists_and_reuses_after_store_reopen():
 
 
 @pytest.mark.anyio
-async def test_default_dry_never_constructs_live_provider():
+@pytest.mark.parametrize('baseline_mode', ['controlled', 'natural'])
+async def test_dry_never_constructs_live_provider(baseline_mode):
     with patch('scripts.probe_session_memory_ab.configured_live_provider', side_effect=AssertionError('paid call forbidden')):
-        report = await run_probe()
+        report = await run_probe(baseline_mode=baseline_mode)
     assert report['mode'] == 'dry_fake' and report['passed']
+    assert report['baseline_mode'] == baseline_mode
+    assert all(row['baseline_mode'] == baseline_mode for row in report['rows'])
+    assert all(pair['baseline_mode'] == baseline_mode for pair in report['pairs'])
     assert len(report['rows']) == 12 and len(report['pairs']) == 6
     assert all(pair['call_delta_B_minus_A'] == -1 for pair in report['pairs'])
     assert all(row['snapshots_persisted'] == (row['arm'] == 'B') for row in report['rows'])
@@ -91,20 +95,22 @@ async def test_default_dry_never_constructs_live_provider():
 
 
 @pytest.mark.anyio
-async def test_perfect_score_with_two_extra_b_recalls_fails_overall_acceptance():
+@pytest.mark.parametrize('baseline_mode', ['controlled', 'natural'])
+async def test_perfect_score_with_two_extra_b_recalls_fails_overall_acceptance(baseline_mode):
     from ethan.providers.base import Message, ToolCall
 
     class RecallingB(FakeProvider):
         async def chat(self, messages, tools=None, system=None, max_tokens=None):
             completed = sum(message.role == 'tool' for message in messages)
-            if not self.force_recall and completed < 2:
+            from ethan.core.session_memory import MARKER
+            if any(message.content.startswith(MARKER) for message in messages) and completed < 2:
                 assert tools and len(tools) == 1  # B tools remain available, never hidden.
                 return Message('assistant', '', tool_calls=[
                     ToolCall(f'extra-{completed}', 'recall_memory', {'query': '偏好'})])
             return await super().chat(messages, tools, system, max_tokens)
 
     with patch('scripts.probe_session_memory_ab.FakeProvider', RecallingB):
-        report = await run_probe()
+        report = await run_probe(baseline_mode=baseline_mode)
     assert not report['passed'] and len(report['pairs']) == 6
     assert all(row['passed'] and row['score'] == 2 for row in report['rows'])
     for row in report['rows']:
@@ -122,16 +128,80 @@ async def test_perfect_score_with_two_extra_b_recalls_fails_overall_acceptance()
     (1, 0, True, False),   # Perfect scores cannot hide a failed baseline run.
     (1, 0, False, True),   # Perfect scores cannot hide a failed B run.
 ])
-async def test_independent_cost_and_execution_gates_fail_closed(calls, recalls, a_failed, b_failed):
-    async def row(case, arm, inner, transport, timeout):
+@pytest.mark.parametrize('baseline_mode', ['controlled', 'natural'])
+async def test_independent_cost_and_execution_gates_fail_closed(calls, recalls, a_failed, b_failed, baseline_mode):
+    async def row(case, arm, inner, transport, timeout, baseline_mode):
         return {'case': case.name, 'arm': arm, 'transport': transport, 'score': 2,
                 'passed': not (a_failed if arm == 'A' else b_failed),
                 'calls': 2 if arm == 'A' else calls, 'recalls': 1 if arm == 'A' else recalls}
     with patch('scripts.probe_session_memory_ab.run_case', row):
-        report = await run_probe(transport='chat')
+        report = await run_probe(transport='chat', baseline_mode=baseline_mode)
     assert not report['passed']
     assert all(not pair['non_regression'] and pair['no_extra_recall'] == (recalls == 0)
                and pair['calls_not_increased'] == (calls <= 2) for pair in report['pairs'])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('transport', ['chat', 'stream'])
+@pytest.mark.parametrize('case', CASES, ids=lambda case: case.name)
+async def test_natural_a_can_decline_recall_without_hidden_preferences(case, transport):
+    from ethan.core.session_memory import MARKER
+    from ethan.providers.base import Message
+
+    class DecliningRecall(FakeProvider):
+        async def chat(self, messages, tools=None, system=None, max_tokens=None):
+            assert tools and len(tools) == 1 and tools[0].name == 'recall_memory'
+            assert not self.force_recall
+            if not any(message.content.startswith(MARKER) for message in messages):
+                assert not any(message.role == 'tool' for message in messages)
+                assert not any(case.profile in message.content for message in messages)
+                # Genuine unknown facts: harness must not fill or replace them.
+                return Message('assistant', '{"facts":{},"plan":[]}')
+            return await super().chat(messages, tools, system, max_tokens)
+
+    a = await run_case(case, 'A', DecliningRecall(case), transport, baseline_mode='natural')
+    b = await run_case(case, 'B', DecliningRecall(case), transport, baseline_mode='natural')
+    assert a['calls'] == 1 and a['recalls'] == 0 and a['snapshot_recalls'] == 0
+    assert a['snapshots_persisted'] == 0 and a['error_type'] is None
+    assert a['reason'] == 'rubric_reject' and a['score'] == 0 and not a['passed']
+    assert a['output_diagnostics']['json_parse_success'] and not a['output_diagnostics']['facts_exact']
+    assert b['passed'] and b['calls'] == 1 and b['recalls'] == 0
+    assert b['snapshots_persisted'] == b['snapshot_recalls'] == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('transport', ['chat', 'stream'])
+async def test_natural_failed_baseline_is_not_hidden_by_perfect_b_or_equal_cost(transport):
+    from ethan.core.session_memory import MARKER
+    from ethan.providers.base import Message
+
+    class DecliningRecall(FakeProvider):
+        async def chat(self, messages, tools=None, system=None, max_tokens=None):
+            if not any(message.content.startswith(MARKER) for message in messages):
+                return Message('assistant', '{"facts":{},"plan":[]}')
+            return await super().chat(messages, tools, system, max_tokens)
+
+    with patch('scripts.probe_session_memory_ab.FakeProvider', DecliningRecall):
+        report = await run_probe(transport=transport, baseline_mode='natural')
+    assert not report['passed']
+    assert all(row['passed'] == (row['arm'] == 'B') for row in report['rows'])
+    assert all(pair['calls_not_increased'] and pair['no_extra_recall']
+               and pair['call_delta_B_minus_A'] == 0 and not pair['non_regression'] for pair in report['pairs'])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('timeout', [0, -1, 181, float('nan')])
+async def test_invalid_timeout_refused_before_live_provider_creation(timeout):
+    with patch('scripts.probe_session_memory_ab.configured_live_provider', side_effect=AssertionError('paid call forbidden')):
+        with pytest.raises(ValueError, match='timeout'):
+            await run_probe(live=True, timeout=timeout, baseline_mode='natural')
+
+
+@pytest.mark.anyio
+async def test_invalid_baseline_mode_refused_before_live_provider_creation():
+    with patch('scripts.probe_session_memory_ab.configured_live_provider', side_effect=AssertionError('paid call forbidden')):
+        with pytest.raises(ValueError, match='baseline mode'):
+            await run_probe(live=True, baseline_mode='unknown')
 
 
 @pytest.mark.parametrize('prefix,starts_think,contains_tag,starts_fence', [
@@ -220,7 +290,8 @@ async def test_upstream_error_is_not_passed_or_logged():
 
 
 @pytest.mark.anyio
-async def test_timeout_cancels_provider_and_fails_closed():
+@pytest.mark.parametrize('baseline_mode', ['controlled', 'natural'])
+async def test_timeout_cancels_provider_and_fails_closed(baseline_mode):
     import asyncio
     cancelled = False
     class Slow(FakeProvider):
@@ -230,18 +301,19 @@ async def test_timeout_cancels_provider_and_fails_closed():
                 await asyncio.Event().wait()
             finally:
                 cancelled = True
-    row = await run_case(CASES[0], 'B', Slow(CASES[0]), timeout=0.01)
+    row = await run_case(CASES[0], 'B', Slow(CASES[0]), timeout=0.01, baseline_mode=baseline_mode)
     assert cancelled and not row['passed'] and row['score'] == 0
     assert row['calls'] <= MAX_CALLS and row['error_type'] == 'TimeoutError'
 
 
 @pytest.mark.anyio
-async def test_call_limit_is_hard_even_when_agent_retries():
+@pytest.mark.parametrize('baseline_mode', ['controlled', 'natural'])
+async def test_call_limit_is_hard_even_when_agent_retries(baseline_mode):
     from ethan.providers.base import Message, ToolCall
     class Repeating(FakeProvider):
         async def chat(self, *args, **kwargs):
             return Message('assistant', '', tool_calls=[ToolCall(str(id(args)), 'recall_memory', {'query': '偏好'})])
-    row = await run_case(CASES[0], 'A', Repeating(CASES[0]))
+    row = await run_case(CASES[0], 'A', Repeating(CASES[0]), baseline_mode=baseline_mode)
     assert row['calls'] == MAX_CALLS and not row['passed'] and row['score'] == 0
 
 
@@ -280,7 +352,8 @@ def test_configured_anthropic_transport_refused_before_construction(key, provide
 
 
 @pytest.mark.anyio
-async def test_live_request_seam_is_bounded_and_closed_without_paid_calls():
+@pytest.mark.parametrize('baseline_mode', ['controlled', 'natural'])
+async def test_live_request_seam_is_bounded_and_closed_without_paid_calls(baseline_mode):
     from types import SimpleNamespace
     from unittest.mock import Mock
 
@@ -292,7 +365,7 @@ async def test_live_request_seam_is_bounded_and_closed_without_paid_calls():
 
         class LocalSDK(FakeProvider):
             def __init__(self):
-                super().__init__(case, force_recall=arm == 'A')
+                super().__init__(case, force_recall=arm == 'A' and baseline_mode == 'controlled')
                 self.requests = []
                 self._client = SimpleNamespace(
                     chat=SimpleNamespace(completions=SimpleNamespace(create=self.sdk_create)), close=AsyncMock())
@@ -311,23 +384,28 @@ async def test_live_request_seam_is_bounded_and_closed_without_paid_calls():
         return inner
 
     with patch('scripts.probe_session_memory_ab.configured_live_provider', Mock(side_effect=create)):
-        report = await run_probe(live=True)
+        report = await run_probe(live=True, baseline_mode=baseline_mode)
+    assert report['baseline_mode'] == baseline_mode
     assert report['passed'] and len(report['rows']) == 6
     for index, inner in enumerate(instances):
         inner._client.close.assert_awaited_once()
         assert len(inner.requests) == (2 if index % 2 == 0 else 1)
         assert all(request['max_tokens'] == 768 and 'temperature' not in request for request in inner.requests)
         assert inner.requests[0].get('tool_choice') == (
-            {'type': 'function', 'function': {'name': 'recall_memory'}} if index % 2 == 0 else None)
+            {'type': 'function', 'function': {'name': 'recall_memory'}}
+            if index % 2 == 0 and baseline_mode == 'controlled' else None)
+        assert all(request['system'] == instances[0].requests[0]['system']
+                   and request['tools'] == instances[0].requests[0]['tools'] for request in inner.requests)
         if index % 2 == 0:
             assert 'tool_choice' not in inner.requests[1]
 
 
 @pytest.mark.anyio
-async def test_live_stream_refused_before_provider_creation():
+@pytest.mark.parametrize('baseline_mode', ['controlled', 'natural'])
+async def test_live_stream_refused_before_provider_creation(baseline_mode):
     with patch('scripts.probe_session_memory_ab.configured_live_provider', side_effect=AssertionError('paid call forbidden')):
         with pytest.raises(ValueError, match='live stream'):
-            await run_probe(live=True, transport='stream')
+            await run_probe(live=True, transport='stream', baseline_mode=baseline_mode)
 
 
 @pytest.mark.anyio
