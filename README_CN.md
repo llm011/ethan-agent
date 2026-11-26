@@ -50,6 +50,8 @@ GitHub 已记录签名正文按 body 摘要去重，改 delivery id 不重复唤
 旧账本无法追溯未保存正文的摘要。可选本地变化检查跳过无变化心跳；未配置时保留原周期任务。
 见 [事件触发](docs/event-triggers.md)。
 
+Web / Desktop 回复恢复按本流占位 ID 与服务器消息 ID 归并，保留合法旁路与不同轮相同正文；fresh-page 收尾后不接受迟到刷新。见 [回复流恢复](docs/chat-stream-replay.md)。源码回归不代表具体用户会话已确诊或已部署。
+
 ## 特性
 
 **多内核**
