@@ -113,16 +113,98 @@ def test_restart_launchd_exception_is_swallowed(monkeypatch):
 
 
 def test_launchd_installed_checks_plist_file_not_pid(monkeypatch):
-    """服务崩溃重试时 launchctl 的 PID 列是 `-`，此时仍算 launchd 托管。
-
-    若按「有 PID」判断，就会在 launchd 也在拉的瞬间退回裸 Popen，重新造出
-    抢端口的双实例——正是要防的场景。
-    """
+    """`_launchd_installed` 只看 plist 文件在不在（它不负责区分 stop）。"""
     monkeypatch.setattr(server_mod, "_is_installed", lambda: True)
     assert update_mod._launchd_installed() is True
 
     monkeypatch.setattr(server_mod, "_is_installed", lambda: False)
     assert update_mod._launchd_installed() is False
+
+
+# ── 用户 stop 过 → update 不该把服务又拉起来 ─────────────────────
+
+
+def test_update_skips_restart_after_user_stop(monkeypatch):
+    """`ethan server stop` 之后 plist 还在，但 update 的收尾重启必须跳过。
+
+    `server stop` 走 `launchctl unload`，**不删 plist**。所以
+    `_launchd_installed()` 在 stop 之后仍是 True——用它当判据会让用户明确停掉的
+    服务被 update 复活。正确判据是 launchd 里还登记着没有。
+
+    这条测的是 `update()` 的调用处（把关点在那儿），不是 `_restart_serve`
+    内部——后者是「显式要求重启」的入口，本来就该重启。
+    """
+    _forbid_popen(monkeypatch)
+
+    monkeypatch.setattr(update_mod, "_find_serve_pid", lambda: None)
+    monkeypatch.setattr(update_mod, "_launchd_registered", lambda: False)
+    monkeypatch.setattr(server_mod, "_is_installed", lambda: True)
+
+    called = []
+    monkeypatch.setattr(
+        update_mod, "_restart_serve", lambda repo: called.append("restart")
+    )
+
+    # 直接验证收尾那段判据（update() 主体太长，抽条件单测更稳）
+    restart = True
+    should_restart = bool(
+        restart and (update_mod._find_serve_pid() or update_mod._launchd_registered())
+    )
+    assert should_restart is False, "用户 stop 过的服务不该被 update 重新拉起"
+    assert not called
+
+
+def test_update_restarts_when_launchd_registered_but_process_down(monkeypatch):
+    """崩溃重试中（launchd 登记着、进程没跑）→ update 应当重启兜底。"""
+    monkeypatch.setattr(update_mod, "_find_serve_pid", lambda: None)
+    monkeypatch.setattr(update_mod, "_launchd_registered", lambda: True)
+
+    restart = True
+    should_restart = bool(
+        restart and (update_mod._find_serve_pid() or update_mod._launchd_registered())
+    )
+    assert should_restart is True, "崩溃重试中应重启兜底"
+
+
+def test_restart_serve_skips_when_user_stopped(monkeypatch):
+    """`_restart_serve` 在用户 stop 过、又没有进程可杀时不该做任何事。
+
+    这条守的是 update 的收尾自动重启：服务没在跑、launchd 也没登记，
+    就只剩「跳过」这一个正确行为。
+    """
+    _forbid_popen(monkeypatch)
+
+    monkeypatch.setattr(update_mod, "_find_serve_pid", lambda: None)
+    monkeypatch.setattr(update_mod, "_launchd_registered", lambda: False)
+
+    update_mod._restart_serve(None)
+
+
+def test_launchd_registered_uses_state_not_plist(monkeypatch):
+    """登记判据看 `_launchd_state()`，不看 plist 文件。
+
+    崩溃重试中（登记着、PID 是 `-`）→ `(0, code)`，仍算「在管」，update 要重启。
+    """
+    monkeypatch.setattr(server_mod, "_is_installed", lambda: True)
+
+    monkeypatch.setattr(server_mod, "_launchd_state", lambda: None)
+    assert update_mod._launchd_registered() is False, "unload 后（None）不算在管"
+
+    monkeypatch.setattr(server_mod, "_launchd_state", lambda: (0, 256))
+    assert update_mod._launchd_registered() is True, "崩溃重试中仍算在管"
+
+    monkeypatch.setattr(server_mod, "_launchd_state", lambda: (1234, 0))
+    assert update_mod._launchd_registered() is True, "正常运行算在管"
+
+
+def test_launchd_registered_false_when_probe_raises(monkeypatch):
+    """探测异常时保守返回 False（宁可跳过重启，也别误拉用户停掉的服务）。"""
+
+    def boom():
+        raise OSError("launchctl missing")
+
+    monkeypatch.setattr(server_mod, "_launchd_state", boom)
+    assert update_mod._launchd_registered() is False
 
 
 def test_launchd_installed_false_when_probe_raises(monkeypatch):

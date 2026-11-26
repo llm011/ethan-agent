@@ -180,16 +180,40 @@ def _wait_pid_gone(pid: int, timeout: float = 8.0) -> bool:
 
 
 def _launchd_installed() -> bool:
-    """是否由 launchd 托管（plist 存在）。
+    """plist 文件是否存在（= 装过 launchd 服务）。
 
-    注意判据是**文件存在**而不是「launchd 里当前有 PID」：服务正在崩溃重试时
-    launchctl list 的 PID 列是 `-`，若按「有 PID」判断就会退回裸 Popen，恰好
-    在最容易撞车的时刻（launchd 也在拉）再造一个抢端口的实例。
+    **不要**用它判断「该不该按 launchd 方式重启」——`ethan server stop` 走的是
+    ``launchctl unload``，它不删 plist，所以用户明确停掉服务后这个函数仍然是
+    True。拿它当判据会把用户停掉的服务又拉起来。要判断「launchd 是否在管着」，
+    用 ``_launchd_registered()``。
     """
     try:
         from ethan.interface.commands import server as server_mod
 
         return server_mod._is_installed()
+    except Exception:
+        return False
+
+
+def _launchd_registered() -> bool:
+    """launchd 里当前是否登记着这个任务（unload 之后为 False）。
+
+    `_launchd_state()` 的三种返回恰好对应三种真实状态：
+
+    - ``None``      → launchd 里没登记（用户 stop 过 / 从没 install）；
+    - ``(0, code)`` → 登记了但进程没在跑（崩溃重试中、或刚被拉起还没起来）；
+    - ``(pid, _)``  → 正常运行。
+
+    后两种才是「launchd 在管它」，也才是 ``_restart_serve`` 该接管重启的场景。
+    第一种必须尊重用户的 stop 意图，跳过重启。
+
+    判据取「登记状态」而不是「有没有 PID」：服务正在崩溃重试时 PID 列是 `-`，
+    按 PID 判断会恰好在最容易撞端口的时刻退回裸 Popen。
+    """
+    try:
+        from ethan.interface.commands import server as server_mod
+
+        return server_mod._launchd_state() is not None
     except Exception:
         return False
 
@@ -235,6 +259,11 @@ def _restart_serve(repo: Optional[Path]) -> None:
     import signal
     import time
 
+    # 这里用 `_launchd_installed()`（plist 存在）而不是 `_launchd_registered()`：
+    # 本函数是「显式要求重启」的入口（server restart / channel·wechat 改完配置
+    # 后重启 / update 已在外层确认 launchd 在管），此时把服务拉起来正是调用方
+    # 的意图。唯一需要尊重用户 stop 的是 `update` 的收尾自动重启——那一步已在
+    # 调用处用 `_launchd_registered()` 把关，不会走到这里。
     if _launchd_installed():
         console.print("[dim]检测到 launchd 托管，交由 launchd 重启...[/dim]")
         if _restart_via_launchd():
@@ -426,9 +455,10 @@ def update(
     if token:
         console.print(f"[dim]   (你的 Web 登录 Token 是: [cyan]{token}[/cyan])[/dim]")
 
-    # launchd 托管时即使 `_find_serve_pid()` 一时没命中（服务正在崩溃重试，
-    # 进程不存在），也要重启——launchd 会在 load 后自己拉起，这正是它该干的。
-    if restart and (_find_serve_pid() or _launchd_installed()):
+    # 用户 `ethan server stop` 之后 plist 还在，但 launchd 里已 unload——那种情况
+    # 要尊重用户意图跳过重启，所以判据用 `_launchd_registered()` 而不是
+    # `_launchd_installed()`。崩溃重试中（登记着、PID 是 `-`）仍然算「在管」。
+    if restart and (_find_serve_pid() or _launchd_registered()):
         _restart_serve(repo)
     elif restart:
         console.print("[dim]（serve 未在运行，跳过重启）[/dim]")
