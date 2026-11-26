@@ -30,11 +30,18 @@ def db_path(tmp_path):
     return path
 
 
+def covered_usage(inputs=100, cache=90):
+    return json.dumps({"input": inputs, "cache": cache, "cache_usage": {
+        "usage_samples": 1, "cache_reported_samples": 1, "cache_missing_samples": 0,
+        "unknown_samples": 0, "usage_missing_samples": 0, "cache_reported": True,
+    }})
+
+
 def insert(path, row_id, *, at=100, usage=None, steps=None, mapped=True, status="completed"):
     with sqlite3.connect(path) as db:
         db.execute("INSERT INTO messages VALUES(?,?,?,?,?,?,?,?)", (
             row_id, "private-session", "assistant", at,
-            json.dumps({"input": 100, "cache": 90}) if usage is None else usage,
+            covered_usage() if usage is None else usage,
             json.dumps([{"state": "done"}]) if steps is None else steps,
             status, "SECRET MESSAGE CONTENT",
         ))
@@ -104,6 +111,70 @@ def test_malformed_json_missing_cache_unmapped_and_errors(db_path):
     assert not result["gate"]["quantitative_schedule_checks_pass"]
 
 
+def test_legacy_cache_keys_do_not_prove_upstream_coverage(db_path):
+    for row_id in range(1, 4):
+        insert(db_path, row_id, usage='{"input":100,"cache":90}')
+    result = observe(db_path)
+    assert result["sources"][0]["cache_coverage"]["legacy_unknown_runs"] == 3
+    assert not result["gate"]["quantitative_schedule_checks_pass"]
+    assert "upstream_cache_coverage_incomplete_or_unknown" in result["gate"]["reasons"]
+
+
+def test_absent_usage_is_not_counted_as_legacy_metadata(db_path):
+    insert(db_path, 1)
+    with sqlite3.connect(db_path) as db:
+        db.execute("UPDATE messages SET usage=NULL WHERE id=1")
+    result = observe(db_path)
+    coverage = result["sources"][0]["cache_coverage"]
+    assert coverage["usage_absent_runs"] == 1
+    assert coverage["legacy_unknown_runs"] == 0
+    assert coverage["usage_samples"] == 0  # no invented per-request count
+    assert not result["gate"]["quantitative_schedule_checks_pass"]
+
+
+@pytest.mark.parametrize("patch", [
+    {"usage_samples": True}, {"usage_samples": 1.0}, {"usage_samples": float("inf")},
+    {"usage_samples": -1}, {"usage_samples": 0}, {"cache_reported_samples": 2},
+    {"usage_missing_samples": 1}, {"cache_reported": 1}, {"cache_reported": False},
+    {"unknown_samples": 1}, {"cache_missing_samples": "0"},
+])
+def test_invalid_aggregate_cannot_pass(db_path, patch):
+    data = json.loads(covered_usage())
+    data["cache_usage"].update(patch)
+    insert(db_path, 1, usage=json.dumps(data))
+    result = observe(db_path)
+    coverage = result["sources"][0]["cache_coverage"]
+    assert coverage["measured_runs"] == 0
+    assert coverage["invalid_runs"] + result["sources"][0]["usage_invalid"] == 1
+    assert not result["gate"]["quantitative_schedule_checks_pass"]
+
+
+@pytest.mark.parametrize("missing,unknown,usage_missing", [(1, 0, 0), (0, 1, 0), (0, 1, 1)])
+def test_partial_coverage_separates_missing_unknown_usage_missing(db_path, missing, unknown, usage_missing):
+    data = json.loads(covered_usage())
+    data["cache_usage"].update(usage_samples=2, cache_reported_samples=1,
+        cache_missing_samples=missing, unknown_samples=unknown,
+        usage_missing_samples=usage_missing, cache_reported=False)
+    insert(db_path, 1, usage=json.dumps(data))
+    result = observe(db_path)
+    coverage = result["sources"][0]["cache_coverage"]
+    assert coverage["partial_runs"] == 1
+    assert coverage["cache_missing_samples"] == missing
+    assert coverage["unknown_samples"] == unknown
+    assert coverage["usage_missing_samples"] == usage_missing
+    assert "upstream_cache_coverage_incomplete_or_unknown" in result["gate"]["reasons"]
+
+
+def test_reported_zero_is_distinct_from_legacy_zero(db_path):
+    insert(db_path, 1, usage=covered_usage(100, 0))
+    insert(db_path, 2, usage='{"input":100,"cache":0}')
+    result = observe(db_path)
+    coverage = result["sources"][0]["cache_coverage"]
+    assert coverage["genuine_zero_cache_runs"] == 1
+    assert coverage["legacy_unknown_runs"] == 1
+    assert result["jobs"][0]["cache_coverage"] == coverage
+
+
 def test_missing_readonly_db_does_not_create(tmp_path):
     missing = tmp_path / "missing.db"
     with pytest.raises(sqlite3.OperationalError):
@@ -135,7 +206,7 @@ def test_reject_future_and_unqualified_datetime(db_path):
 @pytest.mark.parametrize("cache,passes", [(79999, False), (80000, True)])
 def test_cache_threshold_uses_raw_counts_not_display_rounding(db_path, cache, passes):
     for row_id in range(1, 4):
-        insert(db_path, row_id, usage=json.dumps({"input": 100000, "cache": cache}))
+        insert(db_path, row_id, usage=covered_usage(100000, cache))
     result = observe(db_path)
     assert result["sources"][0]["hit_pct"] == 80.0
     assert result["gate"]["quantitative_schedule_checks_pass"] is passes
