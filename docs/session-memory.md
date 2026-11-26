@@ -58,6 +58,27 @@ uv run python scripts/probe_session_memory_ab.py --baseline-mode natural
 快照，不限制后续换话题按需召回。只报告匿名格式/计数/usage/耗时，不保存输出或推理。
 这些门禁只衡量本 probe 的调用计数与固定题输出，不证明真实账单降低、生产安全性或持续质量。
 
+### Rubric v2 与匿名诊断（仅 evaluator 修复）
+
+新生成报告顶层标注 `rubric_version=v2`；此前未标版本的报告属于 legacy v1，原文件、
+分数与通过/失败记录保持不变，不重评分或重跑模型。v2 修复两个可离线复现的漏判：
+JSON 的根对象或任意嵌套对象重复键一律拒绝，不接受 last-wins；学习 plan 三个 minutes
+必须各为正整数且非 bool，7/7/6 仍通过，6.5/6.5/7 即使总计20也拒绝。facts 保持 JSON
+精确匹配（整数与 float/bool 不相等），候选、三题数量与总额门槛不放宽；出行题只要求
+budget 为整数，plan cost 仍允许有限非负小数。逻辑独立于 `scripts/session_memory_rubric.py`，
+原 probe 的 `rubric` / `output_diagnostics` 导入路径保持可用。
+
+每 row 可新增 `rubric_diagnostics.reasons`，纯函数仅返回固定枚举：`invalid_json`、
+`invalid_schema`、`duplicate_json_key`、`facts_shape/keys/type/value`、
+`plan_schema/vocabulary/count/total/non_integer_minutes`（斜线各项为独立完整前缀名）。
+不输出实际键、值、路径、消息、ID、异常正文、答案或 think；成功为空列表。
+`output_diagnostics` 保留原格式字段，JSON 解析成功现在也要求无重复键。
+每次 chat/离线 stream 的 `call_metrics` 另记 `tools_available` bool 与
+`returned_tool_count` int，不保存工具名、参数或用户字段；错误/中断记录数量为0，
+不宣称已验证完整响应，也不改变调用/token/超时预算、live 范围或 fallback 政策。
+诊断只适用于未来报告，不能补解释过去未保存答案的学习A失败；不改变 Agent 或生产行为，
+也不证明自然质量、官方 live 协议或三天收益通过。
+
 ### 自然模式真实测量（2026-11-26 13:10，未通过）
 
 PR #504 squash `d67fc2e7`；root 在固定代码 `d2675903651ca999b89dbbb6c31fa4a4912ca054`

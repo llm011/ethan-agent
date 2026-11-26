@@ -13,7 +13,6 @@ import argparse
 import asyncio
 import json
 import logging
-import math
 import sys
 import tempfile
 import time
@@ -28,6 +27,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ethan.providers.base import Message, StreamChunk, ToolCall  # noqa: E402
 from ethan.tools.base import BaseTool  # noqa: E402
+from scripts.session_memory_rubric import (  # noqa: E402,F401 — preserve old import paths
+    RUBRIC_VERSION,
+    evaluate_rubric,
+    number,
+    output_diagnostics,
+    rubric,
+    rubric_diagnostics,
+)
 
 MAX_CALLS = 3
 MAX_TOKENS = 768
@@ -68,61 +75,6 @@ CASES = (
          {'time': '晚上', 'minutes': 20, 'subjects': ['Python', '英语', '数学']},
          [{'subject': 'Python', 'minutes': 7}, {'subject': '英语', 'minutes': 7}, {'subject': '数学', 'minutes': 6}]),
 )
-
-
-def number(value):
-    return type(value) in (int, float) and math.isfinite(value) and value >= 0
-
-
-def rubric(case: Case, text: str) -> dict:
-    """Conservative exact-facts/allowlisted-plan rubric; unknowns fail closed.
-
-    No LLM judge. Recommendations outside the finite safe vocabulary are NOT
-    judged unsafe in general: they are simply unscorable in this narrow probe.
-    """
-    try:
-        data = json.loads(text)
-    except (ValueError, TypeError):
-        return {'facts_exact': False, 'plan_safe': False, 'score': 0, 'passed': False, 'reason': 'invalid_json'}
-    if not isinstance(data, dict):
-        return {'facts_exact': False, 'plan_safe': False, 'score': 0, 'passed': False, 'reason': 'invalid_schema'}
-    # JSON numeric/bool equality must not let 0 equal False or True equal 1.
-    facts_exact = json.dumps(data.get('facts'), sort_keys=True, ensure_ascii=False) == json.dumps(
-        case.facts, sort_keys=True, ensure_ascii=False)
-    plan = data.get('plan')
-    safe = isinstance(plan, list) and bool(plan)
-    if safe and case.name == 'breakfast':
-        safe = all(isinstance(food, str) and food in {
-            '鸡蛋', '水煮蛋', '燕麦', '水煮燕麦', '豆浆', '无糖豆浆', '米粥', '白粥', '苹果', '香蕉', '水果'
-        } for food in plan)
-    elif safe and case.name == 'travel':
-        safe = all(isinstance(item, dict) and set(item) == {'transport', 'cost'}
-                   and isinstance(item['transport'], str) and item['transport'] in {'地铁', '公交', '步行', '火车', '高铁'}
-                   and number(item['cost']) for item in plan)
-        safe = safe and sum(item['cost'] for item in plan) <= 200
-    elif safe and case.name == 'study':
-        safe = all(isinstance(item, dict) and set(item) == {'subject', 'minutes'}
-                   and isinstance(item['subject'], str) and number(item['minutes'])
-                   and item['minutes'] > 0 for item in plan)
-        safe = (safe and len(plan) == 3 and {item['subject'] for item in plan} == {'Python', '英语', '数学'}
-                and sum(item['minutes'] for item in plan) == 20)
-    score = int(facts_exact) + int(safe)
-    return {'facts_exact': facts_exact, 'plan_safe': bool(safe), 'score': score,
-            'passed': score == 2, 'reason': 'ok' if score == 2 else 'rubric_reject'}
-
-
-def output_diagnostics(text: str, result: dict) -> dict:
-    """Format-only evidence; never return answer, reasoning, or parse-error text."""
-    stripped = text.lstrip().lower()
-    try:
-        json.loads(text)
-        parsed = True
-    except (ValueError, TypeError):
-        parsed = False
-    return {'starts_think': stripped.startswith('<think>'),
-            'contains_think_tag': '<think>' in stripped or '</think>' in stripped,
-            'starts_codefence': stripped.startswith('```'), 'json_parse_success': parsed,
-            'content_chars': len(text), 'facts_exact': result['facts_exact'], 'plan_safe': result['plan_safe']}
 
 
 class SyntheticRecall(BaseTool):
@@ -192,12 +144,13 @@ class BoundedProvider:
         self.calls += 1
         return time.monotonic()
 
-    def finish(self, start, usage=None, error=None):
+    def finish(self, start, usage=None, error=None, *, tools_available=False, returned_tool_count=0):
         usage = usage or {}
         self.records.append({'latency_ms': round((time.monotonic() - start) * 1000, 2),
                              'usage': {key: value for key, value in usage.items()
                                        if key in {'input', 'output', 'cache', 'cache_read', 'cache_creation'} and number(value)},
-                             'error_type': error})
+                             'error_type': error, 'tools_available': bool(tools_available),
+                             'returned_tool_count': returned_tool_count})
         if error:
             self.failure = error
 
@@ -213,9 +166,9 @@ class BoundedProvider:
             answer = await self.inner.chat(messages, tools=tools, system=system, max_tokens=MAX_TOKENS)
             self.validate(answer)
         except BaseException as error:
-            self.finish(start, error=type(error).__name__)
+            self.finish(start, error=type(error).__name__, tools_available=bool(tools))
             raise
-        self.finish(start, answer.usage)
+        self.finish(start, answer.usage, tools_available=bool(tools), returned_tool_count=len(answer.tool_calls))
         return answer
 
     async def stream_chat(self, messages, tools=None, system=None):
@@ -224,19 +177,22 @@ class BoundedProvider:
         start = self.begin()
         usage = None
         final = False
+        returned_tool_count = 0
         try:
             async for chunk in self.inner.stream_chat(messages, tools=tools, system=system):
                 if chunk.truncated or any(call.name != 'recall_memory' for call in chunk.tool_calls):
                     raise RuntimeError('invalid stream response')
+                returned_tool_count += len(chunk.tool_calls)
                 if chunk.is_final:
                     usage, final = chunk.usage, True
                 yield chunk
             if not final:
                 raise RuntimeError('missing final stream chunk')
         except BaseException as error:
-            self.finish(start, error=type(error).__name__)
+            # A partial/invalid stream has no validated complete tool count.
+            self.finish(start, error=type(error).__name__, tools_available=bool(tools))
             raise
-        self.finish(start, usage)
+        self.finish(start, usage, tools_available=bool(tools), returned_tool_count=returned_tool_count)
 
 
 @asynccontextmanager
@@ -308,7 +264,7 @@ async def run_case(case, arm, inner, transport='chat', timeout=MAX_TIMEOUT, base
                     raise ValueError('unsupported transport')
         except Exception as error:
             failure = type(error).__name__  # Never include upstream errors/secret-containing bodies.
-        result = rubric(case, text)
+        result, diagnosis, parsed = evaluate_rubric(case, text)
         if failure or provider.failure:
             result.update(score=0, passed=False, reason='execution_error')
         async with store._db.execute('SELECT count(*) FROM sqlite_master WHERE name="session_memory_snapshots"') as cursor:
@@ -330,7 +286,8 @@ async def run_case(case, arm, inner, transport='chat', timeout=MAX_TIMEOUT, base
                 'calls': provider.calls, 'recalls': tool.calls, 'snapshot_recalls': recall.call_count,
                 'snapshots_persisted': snapshots, 'latency_ms': round((time.monotonic() - start) * 1000, 2),
                 'call_metrics': provider.records, 'error_type': failure or provider.failure,
-                'output_diagnostics': output_diagnostics(text, result), **result}
+                'output_diagnostics': output_diagnostics(text, result, json_parse_success=parsed),
+                'rubric_diagnostics': diagnosis, **result}
 
 
 def configured_live_provider():
@@ -419,6 +376,7 @@ async def run_probe(live=False, transport=None, timeout=MAX_TIMEOUT, baseline_mo
         'Missing preferences or invalid output fail the unchanged rubric; no hidden fact injection. '
     )
     return {'mode': 'live' if live else 'dry_fake', 'baseline_mode': baseline_mode,
+            'rubric_version': RUBRIC_VERSION,
             'max_calls_per_case_arm': MAX_CALLS,
             'max_tokens_per_call': MAX_TOKENS, 'timeout_seconds_per_case_arm': timeout,
             'sampling': 'provider default; no unsupported temperature parameter sent; identical A/B',
@@ -443,7 +401,7 @@ def main():
         report = asyncio.run(run_probe(args.live, args.transport, args.timeout, args.baseline_mode))
     except Exception as error:
         report = {'mode': 'live' if args.live else 'dry_fake', 'baseline_mode': args.baseline_mode,
-                  'passed': False, 'error_type': type(error).__name__}
+                  'rubric_version': RUBRIC_VERSION, 'passed': False, 'error_type': type(error).__name__}
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report['passed'] else 1
 
