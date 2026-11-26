@@ -6,6 +6,7 @@ OpenAICompatProvider 在类上保留同名方法作薄转发，故对外行为�
 from __future__ import annotations
 
 import json
+import math
 
 from ethan.providers._text_toolcalls import (
     _MARKED_TOOL_RE,
@@ -15,6 +16,12 @@ from ethan.providers._text_toolcalls import (
     parse_text_tool_calls,
 )
 from ethan.providers.base import Message, ToolCall
+
+
+def _valid_cache_count(value) -> bool:
+    """Presence means a usable upstream count, not a default or malformed value."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and value >= 0 and (isinstance(value, int) or math.isfinite(value)))
 
 
 def parse_usage(usage) -> dict:
@@ -27,6 +34,7 @@ def parse_usage(usage) -> dict:
     - 火山 ARK：prompt_tokens_details.cached_tokens
 
     返回统一字段：input/output/cache，其中 cache = 命中缓存的 token 数。
+    附加 cache_usage.cache_reported 只观测有效字段是否存在，不改变旧数值计算。
     """
     usage_dict = {
         "input": getattr(usage, "prompt_tokens", 0) or 0,
@@ -41,6 +49,10 @@ def parse_usage(usage) -> dict:
     hit = getattr(usage, "prompt_cache_hit_tokens", None)
     if hit and hit > usage_dict["cache"]:
         usage_dict["cache"] = hit
+    usage_dict["cache_usage"] = {
+        "cache_reported": _valid_cache_count(getattr(ptd, "cached_tokens", None))
+        or _valid_cache_count(hit),
+    }
     return usage_dict
 
 

@@ -12,6 +12,19 @@ Web / Desktop 的定时任务列表卡片和时间轴均展示近 7 天（滚动
 - 平均步数 = 所有最终运行的 `tool_steps` JSON 数组长度平均，保留 1 位小数。缺失、坏 JSON 或非数组记 0；一个数组项是一条工具步骤，不是 LLM 请求轮数。
 - `usage_run_count` 单独标出有效 input 的运行数量，明确运行分母与 token 统计分母不同。
 
+## 缓存字段覆盖观测
+
+原生 OpenAI 兼容响应默认在 usage 中增加 `cache_usage.cache_reported`：标准 `prompt_tokens_details.cached_tokens` 或 DeepSeek `prompt_cache_hit_tokens` 至少一个为有限非负数字（非布尔）才为 true，明确返回 0 也为 true；缺失、null 或无有效数字为 false。既有 `input/output/cache` 计算不变，包括缓存取原有较大值的语义；观测不修正坏上游数值。
+
+原生流式汇总消息的 `messages.usage.cache_usage` 只包含数字和布尔：
+
+- `usage_samples`：UsageStats.add 调用次数，包括没有 usage 的终态；不是工具步数或所有网络尝试数。
+- `cache_reported_samples` / `cache_missing_samples`：明确有 / 无有效缓存字段的样本数。
+- `unknown_samples`：旧 provider 未提供观测元数据，或缺整个 usage 的样本数；`usage_missing_samples` 进一步计缺整个 usage 的次数（也是 unknown 的子集）。
+- `cache_reported`：仅全部样本明确 reported 才为 true；混合覆盖保守为 false。只有至少一份新观测元数据才输出汇总 metadata，纯旧 provider 保留原三键 JSON；没有 metadata 的历史必须视为未知。
+
+因此 `cache=0` 只有在完整覆盖时才证明返回的缓存计数确为零；字段缺失或未知时不能据此验收缓存收益。现有成本 SQL、命中率与 Web/Desktop UI 保持不变，覆盖信息用于后续真实样本的独立验收，不补估算值。不增加请求、不改提示词、不比较用户间前缀；不保存 prompt、hash、user ID、URL、key 或返回 model。计数每个 Agent 独立，消息仍走原 `BEGIN IMMEDIATE` 事务，无新表或迁移。
+
 ## 精确归因与历史限制
 
 独立模块 `ethan/scheduler/cost.py` 在现有 profile `db/sessions.db` 内维护 `schedule_message_attribution`，以最终 **message_id** 为唯一主键，保存 `session_id / job_id / user_id`。每次回调通过 SessionStore 原子接口将最终消息和精确映射同事务提交；原进度行被 UPDATE，不会重复记录一次运行。错误终态也归因。任务改标题、轮转到新 session、服务重启不覆盖旧映射。同一 session 被多个 job 使用，各消息仍只归属一个 job，不将整个 session 重复算给每个任务。

@@ -34,6 +34,8 @@ Ethan 融合了 [OpenClaw](https://github.com/openclaw/openclaw)（结构化 age
 
 Web/Desktop 定时任务支持近 7 天成本报表，展示真实输入与缓存 token、最终运行次数及平均工具步数；按消息精确归因，无法归因的历史明确提示。见 [成本报表](docs/schedule-cost.md)。
 
+原生 OpenAI 兼容响应默认附带仅数字/布尔的缓存字段覆盖观测；既有 token 与 UI 不变，缺字段不再视为真实零缓存。无需额外请求，不记录提示词、哈希或身份信息。见 [缓存字段覆盖](docs/schedule-cost.md#缓存字段覆盖观测)。
+
 ## 安全事件与心跳检查
 
 外部事件默认关闭；显式启用并配置专用 HMAC 后支持 GitHub push/CI 与受限告警，仅生成无工具人工复核摘要。
