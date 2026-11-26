@@ -388,8 +388,12 @@ async def run_probe(live=False, transport=None, timeout=MAX_TIMEOUT):
     for wire in transports:
         for case in CASES:
             a, b = [row for row in rows if row['case'] == case.name and row['transport'] == wire]
+            no_extra_recall = b['recalls'] == 0
+            calls_not_increased = b['calls'] <= a['calls']
             pairs.append({'case': case.name, 'transport': wire,
-                          'non_regression': a['passed'] and b['passed'] and b['score'] >= a['score'],
+                          'no_extra_recall': no_extra_recall, 'calls_not_increased': calls_not_increased,
+                          'non_regression': (a['passed'] and b['passed'] and b['score'] >= a['score']
+                                             and no_extra_recall and calls_not_increased),
                           'call_delta_B_minus_A': b['calls'] - a['calls']})
     return {'mode': 'live' if live else 'dry_fake', 'max_calls_per_case_arm': MAX_CALLS,
             'max_tokens_per_call': MAX_TOKENS, 'timeout_seconds_per_case_arm': timeout,

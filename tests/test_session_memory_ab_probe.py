@@ -90,6 +90,50 @@ async def test_default_dry_never_constructs_live_provider():
     assert all('reasoning' not in json.dumps(row) and 'messages' not in json.dumps(row) for row in report['rows'])
 
 
+@pytest.mark.anyio
+async def test_perfect_score_with_two_extra_b_recalls_fails_overall_acceptance():
+    from ethan.providers.base import Message, ToolCall
+
+    class RecallingB(FakeProvider):
+        async def chat(self, messages, tools=None, system=None, max_tokens=None):
+            completed = sum(message.role == 'tool' for message in messages)
+            if not self.force_recall and completed < 2:
+                assert tools and len(tools) == 1  # B tools remain available, never hidden.
+                return Message('assistant', '', tool_calls=[
+                    ToolCall(f'extra-{completed}', 'recall_memory', {'query': '偏好'})])
+            return await super().chat(messages, tools, system, max_tokens)
+
+    with patch('scripts.probe_session_memory_ab.FakeProvider', RecallingB):
+        report = await run_probe()
+    assert not report['passed'] and len(report['pairs']) == 6
+    assert all(row['passed'] and row['score'] == 2 for row in report['rows'])
+    for row in report['rows']:
+        assert row['calls'] == (2 if row['arm'] == 'A' else 3)
+        assert row['recalls'] == (1 if row['arm'] == 'A' else 2)
+        assert row['snapshots_persisted'] == (row['arm'] == 'B')
+    assert all(not pair['non_regression'] and not pair['no_extra_recall']
+               and not pair['calls_not_increased'] for pair in report['pairs'])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('calls,recalls,a_failed,b_failed', [
+    (2, 1, False, False),  # Equal model calls still fails on extra recall.
+    (3, 0, False, False),  # Zero recall still fails on increased calls.
+    (1, 0, True, False),   # Perfect scores cannot hide a failed baseline run.
+    (1, 0, False, True),   # Perfect scores cannot hide a failed B run.
+])
+async def test_independent_cost_and_execution_gates_fail_closed(calls, recalls, a_failed, b_failed):
+    async def row(case, arm, inner, transport, timeout):
+        return {'case': case.name, 'arm': arm, 'transport': transport, 'score': 2,
+                'passed': not (a_failed if arm == 'A' else b_failed),
+                'calls': 2 if arm == 'A' else calls, 'recalls': 1 if arm == 'A' else recalls}
+    with patch('scripts.probe_session_memory_ab.run_case', row):
+        report = await run_probe(transport='chat')
+    assert not report['passed']
+    assert all(not pair['non_regression'] and pair['no_extra_recall'] == (recalls == 0)
+               and pair['calls_not_increased'] == (calls <= 2) for pair in report['pairs'])
+
+
 @pytest.mark.parametrize('prefix,starts_think,contains_tag,starts_fence', [
     ('<think>secret-reasoning</think>', True, True, False),
     ('  <THINK>secret-reasoning</THINK>', True, True, False),
