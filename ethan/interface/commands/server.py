@@ -336,6 +336,130 @@ def _wait_for_health(port: int, timeout: float = 120.0) -> bool:
     return False
 
 
+def _wait_port_released(port: int, timeout: float = 15.0) -> bool:
+    """等端口不再被监听（上限 timeout 秒）。
+
+    `launchctl unload` 只保证「让进程退出」，**不保证它已经退出**。紧接着 `load`
+    时旧进程可能还占着端口，新进程绑不上就立刻退出（Errno 48），随后被
+    ThrottleInterval 拖到 60s 后才重试——用户看到的就是「restart 卡了很久」。
+    轮询到真释放再 load，把这段等待变成确定性的。
+    """
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _is_port_listening(port):
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def _is_port_listening(port: int, host: str = "127.0.0.1", timeout: float = 0.5) -> bool:
+    """TCP connect 探测端口是否有监听者。"""
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _launchd_service_port() -> int:
+    """launchd 托管实例实际监听的端口。
+
+    不能直接用 ``_service_port()``：它**优先读 shell 的 ETHAN_SERVER_PORT**，
+    而 launchd 不继承 shell 环境——plist 的 EnvironmentVariables 里没这个键时，
+    服务读的是 config 文件里的端口。于是「终端里设了 ETHAN_SERVER_PORT=8981，
+    服务实际跑 8989」时，重启会去探 8981，把一次成功的重启误报成失败。
+
+    因此这里**绕开 get_config()**：``config.load_config`` 自己也会读 shell 的
+    ``ETHAN_SERVER_PORT``（env 赢过 config.yaml），照旧会被 shell 污染。只读
+    config.yaml 原文，才是 launchd 里那个进程真正看到的值。
+
+    判据顺序：plist 的 ETHAN_SERVER_PORT > config.yaml `server.port` > 8900。
+    """
+    if PLIST_PATH.exists():
+        try:
+            text = PLIST_PATH.read_text()
+        except OSError:
+            text = ""
+        m = re.search(
+            r"<key>ETHAN_SERVER_PORT</key>\s*<string>\s*(\d+)\s*</string>", text
+        )
+        if m:
+            return int(m.group(1))
+    try:
+        import yaml
+
+        from ethan.core.config import CONFIG_FILE
+
+        with open(CONFIG_FILE) as f:
+            raw = yaml.safe_load(f) or {}
+        port = (raw.get("server") or {}).get("port")
+        if port is not None:
+            return int(port)
+    except Exception:
+        pass
+    return 8900
+
+
+def restart_service(console: Console) -> bool:
+    """按 launchd 方式重启服务，返回是否真正就绪。
+
+    这是 `ethan server restart` 与 `update._restart_serve` **共用**的唯一重启
+    路径。抽出来是为了堵住一个反复出现的坑：`update` 原先自己
+    ``SIGTERM + Popen``，完全不知道 launchd 的存在——杀掉 launchd 的进程后
+    KeepAlive 会再拉一个，同时 update 也 Popen 了一个，两个抢同一端口；抢输的
+    那个在 ``api.run_server`` 里拒绝启动，日志刷满「拒绝重复启动」。更糟的是
+    update 拉起的进程不带 ``ETHAN_NO_WATCHDOG=1``，会写 server.pid 并再拉起一个
+    watchdog，形成双保姆。
+
+    因此**凡 plist 已安装，重启必须走 launchctl**（unload → 清残留 → 等端口
+    释放 → load → 等健康），绝不能自己 Popen。
+
+    调用方区别只在失败处理：`server restart` 要 ``Exit(1)``，`update` 只提示。
+    """
+    if not _is_installed():
+        return False
+
+    # 旧 plist 缺 ETHAN_NO_WATCHDOG / 资源上限等新配置，先按当前模板对齐，
+    # 否则 load 回去的还是那份老配置。
+    _refresh_plist_if_stale(console)
+    _launchctl("unload", str(PLIST_PATH))
+
+    # launchd 的进程停了，但可能还有别的实例占着端口，先清干净再拉起，
+    # 否则新进程绑不上，重启看起来无效。
+    _stop_leftover_instances(console)
+
+    port = _launchd_service_port()
+    if not _wait_port_released(port):
+        console.print(f"[yellow]端口 {port} 仍被占用，仍尝试拉起（可能失败）。[/yellow]")
+
+    result = _launchctl("load", str(PLIST_PATH))
+    if result.returncode != 0:
+        console.print(f"[red]重启失败：{result.stderr.strip()}[/red]")
+        return False
+
+    # `load` 返回 0 只代表任务被登记，不代表 serve 起来了（端口占用、
+    # 启动期异常都会让它立刻退出）。必须等健康检查通过再报成功——否则
+    # 用户看到「✓ 服务已重启」但访问失败，无从判断到底怎么了。
+    console.print(f"[dim]等待服务在 :{port} 就绪...[/dim]")
+    if not _wait_for_health(port):
+        console.print("[red]✗ 服务未能就绪。[/red]")
+        console.print(f"  launchd 已加载任务，但 http://127.0.0.1:{port}/api/health 无响应。")
+        state = _launchd_state()
+        if state and state[0] == 0:
+            # 进程已经不在了：是启动失败退出，不是还在慢慢起
+            console.print(f"  serve 进程已退出，退出码 {state[1]}（负数=被信号终止）。")
+        else:
+            console.print("  serve 进程仍在运行，可能只是启动较慢或端口被占用。")
+        console.print(f"  请查看日志：{Path.home() / '.ethan' / 'logs' / 'api.err.log'}")
+        return False
+    console.print("[green]✓ 服务已重启。[/green]")
+    return True
+
+
 def _stop_leftover_instances(console: Console) -> None:
     """停掉 launchd 之外的残留 ethan 实例（如 watchdog 拉起的那个）。
 
@@ -380,35 +504,8 @@ def restart() -> None:
     """重启 Ethan 后台服务。"""
     console = Console()
     if _is_installed():
-        # 旧 plist 缺 ETHAN_NO_WATCHDOG / 资源上限等新配置，先按当前模板对齐，
-        # 否则 load 回去的还是那份老配置。
-        _refresh_plist_if_stale(console)
-        _launchctl("unload", str(PLIST_PATH))
-        # launchd 的进程停了，但可能还有别的实例占着端口，先清干净再拉起，
-        # 否则新进程绑不上，重启看起来无效。
-        _stop_leftover_instances(console)
-        result = _launchctl("load", str(PLIST_PATH))
-        if result.returncode != 0:
-            console.print(f"[red]重启失败：{result.stderr.strip()}[/red]")
+        if not restart_service(console):
             raise typer.Exit(1)
-
-        # `load` 返回 0 只代表任务被登记，不代表 serve 起来了（端口占用、
-        # 启动期异常都会让它立刻退出）。必须等健康检查通过再报成功——否则
-        # 用户看到「✓ 服务已重启」但访问失败，无从判断到底怎么了。
-        port = _service_port()
-        console.print(f"[dim]等待服务在 :{port} 就绪...[/dim]")
-        if not _wait_for_health(port):
-            console.print("[red]✗ 服务未能就绪。[/red]")
-            console.print(f"  launchd 已加载任务，但 http://127.0.0.1:{port}/api/health 无响应。")
-            state = _launchd_state()
-            if state and state[0] == 0:
-                # 进程已经不在了：是启动失败退出，不是还在慢慢起
-                console.print(f"  serve 进程已退出，退出码 {state[1]}（负数=被信号终止）。")
-            else:
-                console.print("  serve 进程仍在运行，可能只是启动较慢或端口被占用。")
-            console.print(f"  请查看日志：{Path.home() / '.ethan' / 'logs' / 'api.err.log'}")
-            raise typer.Exit(1)
-        console.print("[green]✓ 服务已重启。[/green]")
     else:
         from ethan.interface.commands.update import _restart_serve
         _restart_serve(None)

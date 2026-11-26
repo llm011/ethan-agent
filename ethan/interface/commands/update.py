@@ -179,6 +179,46 @@ def _wait_pid_gone(pid: int, timeout: float = 8.0) -> bool:
     return False
 
 
+def _launchd_installed() -> bool:
+    """是否由 launchd 托管（plist 存在）。
+
+    注意判据是**文件存在**而不是「launchd 里当前有 PID」：服务正在崩溃重试时
+    launchctl list 的 PID 列是 `-`，若按「有 PID」判断就会退回裸 Popen，恰好
+    在最容易撞车的时刻（launchd 也在拉）再造一个抢端口的实例。
+    """
+    try:
+        from ethan.interface.commands import server as server_mod
+
+        return server_mod._is_installed()
+    except Exception:
+        return False
+
+
+def _restart_via_launchd() -> bool:
+    """交给 launchd 重启，返回是否就绪。
+
+    这里是**唯一**允许重启 launchd 托管服务的入口。`update` 以前自己
+    ``SIGTERM + Popen``，不知道 launchd 的存在，于是出现：
+
+    - KeepAlive 把刚被 SIGTERM 的进程又拉起来，同时本函数也 Popen 了一个，
+      两个抢同一端口，抢输的在 ``api.run_server`` 里拒绝启动（日志刷满
+      「拒绝重复启动」，实测上千次）；
+    - 本函数 Popen 出来的进程不带 ``ETHAN_NO_WATCHDOG=1``，会写 server.pid 并
+      再拉起一个 watchdog，与 launchd 形成**双保姆**——这是「桌面端反复失联」
+      和孤儿 watchdog 的根源。
+
+    复用 ``server.restart_service`` 而不是在这里重写一遍，保证两条入口的行为
+    不会再次分叉。
+    """
+    try:
+        from ethan.interface.commands import server as server_mod
+
+        return server_mod.restart_service(console)
+    except Exception as e:
+        console.print(f"[yellow]launchd 重启失败：{e}[/yellow]")
+        return False
+
+
 def _restart_serve(repo: Optional[Path]) -> None:
     """重启 ethan serve 进程。
 
@@ -187,9 +227,23 @@ def _restart_serve(repo: Optional[Path]) -> None:
 
     不再「Popen 完就打印成功」——新进程可能因端口未释放、import 错误等起不来，
     那样会让用户以为重启成功实际没起来（lsof 看不到端口）。改成探测端口后才报成功。
+
+    **launchd 托管时走另一条路**：绝不在本函数里 Popen。launchd 的 KeepAlive 才是
+    这个服务的 supervisor，自己再拉一个必然抢端口 + 造双保姆（见
+    ``_restart_via_launchd`` 的说明）。
     """
     import signal
     import time
+
+    if _launchd_installed():
+        console.print("[dim]检测到 launchd 托管，交由 launchd 重启...[/dim]")
+        if _restart_via_launchd():
+            return
+        console.print(
+            "[yellow]⚠ launchd 重启未成功，请查看 "
+            f"{Path.home() / '.ethan' / 'logs' / 'api.err.log'}[/yellow]"
+        )
+        return
 
     pid = _find_serve_pid()
     if pid:
@@ -372,7 +426,9 @@ def update(
     if token:
         console.print(f"[dim]   (你的 Web 登录 Token 是: [cyan]{token}[/cyan])[/dim]")
 
-    if restart and _find_serve_pid():
+    # launchd 托管时即使 `_find_serve_pid()` 一时没命中（服务正在崩溃重试，
+    # 进程不存在），也要重启——launchd 会在 load 后自己拉起，这正是它该干的。
+    if restart and (_find_serve_pid() or _launchd_installed()):
         _restart_serve(repo)
     elif restart:
         console.print("[dim]（serve 未在运行，跳过重启）[/dim]")
