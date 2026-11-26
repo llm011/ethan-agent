@@ -37,6 +37,8 @@ ethan server uninstall   # 卸载开机自启
 
 Web / Desktop 恢复登录时，仅在已保存的非空 token 验证成功后修复图片认证 Cookie；验证失败或空 token 不写 Cookie，恢复期间的注销/新登录不会被旧结果覆盖。见 [图片认证恢复](docs/image-auth-recovery.md)。
 
+Web / Desktop 回复恢复按本流占位 ID 与服务器消息 ID 归并，保留合法旁路与不同轮相同正文；fresh-page 收尾后不接受迟到刷新。见 [回复流恢复](docs/chat-stream-replay.md)。源码回归不代表具体用户会话已确诊或已部署。
+
 ### Docker 部署（服务器 / NAS）
 
 ```bash

@@ -1,4 +1,5 @@
 import type { StreamChunk } from "@/lib/api";
+import { updateStreamMessage } from "@ethan/shared/chat/stream-message";
 import { notifyDesktop } from "@/lib/notify";
 import { MESSAGE_PAGE_SIZE, isTempId, makeTempId, replaceTailKeepOlder } from "@ethan/shared/chat/history";
 import type { ToolStep } from "@ethan/shared/components/tool-timeline";
@@ -179,12 +180,8 @@ export async function consumeStream(
 
   let _rafId: number | null = null;
   let _flushTimer: ReturnType<typeof setTimeout> | null = null;
-  // 流式期间这条助手消息的稳定 id。
-  //
-  // 必须是**一条流一个**：占位气泡从第一帧起就拿它当 React key，后端落库后再由
-  // 定稿提升成真实数字 id。中途任何一次重建都不能把它丢掉 —— 见下面 flushAssistant
-  // 的注释（key 一塌，列表就会重挂甚至撞车出重复气泡）。
-  let liveId: number | string = placeholderId;
+  // 固定占位别名，React 延迟执行 updater 时也不修改闭包中的身份。
+  let settled = false;
   const buildMsg = (extra?: Partial<Message>): Message => ({
     role: "assistant" as const,
     content: assistantContent,
@@ -194,51 +191,15 @@ export async function consumeStream(
     created_at: Date.now() / 1000,
     model: finalModel,
     intermediateOutput: intermediateOutput || undefined,
-    id: liveId,
+    id: placeholderId,
     ...extra,
   });
-  /**
-   * 把当前累积状态刷进占位气泡。
-   *
-   * 语义是「**就地更新**最后一条 assistant 消息」，不是「用一条新消息替换它」。
-   * 差别全在 id 上：`buildMsg` 重建出来的对象即使带 `id: liveId`，也不能保证
-   * 覆盖到所有字段 —— 早前这里直接 `next[next.length - 1] = msg`，而 `buildMsg`
-   * 根本不带 `id`，于是**正文到达之前**的任何一次 flush（心跳「任务仍在运行中…」、
-   * 工具 start/done、顶层 cards）都会把占位气泡的 `tmp:xxx` 抹成 `undefined`。
-   *
-   * 后果（用户现象：同一条回复出现两份）：
-   *  - MessageList 的 `key={msg.id ?? \`idx-${startIdx + i}\`}` 退化成下标 key，
-   *    占位气泡被 React 卸载重建（markdown 重解析、代码块重高亮、滚动锚点丢失）；
-   *  - 下标 key 在同一列表里可能撞车，React 把两个兄弟节点折叠/重复渲染 ——
-   *    就是「同一条回复渲染了两次」。刷新后从 DB 重新拉历史，id 回来、重复消失，
-   *    与「点刷新就好了」的现象吻合；
-   *  - 丢失不可恢复：后续每次 flush 都基于上一次结果再替换，占位 id 再也回不来；
-   *    定稿的 `id: messageId ?? last.id` 此时 `last.id` 已是 `undefined`，而后端在
-   *    「无工具无正文」等路径下 `done` 不带 `message_id`，定稿后 id 仍是空。
-   *
-   * 所以这里沿用上一条消息的 id（`liveId`），保证「同一条回复」在整个生命周期里
-   * 始终是同一个 key。后端给出真实 id 时由定稿路径提升，并同步写回 `liveId`，
-   * 避免后续 flush 把真实 id 又退回临时 id。
-   */
+  // 按本流身份更新，不假定末条是主回复；终态后迟到回调不再写入。
   const flushAssistant = (extra?: Partial<Message>) => {
-    writeMsgs(prev => {
-      const next = [...prev];
-      // 必须按 **id** 定位本次流自己的那条气泡，不能假设「最后一条就是它」。
-      // `chunk.new_message` 会往列表末尾追加一条旁路消息（见下面 new_message 分支），
-      // 此时最后一条已经不是本流的占位气泡了；若仍按「末位」更新，就会：
-      //   1. 把占位气泡的 `liveId` 盖到那条旁路消息上 → 两条兄弟节点 **同 key**
-      //      （React 折叠/重复渲染，正是本 PR 要修的现象）；
-      //   2. 本流已累积的正文被写进旁路消息，真正的占位气泡则永远停在旧内容上。
-      const idx = next.findIndex(
-        m => m.role === "assistant" && (m.id === liveId || (messageId != null && m.id === messageId)),
-      );
-      if (idx >= 0) {
-        next[idx] = buildMsg(extra);
-        return next;
-      }
-      next.push(buildMsg(extra));
-      return next;
-    });
+    if (settled) return;
+    const snapshot = buildMsg(extra);
+    const serverId = messageId;
+    writeMsgs(prev => updateStreamMessage(prev, placeholderId, serverId, () => snapshot));
   };
   // 流式刷新的节流窗口。
   //
@@ -250,6 +211,7 @@ export async function consumeStream(
   let _lastFlushAt = 0;
 
   const scheduleFlush = () => {
+    if (settled) return;
     if (_flushTimer !== null || _rafId !== null) return;
     const elapsed = Date.now() - _lastFlushAt;
     if (elapsed >= FLUSH_INTERVAL_MS) {
@@ -266,6 +228,10 @@ export async function consumeStream(
   const cancelScheduledFlush = () => {
     if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
     if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+  };
+  const finishFlushes = () => {
+    settled = true;
+    cancelScheduledFlush();
   };
 
   try {
@@ -470,8 +436,9 @@ export async function consumeStream(
       if (chunk.cards && !chunk.tool && Array.isArray(chunk.cards)) {
         cardsCollected.push(...chunk.cards);
         cancelScheduledFlush();
-        flushAssistant({ cards: cardsCollected as unknown as Message["cards"] });
+        flushAssistant({ cards: [...cardsCollected] as unknown as Message["cards"] });
       }
+      if (chunk.done && chunk.message_id != null) messageId = chunk.message_id;
       if (chunk.done && chunk.usage) {
         finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
         if (chunk.ttfb_ms != null) ttfbMs = chunk.ttfb_ms;
@@ -518,7 +485,7 @@ export async function consumeStream(
     if ((err as { name?: string })?.name === "AbortError") {
       // 授权/清理弹窗是全局态，直接清；待处理补充信息按会话展示，走守卫 ——
       // 切会话时新会话会自己从后端加载它那份，这里不该把新会话的擦掉。
-      cancelScheduledFlush();
+      finishFlushes();
       setConsentRequest(null);
       setCleanupConfirm(null);
       setAskUserRequest(null);
@@ -620,6 +587,7 @@ export async function consumeStream(
               }
             }
             if (chunk.done) {
+              if (chunk.message_id != null) messageId = chunk.message_id;
               if (chunk.usage) {
                 finalUsage = { input: chunk.usage.input || 0, output: chunk.usage.output || 0, cache: chunk.usage.cache || 0 };
               }
@@ -653,6 +621,7 @@ export async function consumeStream(
             // 关键：不能整表替换 —— 用户上滚翻出来的更早几页不在这一页里，
             // 直接 setMessages(这一页) 会让它们凭空消失。
             const mergedMsgs = mergeMissingUserMessages(baseMessages, freshMsgs);
+            finishFlushes();
             writeMsgs(prev => settleFromFreshPage(prev, mergedMsgs));
             setBgPolling(null);
             setConsentRequest(null);
@@ -667,6 +636,7 @@ export async function consumeStream(
         }
       } catch (reconnectErr) {
         if ((reconnectErr as { name?: string })?.name === "AbortError") {
+          finishFlushes();
           setConsentRequest(null);
           setCleanupConfirm(null);
           setAskUserRequest(null);
@@ -684,68 +654,28 @@ export async function consumeStream(
     }
   }
 
-  // 先落定稿再取消：反过来会留下一个「读到旧闭包状态、在定稿之后才执行」的定时 flush，
-  // 把刚写好的定稿覆盖掉（表现为最后一条消息偶尔回退到中途状态）。
-  //
-  // 定稿时按 id 定位气泡，并把 id 落到 liveId（后端给了真实 id 就提升，后续迟到的
-  // flush 也不会退回临时 id；没给就保留占位 id，**绝不能写成 undefined**）。
-  //
-  // 提升必须发生在**拿到数组之后、就地改写那条气泡时**：`liveId` 与数组里那条气泡的
-  // `id` 是同一份身份，若提前把 `liveId` 改成真实 id，`findIndex` 就再也匹配不到仍带
-  // 临时 id 的占位气泡，会走 push 分支**凭空多出一条**（表现为同一条回复两个气泡）。
-  writeMsgs(prev => {
-    const msgs = [...prev];
-    // 与 flushAssistant 同理：只能按 **id** 定位本次流自己的那条气泡。
-    // `chunk.new_message` 会在末尾追加旁路消息，若这里仍按「末位」定稿，就会把
-    // 主流的正文 / 真实 message_id 写到旁路消息上，真正的占位气泡则永远停在空内容上。
-    const idx = msgs.findIndex(
-      m => m.role === "assistant" && (m.id === liveId || (messageId != null && m.id === messageId)),
-    );
-    if (idx >= 0) {
-      const last = msgs[idx];
-      const settledId = messageId ?? last.id ?? liveId;
-      liveId = settledId;
-      msgs[idx] = {
-        ...last,
-        content: assistantContent,
-        thought: assistantThought,
-        toolsExpanded: false,
-        usage: finalUsage || last.usage,
-        ttft: ttft ?? last.ttft,
-        ttfb_ms: ttfbMs ?? last.ttfb_ms,
-        total_ms: totalMs ?? last.total_ms,
-        a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
-        mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
-        cards: cardsCollected.length > 0 ? (cardsCollected as unknown as Message["cards"]) : undefined,
-        matchedSkills: currentMatchedSkills,
-        id: settledId,
-        intermediateOutput: intermediateOutput || undefined,
-        model: finalModel ?? last.model,
-        error: lastError || undefined,
-      };
-      return msgs;
-    }
-    return [...prev, {
-      role: "assistant",
-      content: assistantContent,
-      thought: assistantThought,
-      created_at: Date.now() / 1000,
-      usage: finalUsage,
-      ttft,
-      ttfb_ms: ttfbMs,
-      total_ms: totalMs,
-      a2ui: a2uiSurfaces.length > 0 ? a2uiSurfaces : undefined,
-      mcpApps: mcpAppsCollected.length > 0 ? mcpAppsCollected : undefined,
-      cards: cardsCollected.length > 0 ? (cardsCollected as unknown as Message["cards"]) : undefined,
-      matchedSkills: currentMatchedSkills,
-      // 兜底：没有占位气泡可改时新加一条，同样优先用真实 id，再退回占位 id
-      id: messageId ?? placeholderId,
-      intermediateOutput: intermediateOutput || undefined,
-      model: finalModel,
-      error: lastError || undefined,
-    }];
-  });
-  cancelScheduledFlush();
+  // 先封闭调度；已排队的增量 updater 按快照执行，随后这次纯定稿 updater 归并身份。
+  finishFlushes();
+  const finalSnapshot = buildMsg();
+  writeMsgs(prev => updateStreamMessage(prev, placeholderId, messageId, previous => ({
+    ...previous,
+    ...finalSnapshot,
+    content: assistantContent || previous?.content || "",
+    created_at: previous?.created_at ?? finalSnapshot.created_at,
+    toolSteps: finalSnapshot.toolSteps ?? previous?.toolSteps,
+    intermediateOutput: finalSnapshot.intermediateOutput ?? previous?.intermediateOutput,
+    model: finalModel ?? previous?.model,
+    toolsExpanded: false,
+    usage: finalUsage ?? previous?.usage,
+    ttft: ttft ?? previous?.ttft,
+    ttfb_ms: ttfbMs ?? previous?.ttfb_ms,
+    total_ms: totalMs ?? previous?.total_ms,
+    a2ui: a2uiSurfaces.length > 0 ? [...a2uiSurfaces] : previous?.a2ui,
+    mcpApps: mcpAppsCollected.length > 0 ? [...mcpAppsCollected] : previous?.mcpApps,
+    cards: cardsCollected.length > 0 ? ([...cardsCollected] as unknown as Message["cards"]) : previous?.cards,
+    matchedSkills: currentMatchedSkills ?? previous?.matchedSkills,
+    error: lastError || undefined,
+  })));
   setBgPolling(null);
   setConsentRequest(null);
   setCleanupConfirm(null);
