@@ -78,8 +78,10 @@ class UsageStats:
         self._usage_samples += 1
         metadata = usage.get("cache_usage") if usage else None
         reported = metadata.get("cache_reported") if isinstance(metadata, dict) else None
+        known = metadata.get("cache_presence_known", True) if isinstance(metadata, dict) else False
         if isinstance(reported, bool):
             self._cache_observed = True
+        if isinstance(reported, bool) and known is True:
             if reported:
                 self._cache_reported_samples += 1
             else:

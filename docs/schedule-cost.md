@@ -14,13 +14,13 @@ Web / Desktop 的定时任务列表卡片和时间轴均展示近 7 天（滚动
 
 ## 缓存字段覆盖观测
 
-原生 OpenAI 兼容响应默认在 usage 中增加 `cache_usage.cache_reported`：标准 `prompt_tokens_details.cached_tokens` 或 DeepSeek `prompt_cache_hit_tokens` 至少一个为有限非负数字（非布尔）才为 true，明确返回 0 也为 true；缺失、null 或无有效数字为 false。既有 `input/output/cache` 计算不变，包括缓存取原有较大值的语义；观测不修正坏上游数值。
+原生 OpenAI 兼容响应默认在 usage 中增加 `cache_usage.cache_reported`：在 SDK 类型转换前观测原始 JSON/SSE 的标准 `prompt_tokens_details.cached_tokens` 或 DeepSeek `prompt_cache_hit_tokens`，至少一个为有限非负数字（非布尔）才为 true，明确返回 0 也为 true；缺失、null 或无有效数字为 false。`cache_presence_known` 表示有当前响应的原始字段观测；无原始 provenance（包括直接构造的 SDK 对象）为 false，计 unknown 而不冒充缺字段。SDK 将 false/true/字符串转为数字也不会被误判有效。仅私有布尔附在本响应 usage 上，SDK 序列化和下一请求不包含它；不保留原始 JSON。既有 `input/output/cache` 计算不变，包括缓存取原有较大值的语义；观测不修正坏上游数值。
 
 原生流式汇总消息的 `messages.usage.cache_usage` 只包含数字和布尔：
 
 - `usage_samples`：UsageStats.add 调用次数，包括没有 usage 的终态；不是工具步数或所有网络尝试数。
 - `cache_reported_samples` / `cache_missing_samples`：明确有 / 无有效缓存字段的样本数。
-- `unknown_samples`：旧 provider 未提供观测元数据，或缺整个 usage 的样本数；`usage_missing_samples` 进一步计缺整个 usage 的次数（也是 unknown 的子集）。
+- `unknown_samples`：旧 provider 未提供观测元数据、没有原始字段 provenance，或缺整个 usage 的样本数；`usage_missing_samples` 进一步计缺整个 usage 的次数（也是 unknown 的子集）。
 - `cache_reported`：仅全部样本明确 reported 才为 true；混合覆盖保守为 false。只有至少一份新观测元数据才输出汇总 metadata，纯旧 provider 保留原三键 JSON；没有 metadata 的历史必须视为未知。
 
 因此 `cache=0` 只有在完整覆盖时才证明返回的缓存计数确为零；字段缺失或未知时不能据此验收缓存收益。现有成本 SQL、命中率与 Web/Desktop UI 保持不变，覆盖信息用于后续真实样本的独立验收，不补估算值。不增加请求、不改提示词、不比较用户间前缀；不保存 prompt、hash、user ID、URL、key 或返回 model。计数每个 Agent 独立，消息仍走原 `BEGIN IMMEDIATE` 事务，无新表或迁移。

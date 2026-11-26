@@ -49,10 +49,12 @@ def parse_usage(usage) -> dict:
     hit = getattr(usage, "prompt_cache_hit_tokens", None)
     if hit and hit > usage_dict["cache"]:
         usage_dict["cache"] = hit
-    usage_dict["cache_usage"] = {
-        "cache_reported": _valid_cache_count(getattr(ptd, "cached_tokens", None))
-        or _valid_cache_count(hit),
-    }
+    raw_reported = getattr(usage, "_ethan_cache_reported", None)
+    # SDK field sets preserve keys, not original types; coerced values cannot
+    # establish raw presence without our per-response conversion observation.
+    known = isinstance(raw_reported, bool)
+    reported = raw_reported if known else False
+    usage_dict["cache_usage"] = {"cache_reported": reported, "cache_presence_known": known}
     return usage_dict
 
 

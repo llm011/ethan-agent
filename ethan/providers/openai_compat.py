@@ -160,9 +160,8 @@ def _is_first_request_timeout(e: Exception) -> bool:
 class OpenAICompatProvider(BaseProvider):
     def __init__(self, provider_cfg: ProviderConfig, model: str, proxy: Optional[str] = None,
                  vision: Optional[bool] = None):
-        from openai import AsyncOpenAI  # lazy: SDK is heavy; only load when a provider instance is created
-
         from ethan.core.context import get_session_id
+        from ethan.providers._usage_observation import ObservedAsyncOpenAI as AsyncOpenAI  # lazy SDK import
 
         # 透传当前 Ethan 会话 ID，供下游网关（如 buddy-proxy）按会话轮转账号并保持前缀缓存。
         async def _inject_session_header(request: httpx.Request) -> None:
