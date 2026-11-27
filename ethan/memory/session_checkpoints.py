@@ -19,15 +19,18 @@ class SessionCheckpointsMixin(SessionWireMixin):
         def persist():
             delay = 0.3
             for attempt in range(5):
+                # `with sqlite3.connect(...)` 只负责 commit/rollback，不会关闭连接；
+                # 重试循环里必须显式 close，否则每次撞锁都泄漏一个连接。
+                db = sqlite3.connect(str(self._db_path), timeout=30)
                 try:
-                    with sqlite3.connect(str(self._db_path), timeout=30) as db:
-                        db.execute("PRAGMA foreign_keys=ON")
-                        db.execute(
-                            "INSERT INTO run_checkpoints(message_id,session_id,state) VALUES(?,?,?) "
-                            "ON CONFLICT(message_id) DO UPDATE SET state=excluded.state",
-                            (row_id, session_id, encoded),
-                        )
-                        db.execute("UPDATE messages SET run_checkpoint=? WHERE id=? AND session_id=?", (encoded, row_id, session_id))
+                    db.execute("PRAGMA foreign_keys=ON")
+                    db.execute(
+                        "INSERT INTO run_checkpoints(message_id,session_id,state) VALUES(?,?,?) "
+                        "ON CONFLICT(message_id) DO UPDATE SET state=excluded.state",
+                        (row_id, session_id, encoded),
+                    )
+                    db.execute("UPDATE messages SET run_checkpoint=? WHERE id=? AND session_id=?", (encoded, row_id, session_id))
+                    db.commit()
                     return
                 except sqlite3.OperationalError as e:
                     msg = str(e).lower()
@@ -35,6 +38,8 @@ class SessionCheckpointsMixin(SessionWireMixin):
                         raise
                     time.sleep(delay)
                     delay = min(delay * 2, 3.0)
+                finally:
+                    db.close()
         await asyncio.to_thread(persist)
 
 
