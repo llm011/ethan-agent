@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import time
 
 from .session_wire import SessionWireMixin
 
@@ -16,14 +17,24 @@ class SessionCheckpointsMixin(SessionWireMixin):
         # schedule attribution or another coroutine on the singleton connection.
         encoded = json.dumps(checkpoint, ensure_ascii=False)
         def persist():
-            with sqlite3.connect(str(self._db_path), timeout=30) as db:
-                db.execute("PRAGMA foreign_keys=ON")
-                db.execute(
-                    "INSERT INTO run_checkpoints(message_id,session_id,state) VALUES(?,?,?) "
-                    "ON CONFLICT(message_id) DO UPDATE SET state=excluded.state",
-                    (row_id, session_id, encoded),
-                )
-                db.execute("UPDATE messages SET run_checkpoint=? WHERE id=? AND session_id=?", (encoded, row_id, session_id))
+            delay = 0.3
+            for attempt in range(5):
+                try:
+                    with sqlite3.connect(str(self._db_path), timeout=30) as db:
+                        db.execute("PRAGMA foreign_keys=ON")
+                        db.execute(
+                            "INSERT INTO run_checkpoints(message_id,session_id,state) VALUES(?,?,?) "
+                            "ON CONFLICT(message_id) DO UPDATE SET state=excluded.state",
+                            (row_id, session_id, encoded),
+                        )
+                        db.execute("UPDATE messages SET run_checkpoint=? WHERE id=? AND session_id=?", (encoded, row_id, session_id))
+                    return
+                except sqlite3.OperationalError as e:
+                    msg = str(e).lower()
+                    if ("locked" not in msg and "busy" not in msg) or attempt >= 4:
+                        raise
+                    time.sleep(delay)
+                    delay = min(delay * 2, 3.0)
         await asyncio.to_thread(persist)
 
 
