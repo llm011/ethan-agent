@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -31,7 +32,14 @@ def isolated_backup(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(session_backup, "_last_backup_at", 0.0)
     monkeypatch.setattr(session_backup, "_timer", None)
-    return db_path
+    # 测试必须收干净补偿定时器线程：默认 300s 冷却会让定时器在 pytest
+    # 收尾阶段仍然存活，触发时临时目录已删 → UnhandledThreadException。
+    yield db_path
+    timer = session_backup._timer
+    if timer is not None:
+        timer.cancel()
+    session_backup._timer = None
+    session_backup._last_backup_at = 0.0
 
 
 def _backups(db_path: Path) -> list[Path]:
@@ -191,3 +199,59 @@ def test_checkpoint_retry_closes_every_connection(tmp_path, monkeypatch):
         "SELECT state FROM run_checkpoints WHERE message_id = 1"
     ).fetchone()
     assert json.loads(row[0]) == {"step": 1}, "重试后应成功落库"
+
+
+def test_checkpoint_retry_has_total_time_budget(tmp_path):
+    """撞锁重试必须受总预算约束，不能把 30s 放大成几分钟。
+
+    每次尝试自带 busy_timeout；若只用「重试 5 次」而无总预算，最坏会
+    5×timeout 全占着共享 asyncio 线程池，把无关的 to_thread 调用也拖住。
+    """
+    import asyncio
+    import time as _time
+
+    db_path = tmp_path / "held.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE run_checkpoints("
+        "message_id INTEGER PRIMARY KEY, session_id TEXT, state TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE messages("
+        "id INTEGER PRIMARY KEY, session_id TEXT, run_checkpoint TEXT)"
+    )
+    conn.execute("INSERT INTO messages(id, session_id) VALUES (1, 's1')")
+    conn.commit()
+
+    from ethan.memory.session_checkpoints import SessionCheckpointsMixin
+
+    class Store(SessionCheckpointsMixin):
+        _db_path = db_path
+
+    # 另一个连接长期持有写锁，模拟整点任务撞车
+    holder = sqlite3.connect(db_path, timeout=30)
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("UPDATE messages SET run_checkpoint='held' WHERE id=1")
+
+    started = _time.monotonic()
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            asyncio.run(Store().persist_run_checkpoint("s1", 1, {"step": 1}))
+    finally:
+        holder.rollback()
+        holder.close()
+    elapsed = _time.monotonic() - started
+
+    # 预算 15s；留 5s 余量覆盖单次尝试的收尾
+    assert elapsed <= 20.0, (
+        f"重试总耗时应受预算约束（约 15s），实际 {elapsed:.1f}s"
+    )
+
+    # 锁释放后必须能正常写入
+    asyncio.run(Store().persist_run_checkpoint("s1", 1, {"step": 2}))
+    step = json.loads(
+        sqlite3.connect(db_path).execute(
+            "SELECT state FROM run_checkpoints WHERE message_id = 1"
+        ).fetchone()[0]
+    )
+    assert step == {"step": 2}, "锁释放后应写入成功"

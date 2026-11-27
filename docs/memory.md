@@ -246,8 +246,11 @@ candidate/active/disputed/superseded/expired/**dormant**/forgotten）+
 
 - **关键落库点指数退避重试**：`session.py` 的 `retry_on_db_locked` 包装「失败即永久
   丢失」的写入；运行检查点 `session_checkpoints.persist_run_checkpoint` 用独立短
-  连接写 `run_checkpoints`/`messages.run_checkpoint`，撞锁时做最多 4 次
-  （0.3s→2.4s）退避重试，避免一次锁冲突就把整轮运行标记成中断。
+  连接写 `run_checkpoints`/`messages.run_checkpoint`，撞锁时退避重试，但**受总时间
+  预算约束**（单次 `busy_timeout` 5s、整体约 15s），不是「重试 5 次 × 30s」——后者
+  最坏会把一次检查点写入拖到 ≈154s，且这些时间全占着共享的 asyncio 默认线程池
+  （本机 14 个 worker），并发撞锁时连无关的 `to_thread` 调用（读文件、加载 skill）
+  都会被排队。预算是为了避免「修锁冲突反而把进程堵死」。
 - **备份节流**：`session_backup` 在对话结束 10s 防抖后触发，另加 **5 分钟最小
   冷却间隔**，两次成功备份之间不会被高频定时任务连续拉起；**冷却命中时不是丢弃
   这次备份，而是排到冷却结束再补跑一次**（否则冷却窗口内结束的那轮对话会永远等
