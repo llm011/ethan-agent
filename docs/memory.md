@@ -244,12 +244,14 @@ candidate/active/disputed/superseded/expired/**dormant**/forgotten）+
 定时任务、heartbeat 各自持连接并发写，整点任务集中触发时容易把
 `busy_timeout` 耗尽并抛 `database is locked`。当前的处理：
 
-- **关键落库点指数退避重试**：`session.py` 的 `retry_on_locked` 包装「失败即永久
+- **关键落库点指数退避重试**：`session.py` 的 `retry_on_db_locked` 包装「失败即永久
   丢失」的写入；运行检查点 `session_checkpoints.persist_run_checkpoint` 用独立短
   连接写 `run_checkpoints`/`messages.run_checkpoint`，撞锁时做最多 4 次
   （0.3s→2.4s）退避重试，避免一次锁冲突就把整轮运行标记成中断。
 - **备份节流**：`session_backup` 在对话结束 10s 防抖后触发，另加 **5 分钟最小
-  冷却间隔**，两次成功备份之间不会被高频定时任务连续拉起；备份连接显式
+  冷却间隔**，两次成功备份之间不会被高频定时任务连续拉起；**冷却命中时不是丢弃
+  这次备份，而是排到冷却结束再补跑一次**（否则冷却窗口内结束的那轮对话会永远等
+  不到备份）。备份连接显式
   `timeout=30`。备份仍保留「源库 quick_check → `.backup()` → 目标库
   quick_check → 只留最近 2 份」的既有安全策略。
 

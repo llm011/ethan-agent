@@ -76,8 +76,18 @@ def _do_backup() -> None:
     global _timer, _last_backup_at
     with _lock:
         _timer = None
-        if _last_backup_at > 0 and (time.monotonic() - _last_backup_at) < _MIN_COOLDOWN_S:
-            return
+        if _last_backup_at > 0:
+            remaining = _MIN_COOLDOWN_S - (time.monotonic() - _last_backup_at)
+            if remaining > 0:
+                # 冷却命中不能直接丢弃这次备份：调用方语义是「对话结束 →
+                # 稍后备份一次」，直接 return 会让冷却窗口内结束的那轮对话
+                # 永远等不到备份（用户不继续聊就更不会补上）。改成排到冷却
+                # 结束再跑一次。
+                timer = threading.Timer(remaining, _do_backup)
+                timer.daemon = True
+                _timer = timer
+                timer.start()
+                return
 
     try:
         from ethan.core.paths import user_sessions_db_path

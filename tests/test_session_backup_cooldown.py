@@ -46,7 +46,8 @@ def test_backup_creates_file_and_sets_cooldown(isolated_backup):
     assert session_backup._last_backup_at > 0, "成功备份后应记录时间戳"
 
 
-def test_backup_within_cooldown_is_skipped(isolated_backup):
+def test_backup_within_cooldown_is_deferred_not_dropped(isolated_backup):
+    """冷却命中时这次备份必须被排到冷却结束，而不是直接丢掉。"""
     session_backup._do_backup()
     first = _backups(isolated_backup)
     assert len(first) == 1
@@ -61,12 +62,23 @@ def test_backup_within_cooldown_is_skipped(isolated_backup):
     conn.commit()
     conn.close()
 
-    # 冷却窗口内再调用：应直接返回，不产出新备份
-    session_backup._do_backup()
-    assert len(_backups(isolated_backup)) == 1, "冷却窗口内不应再产出备份"
-    assert _backups(isolated_backup)[0].stat().st_size == first_size, (
-        "冷却窗口内不应覆盖已有备份"
-    )
+    try:
+        session_backup._do_backup()
+        # 此刻不应产出新备份
+        assert len(_backups(isolated_backup)) == 1, "冷却窗口内不应立刻产出备份"
+        assert _backups(isolated_backup)[0].stat().st_size == first_size, (
+            "冷却窗口内不应覆盖已有备份"
+        )
+        # 但必须排了一个补偿性的定时器，否则这轮对话的备份就永久丢了
+        assert session_backup._timer is not None, (
+            "冷却命中后必须重排备份，不能直接丢弃"
+        )
+        assert session_backup._timer.is_alive(), "重排的定时器应处于等待状态"
+    finally:
+        timer = session_backup._timer
+        if timer is not None:
+            timer.cancel()
+        session_backup._timer = None
 
 
 def test_backup_resumes_after_cooldown(isolated_backup, monkeypatch):
