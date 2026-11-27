@@ -238,6 +238,21 @@ candidate/active/disputed/superseded/expired/**dormant**/forgotten）+
 `consolidation_jobs`（幂等水位线）+ `daily_summaries` + `memory_fts`（FTS5）+
 `vec_items`/`vec_index`（sqlite-vec：insight、fact_sync 镜像、memory 语义索引）。
 
+### sessions.db 写入争用与备份节流
+
+`sessions.db` 是 DELETE journal 模式，写锁全库排他。常驻服务里对话 producer、
+定时任务、heartbeat 各自持连接并发写，整点任务集中触发时容易把
+`busy_timeout` 耗尽并抛 `database is locked`。当前的处理：
+
+- **关键落库点指数退避重试**：`session.py` 的 `retry_on_locked` 包装「失败即永久
+  丢失」的写入；运行检查点 `session_checkpoints.persist_run_checkpoint` 用独立短
+  连接写 `run_checkpoints`/`messages.run_checkpoint`，撞锁时做最多 4 次
+  （0.3s→2.4s）退避重试，避免一次锁冲突就把整轮运行标记成中断。
+- **备份节流**：`session_backup` 在对话结束 10s 防抖后触发，另加 **5 分钟最小
+  冷却间隔**，两次成功备份之间不会被高频定时任务连续拉起；备份连接显式
+  `timeout=30`。备份仍保留「源库 quick_check → `.backup()` → 目标库
+  quick_check → 只留最近 2 份」的既有安全策略。
+
 ## 隐私与遗忘
 
 - companion 情感记忆独立域存储/召回，只在陪伴模式注入
