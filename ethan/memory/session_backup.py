@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -10,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _timer: threading.Timer | None = None
+_last_backup_at: float = 0.0
 _DEBOUNCE_S = 10.0
+_MIN_COOLDOWN_S = 300.0  # 两次成功备份之间至少间隔 5 分钟，避免高频定时任务连续全库备份
 
 
 def schedule_backup() -> None:
@@ -70,9 +73,21 @@ def _do_backup() -> None:
     4. 任一校验失败立刻删掉这次产出的新备份，不动旧备份
     5. 保留最近 _KEEP_BACKUPS 份，多的从最旧开始删
     """
-    global _timer
+    global _timer, _last_backup_at
     with _lock:
         _timer = None
+        if _last_backup_at > 0:
+            remaining = _MIN_COOLDOWN_S - (time.monotonic() - _last_backup_at)
+            if remaining > 0:
+                # 冷却命中不能直接丢弃这次备份：调用方语义是「对话结束 →
+                # 稍后备份一次」，直接 return 会让冷却窗口内结束的那轮对话
+                # 永远等不到备份（用户不继续聊就更不会补上）。改成排到冷却
+                # 结束再跑一次。
+                timer = threading.Timer(remaining, _do_backup)
+                timer.daemon = True
+                _timer = timer
+                timer.start()
+                return
 
     try:
         from ethan.core.paths import user_sessions_db_path
@@ -109,8 +124,8 @@ def _do_backup() -> None:
 
         # ② 用 sqlite3 的 .backup 确保一致性（避免拷贝到 WAL 写入中途的状态）
         import sqlite3
-        src = sqlite3.connect(str(db_path))
-        dst = sqlite3.connect(str(new_backup))
+        src = sqlite3.connect(str(db_path), timeout=30)
+        dst = sqlite3.connect(str(new_backup), timeout=30)
         try:
             src.backup(dst)
         finally:
@@ -131,6 +146,9 @@ def _do_backup() -> None:
             except OSError:
                 pass
             return
+
+        with _lock:
+            _last_backup_at = time.monotonic()
 
         logger.info(
             "[SessionBackup] created %s (%d bytes, quick_check=ok)",

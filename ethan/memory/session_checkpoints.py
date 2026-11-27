@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import time
 
 from .session_wire import SessionWireMixin
 
@@ -16,14 +17,41 @@ class SessionCheckpointsMixin(SessionWireMixin):
         # schedule attribution or another coroutine on the singleton connection.
         encoded = json.dumps(checkpoint, ensure_ascii=False)
         def persist():
-            with sqlite3.connect(str(self._db_path), timeout=30) as db:
-                db.execute("PRAGMA foreign_keys=ON")
-                db.execute(
-                    "INSERT INTO run_checkpoints(message_id,session_id,state) VALUES(?,?,?) "
-                    "ON CONFLICT(message_id) DO UPDATE SET state=excluded.state",
-                    (row_id, session_id, encoded),
-                )
-                db.execute("UPDATE messages SET run_checkpoint=? WHERE id=? AND session_id=?", (encoded, row_id, session_id))
+            # 每次尝试的 busy_timeout 必须小，否则 retry 会把「一次 30s」放大成
+            # 几分钟：每次尝试各自等满 timeout，最坏 5×30s+退避 ≈ 154s，而这些
+            # 时间全占着共享的 asyncio 默认线程池（本机 14 个 worker），并发撞锁
+            # 时会拖住无关的 to_thread 调用（读文件、加载 skill）。
+            # 这里用「总预算」约束：单次 5s，整体不超过 _TOTAL_BUDGET_S。
+            per_attempt_timeout = 5.0
+            total_budget = 15.0
+            deadline = time.monotonic() + total_budget
+            delay = 0.3
+            while True:
+                # `with sqlite3.connect(...)` 只负责 commit/rollback，不会关闭连接；
+                # 重试循环里必须显式 close，否则每次撞锁都泄漏一个连接。
+                db = sqlite3.connect(str(self._db_path), timeout=per_attempt_timeout)
+                try:
+                    db.execute("PRAGMA foreign_keys=ON")
+                    db.execute(
+                        "INSERT INTO run_checkpoints(message_id,session_id,state) VALUES(?,?,?) "
+                        "ON CONFLICT(message_id) DO UPDATE SET state=excluded.state",
+                        (row_id, session_id, encoded),
+                    )
+                    db.execute("UPDATE messages SET run_checkpoint=? WHERE id=? AND session_id=?", (encoded, row_id, session_id))
+                    db.commit()
+                    return
+                except sqlite3.OperationalError as e:
+                    msg = str(e).lower()
+                    if "locked" not in msg and "busy" not in msg:
+                        raise
+                    # 预算必须把「下一次尝试自身的 busy_timeout」也算进去，
+                    # 否则最后一次尝试仍可超预算跑满 per_attempt_timeout。
+                    if time.monotonic() + delay + per_attempt_timeout >= deadline:
+                        raise  # 预算用完，交给调用方按原有的失败路径处理
+                    time.sleep(delay)
+                    delay = min(delay * 2, 2.0)
+                finally:
+                    db.close()
         await asyncio.to_thread(persist)
 
 
